@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "./context7-wrapper.sh",
+      "args": [],
+      "env": {}
+    },
+    "devstream": {
+      "command": "node",
+      "args": ["/Users/fulvioventura/devstream/mcp-devstream-server/dist/index.js", "/Users/fulvioventura/devstream/data/devstream.db"],
+      "env": {
+        "NODE_ENV": "development",
+        "DEBUG": "mcp*"
+      }
+    }
+  }
+}

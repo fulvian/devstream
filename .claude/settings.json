@@ -1,0 +1,89 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": [
+              "uv",
+              "run",
+              "--script",
+              ".claude/hooks/devstream/context/user_query_context_enhancer.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__devstream__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": [
+              "uv",
+              "run",
+              "--script",
+              ".claude/hooks/devstream/memory/pre_tool_use.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": [
+              "uv",
+              "run",
+              "--script",
+              ".claude/hooks/devstream/tasks/session_start.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": [
+              "uv",
+              "run",
+              "--script",
+              ".claude/hooks/devstream/context/project_context.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": [
+              "uv",
+              "run",
+              "--script",
+              ".claude/hooks/devstream/tasks/stop.py"
+            ],
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Notification": []
+  }
+}

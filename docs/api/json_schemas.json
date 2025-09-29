@@ -1,0 +1,957 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Sistema Integrato Task Management - JSON Schemas",
+  "description": "Schemi JSON per interscambio dati tra Claude Code e sistema di task management",
+
+  "definitions": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO 8601"
+    },
+
+    "uuid": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{32}$",
+      "description": "ID univoco a 32 caratteri esadecimali"
+    },
+
+    "status_enum": {
+      "type": "string",
+      "enum": ["draft", "active", "completed", "archived", "cancelled", "pending", "blocked", "failed", "skipped"]
+    },
+
+    "priority": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Priorità da 1 (bassa) a 10 (critica)"
+    },
+
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "description": "Array di tag per categorizzazione"
+    }
+  },
+
+  "schemas": {
+    "InterventionPlan": {
+      "$id": "#/schemas/InterventionPlan",
+      "type": "object",
+      "required": ["title", "objectives", "expected_outcome"],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Titolo del piano di intervento"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Descrizione dettagliata del piano"
+        },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "Obiettivi specifici del piano"
+        },
+        "technical_specs": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string",
+              "description": "Linguaggio di programmazione principale"
+            },
+            "framework": {
+              "type": "string",
+              "description": "Framework utilizzato"
+            },
+            "database": {
+              "type": "string",
+              "description": "Sistema di database"
+            },
+            "architecture": {
+              "type": "string",
+              "description": "Pattern architetturale"
+            },
+            "deployment": {
+              "type": "string",
+              "description": "Strategia di deployment"
+            },
+            "testing": {
+              "type": "string",
+              "description": "Strategia di testing"
+            }
+          },
+          "additionalProperties": true,
+          "description": "Specifiche tecniche del progetto"
+        },
+        "expected_outcome": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Risultato atteso al completamento"
+        },
+        "status": {
+          "$ref": "#/definitions/status_enum"
+        },
+        "priority": {
+          "$ref": "#/definitions/priority"
+        },
+        "estimated_hours": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Stima ore di lavoro"
+        },
+        "actual_hours": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Ore effettive lavorate"
+        },
+        "tags": {
+          "$ref": "#/definitions/tags"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Metadati aggiuntivi flessibili"
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/schemas/Phase"
+          },
+          "description": "Fasi del piano"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "completed_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "Phase": {
+      "$id": "#/schemas/Phase",
+      "type": "object",
+      "required": ["name", "sequence_order"],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "plan_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Nome della fase"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Descrizione della fase"
+        },
+        "sequence_order": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Ordine di esecuzione nella sequenza"
+        },
+        "is_parallel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Può essere eseguita in parallelo ad altre fasi"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "IDs delle fasi prerequisito"
+        },
+        "status": {
+          "$ref": "#/definitions/status_enum"
+        },
+        "estimated_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Stima minuti per completare la fase"
+        },
+        "actual_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minuti effettivi per completare"
+        },
+        "blocking_reason": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Motivo del blocco se status=blocked"
+        },
+        "completion_criteria": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Criteri per considerare completata la fase"
+        },
+        "micro_tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/schemas/MicroTask"
+          },
+          "description": "Micro-task della fase"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "started_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "completed_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "MicroTask": {
+      "$id": "#/schemas/MicroTask",
+      "type": "object",
+      "required": ["title", "description"],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "phase_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Titolo del micro-task"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Descrizione dettagliata del task"
+        },
+        "max_duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 10,
+          "description": "Durata massima in minuti (vincolo: ≤10)"
+        },
+        "max_context_tokens": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 256000,
+          "default": 256000,
+          "description": "Token massimi di contesto Claude"
+        },
+        "assigned_agent": {
+          "type": "string",
+          "enum": ["architect", "coder", "reviewer", "documenter", "auto"],
+          "description": "Agente Claude Code responsabile"
+        },
+        "task_type": {
+          "type": "string",
+          "enum": ["analysis", "coding", "documentation", "testing", "review", "research"],
+          "default": "coding",
+          "description": "Tipo di task"
+        },
+        "status": {
+          "$ref": "#/definitions/status_enum"
+        },
+        "priority": {
+          "$ref": "#/definitions/priority"
+        },
+        "input_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "File di input richiesti"
+        },
+        "output_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "File di output generati"
+        },
+        "generated_code": {
+          "type": "string",
+          "description": "Codice generato durante l'esecuzione"
+        },
+        "documentation": {
+          "type": "string",
+          "description": "Documentazione generata"
+        },
+        "error_log": {
+          "type": "string",
+          "description": "Log degli errori se fallito"
+        },
+        "actual_duration_minutes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Durata effettiva in minuti"
+        },
+        "context_tokens_used": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Token di contesto utilizzati"
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Numero di retry effettuati"
+        },
+        "parent_task_id": {
+          "$ref": "#/definitions/uuid",
+          "description": "ID del task parent se questo è un retry"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "started_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "completed_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "last_retry_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "SemanticMemory": {
+      "$id": "#/schemas/SemanticMemory",
+      "type": "object",
+      "required": ["content", "content_type"],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "plan_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "phase_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "task_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "content": {
+          "type": "string",
+          "description": "Contenuto della memoria"
+        },
+        "content_type": {
+          "type": "string",
+          "enum": ["code", "documentation", "context", "output", "error", "decision", "learning"],
+          "description": "Tipo di contenuto"
+        },
+        "content_format": {
+          "type": "string",
+          "enum": ["text", "markdown", "code", "json", "yaml"],
+          "default": "text",
+          "description": "Formato del contenuto"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Parole chiave estratte"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Entità riconosciute nel contenuto"
+        },
+        "sentiment": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "Score sentiment (-1 negativo, 1 positivo)"
+        },
+        "complexity_score": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Score complessità del contenuto"
+        },
+        "embedding_model": {
+          "type": "string",
+          "default": "embeddinggemma",
+          "description": "Modello usato per embedding"
+        },
+        "embedding_dimension": {
+          "type": "integer",
+          "default": 384,
+          "description": "Dimensioni del vettore embedding"
+        },
+        "context_snapshot": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Snapshot del contesto di creazione"
+        },
+        "related_memory_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "IDs di memorie correlate"
+        },
+        "access_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Contatore accessi"
+        },
+        "relevance_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1.0,
+          "description": "Score di rilevanza"
+        },
+        "is_archived": {
+          "type": "boolean",
+          "default": false,
+          "description": "Se la memoria è archiviata"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "last_accessed_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "Agent": {
+      "$id": "#/schemas/Agent",
+      "type": "object",
+      "required": ["id", "name", "role", "capabilities"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "ID agente (snake_case)"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Nome display dell'agente"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Ruolo dell'agente nel team"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Descrizione capacità agente"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "system_design", "architecture_planning", "technology_selection",
+              "code_generation", "refactoring", "debugging", "implementation",
+              "code_review", "testing", "quality_check", "security_audit",
+              "documentation", "api_docs", "user_guides", "technical_writing",
+              "research", "analysis", "requirements_gathering", "planning"
+            ]
+          },
+          "minItems": 1,
+          "description": "Capabilities dell'agente"
+        },
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Eventi che attivano l'agente"
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "max_context_tokens": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 256000
+            },
+            "prefer_patterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "languages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "focus_areas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "formats": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true,
+          "description": "Configurazione specifica agente"
+        },
+        "is_active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Se l'agente è attivo"
+        },
+        "success_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.0,
+          "description": "Tasso successo (0-1)"
+        },
+        "total_tasks": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Task totali assegnati"
+        },
+        "successful_tasks": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Task completati con successo"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "Hook": {
+      "$id": "#/schemas/Hook",
+      "type": "object",
+      "required": ["name", "event_type", "action_type"],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Nome del hook"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "user_interaction_start", "user_interaction_end",
+            "task_creation", "task_start", "task_completion", "task_failure",
+            "phase_start", "phase_completion",
+            "plan_creation", "plan_completion",
+            "context_window_full", "memory_injection_needed",
+            "agent_assignment", "code_generation", "review_requested"
+          ],
+          "description": "Tipo di evento che scatena l'hook"
+        },
+        "trigger_condition": {
+          "type": "string",
+          "description": "Condizione SQL-like per attivare hook"
+        },
+        "action_type": {
+          "type": "string",
+          "enum": [
+            "force_task_creation", "save_memory", "inject_context",
+            "assign_agent", "validate_output", "archive_session",
+            "generate_summary", "trigger_review"
+          ],
+          "description": "Tipo di azione da eseguire"
+        },
+        "action_config": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Configurazione dell'azione"
+        },
+        "is_active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Se l'hook è attivo"
+        },
+        "execution_order": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100,
+          "description": "Ordine di esecuzione"
+        },
+        "created_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "WorkSession": {
+      "$id": "#/schemas/WorkSession",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "plan_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Identificativo utente"
+        },
+        "session_name": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Nome della sessione"
+        },
+        "context_window_size": {
+          "type": "integer",
+          "default": 256000,
+          "description": "Dimensione finestra contesto"
+        },
+        "tokens_used": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Token utilizzati nella sessione"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "paused", "completed", "archived"],
+          "default": "active",
+          "description": "Stato della sessione"
+        },
+        "context_summary": {
+          "type": "string",
+          "description": "Riassunto del contesto sessione"
+        },
+        "active_tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "IDs dei task attivi"
+        },
+        "completed_tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "IDs dei task completati"
+        },
+        "started_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "last_activity_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "ended_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "TaskExecutionRequest": {
+      "$id": "#/schemas/TaskExecutionRequest",
+      "type": "object",
+      "required": ["task_id"],
+      "properties": {
+        "task_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "force_agent": {
+          "type": "string",
+          "description": "Forza assegnazione a specifico agente"
+        },
+        "additional_context": {
+          "type": "string",
+          "description": "Contesto aggiuntivo per esecuzione"
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 1,
+          "description": "Numero massimo di retry"
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 15,
+          "default": 10,
+          "description": "Timeout esecuzione in minuti"
+        },
+        "inject_memory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Se iniettare memoria rilevante"
+        },
+        "memory_relevance_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.7,
+          "description": "Soglia rilevanza per memoria"
+        }
+      }
+    },
+
+    "TaskExecutionResult": {
+      "$id": "#/schemas/TaskExecutionResult",
+      "type": "object",
+      "required": ["task_id", "status"],
+      "properties": {
+        "task_id": {
+          "$ref": "#/definitions/uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "failed", "timeout", "cancelled"],
+          "description": "Risultato esecuzione"
+        },
+        "agent_used": {
+          "type": "string",
+          "description": "Agente che ha eseguito il task"
+        },
+        "execution_time_minutes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Tempo effettivo esecuzione"
+        },
+        "tokens_used": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Token utilizzati"
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "generated_code": {
+              "type": "string"
+            },
+            "documentation": {
+              "type": "string"
+            },
+            "files_created": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files_modified": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Output dell'esecuzione"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "stack_trace": {
+              "type": "string"
+            }
+          },
+          "description": "Dettagli errore se fallito"
+        },
+        "memory_stored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "IDs delle memorie create"
+        },
+        "recommendations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Raccomandazioni per task futuri"
+        },
+        "completed_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+
+    "MemorySearchRequest": {
+      "$id": "#/schemas/MemorySearchRequest",
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Query di ricerca"
+        },
+        "search_type": {
+          "type": "string",
+          "enum": ["semantic", "keyword", "hybrid"],
+          "default": "hybrid",
+          "description": "Tipo di ricerca"
+        },
+        "content_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["code", "documentation", "context", "output", "error", "decision", "learning"]
+          },
+          "description": "Filtro per tipo contenuto"
+        },
+        "plan_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/uuid"
+          },
+          "description": "Filtro per specifici piani"
+        },
+        "date_range": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/definitions/timestamp"
+            },
+            "to": {
+              "$ref": "#/definitions/timestamp"
+            }
+          },
+          "description": "Filtro temporale"
+        },
+        "relevance_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5,
+          "description": "Soglia minima rilevanza"
+        },
+        "max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10,
+          "description": "Numero massimo risultati"
+        },
+        "include_archived": {
+          "type": "boolean",
+          "default": false,
+          "description": "Includere memoria archiviata"
+        }
+      }
+    },
+
+    "MemorySearchResult": {
+      "$id": "#/schemas/MemorySearchResult",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Query originale"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "memory": {
+                "$ref": "#/schemas/SemanticMemory"
+              },
+              "relevance_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Score di rilevanza"
+              },
+              "match_type": {
+                "type": "string",
+                "enum": ["semantic", "keyword", "exact"],
+                "description": "Tipo di match"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "task_title": {
+                    "type": "string"
+                  },
+                  "phase_name": {
+                    "type": "string"
+                  },
+                  "plan_title": {
+                    "type": "string"
+                  }
+                },
+                "description": "Contesto del risultato"
+              }
+            }
+          },
+          "description": "Risultati della ricerca"
+        },
+        "total_results": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numero totale risultati"
+        },
+        "search_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tempo di ricerca in millisecondi"
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Suggerimenti per migliorare ricerca"
+        }
+      }
+    }
+  }
+}

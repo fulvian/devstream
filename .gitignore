@@ -1,0 +1,135 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Documentation
+docs/_build/
+.readthedocs.yml
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# DevStream specific
+data/
+logs/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Configuration secrets
+.env.local
+.env.production
+secrets/
+credentials/
+
+# Performance profiling
+*.prof
+profile_results/
+
+# Cache directories
+.cache/
+.ruff_cache/
+.mypy_cache/
+
+# Pre-commit
+.pre-commit-config.yaml.bak
+
+# Node.js / MCP Server
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.tsbuildinfo
+.npm
+.eslintcache
+.yarn-integrity
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# MCP Server build outputs
+mcp-devstream-server/dist/
+mcp-devstream-server/node_modules/
+mcp-devstream-server/.turbo/
+*.tgz
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archive and backups
+.archive/
+*.bak
+*.backup
+*~
+
+# Test virtual environments
+venv_test/
+.devstream/
+
+# Local development
+.local/
+scratch/
+testing/

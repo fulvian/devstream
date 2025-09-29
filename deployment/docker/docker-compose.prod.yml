@@ -1,0 +1,244 @@
+# DevStream Production Docker Compose
+# Context7-validated production deployment with monitoring and security
+
+version: '3.8'
+
+services:
+  # Database migration service (runs once)
+  devstream-migrations:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+      target: migration
+    image: devstream:latest-migration
+    container_name: devstream-migrations
+    environment:
+      - DEVSTREAM_ENV=production
+      - DEVSTREAM_DATABASE_PATH=/data/production.db
+      - DEVSTREAM_LOG_LEVEL=INFO
+    volumes:
+      - devstream-data:/data
+      - devstream-logs:/app/logs
+    networks:
+      - devstream-network
+    restart: "no"
+    depends_on:
+      - devstream-db-init
+
+  # Database initialization (ensures directory structure)
+  devstream-db-init:
+    image: alpine:latest
+    container_name: devstream-db-init
+    command: >
+      sh -c "
+        mkdir -p /data/backups /logs &&
+        touch /data/production.db &&
+        chown -R 1000:1000 /data /logs &&
+        echo 'Database directories initialized'
+      "
+    volumes:
+      - devstream-data:/data
+      - devstream-logs:/logs
+    restart: "no"
+
+  # Main API service
+  devstream-api:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+      target: production
+    image: devstream:latest
+    container_name: devstream-api
+    restart: unless-stopped
+    environment:
+      - DEVSTREAM_ENV=production
+      - DEVSTREAM_DATABASE_PATH=/data/production.db
+      - DEVSTREAM_LOG_LEVEL=INFO
+      - DEVSTREAM_LOG_FILE_ENABLED=true
+      - DEVSTREAM_LOG_FILE_PATH=/app/logs/api.log
+      - DEVSTREAM_SECURITY_SECRET_KEY=${DEVSTREAM_SECRET_KEY}
+      - DEVSTREAM_MONITORING_HEALTH_CHECK_ENABLED=true
+      - DEVSTREAM_MONITORING_METRICS_ENABLED=true
+    volumes:
+      - devstream-data:/data
+      - devstream-logs:/app/logs
+    networks:
+      - devstream-network
+    expose:
+      - "8000"
+    depends_on:
+      - devstream-migrations
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # Task engine service
+  devstream-tasks:
+    image: devstream:latest
+    container_name: devstream-tasks
+    restart: unless-stopped
+    environment:
+      - DEVSTREAM_ENV=production
+      - DEVSTREAM_DATABASE_PATH=/data/production.db
+      - DEVSTREAM_SERVICE_MODE=task_engine
+      - DEVSTREAM_LOG_LEVEL=INFO
+      - DEVSTREAM_LOG_FILE_ENABLED=true
+      - DEVSTREAM_LOG_FILE_PATH=/app/logs/tasks.log
+      - DEVSTREAM_SECURITY_SECRET_KEY=${DEVSTREAM_SECRET_KEY}
+    volumes:
+      - devstream-data:/data
+      - devstream-logs:/app/logs
+    networks:
+      - devstream-network
+    depends_on:
+      - devstream-api
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    command: ["python", "-m", "devstream.tasks.engine"]
+
+  # Nginx reverse proxy
+  devstream-nginx:
+    image: nginx:alpine
+    container_name: devstream-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - devstream-logs:/var/log/nginx
+    networks:
+      - devstream-network
+    depends_on:
+      - devstream-api
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
+  # Log aggregation (optional)
+  devstream-logs:
+    image: alpine:latest
+    container_name: devstream-logs
+    restart: unless-stopped
+    command: >
+      sh -c "
+        while true; do
+          echo '[$(date)] Log aggregation running';
+          sleep 300;
+        done
+      "
+    volumes:
+      - devstream-logs:/logs:ro
+    networks:
+      - devstream-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+
+  # Backup service (runs periodically)
+  devstream-backup:
+    image: devstream:latest
+    container_name: devstream-backup
+    restart: unless-stopped
+    environment:
+      - DEVSTREAM_ENV=production
+      - DEVSTREAM_DATABASE_PATH=/data/production.db
+      - DEVSTREAM_LOG_LEVEL=INFO
+    volumes:
+      - devstream-data:/data
+      - devstream-logs:/app/logs
+    networks:
+      - devstream-network
+    depends_on:
+      - devstream-api
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    command: >
+      sh -c "
+        while true; do
+          echo '[$(date)] Running backup';
+          python -c '
+import asyncio
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+async def backup():
+    timestamp = datetime.now().strftime(\"%Y%m%d_%H%M%S\")
+    src = \"/data/production.db\"
+    dst = f\"/data/backups/auto_backup_{timestamp}.db\"
+
+    if Path(src).exists():
+        Path(dst).parent.mkdir(exist_ok=True)
+        shutil.copy2(src, dst)
+        print(f\"Backup created: {dst}\")
+
+        # Cleanup old backups (keep last 30)
+        backup_dir = Path(\"/data/backups\")
+        if backup_dir.exists():
+            backups = sorted(backup_dir.glob(\"auto_backup_*.db\"))
+            for old_backup in backups[:-30]:
+                old_backup.unlink()
+                print(f\"Removed old backup: {old_backup}\")
+
+asyncio.run(backup())
+          ';
+          sleep 3600;
+        done
+      "
+
+# Named volumes for persistent data
+volumes:
+  devstream-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/devstream/data
+
+  devstream-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/devstream/logs
+
+# Network configuration
+networks:
+  devstream-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

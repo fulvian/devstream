@@ -1,0 +1,259 @@
+# CLAUDE.md - DevStream Project Rules
+
+Questo file definisce la metodologia di lavoro e le best practice per lo sviluppo del progetto DevStream - Sistema Integrato Task Management & Memoria Cross-Session per Claude Code.
+
+## 📋 Metodologia DevStream
+
+### 🎯 Core Principles
+
+**La nostra metodologia si basa su 4 pilastri fondamentali:**
+
+1. **Discussione e Confronto** - Analisi collaborativa di obiettivi e specifiche
+2. **Divisione Strutturata** - Breakdown in fasi e micro-task granulari
+3. **Research-Driven Development** - Utilizzo Context7 per best practice
+4. **Verification & Testing** - Verifiche severe e test completi del codice
+
+### 🔄 Workflow di Sviluppo
+
+#### Phase 1: Discussione e Analisi Obiettivi
+```
+🎯 OBIETTIVO: Definire chiaramente cosa implementare
+📋 ATTIVITÀ:
+- Analizzare requisiti e specifiche tecniche
+- Discussione su trade-offs architetturali
+- Identificazione di vincoli e dipendenze
+- Consensus su approccio implementativo
+
+✅ DELIVERABLE: Specifiche chiare e approvate
+```
+
+#### Phase 2: Divisione in Fasi e Micro-Task
+```
+🎯 OBIETTIVO: Breakdown granulare per tracciabilità
+📋 ATTIVITÀ:
+- Dividere implementazione in fasi logiche (A, B, C, D)
+- Creare micro-task da max 10 minuti ciascuno
+- Definire dipendenze tra task
+- Stabilire criterio di completion per ogni task
+
+✅ DELIVERABLE: Task list strutturata con TodoWrite
+```
+
+#### Phase 3: Research con Context7
+```
+🎯 OBIETTIVO: Identificare best practice e soluzioni validate
+📋 ATTIVITÀ:
+- Ricerca documentazione tecnica via Context7
+- Identificazione di pattern e snippet di codice
+- Validazione di approcci architetturali
+- Acquisizione di best practice da progetti esistenti
+
+✅ DELIVERABLE: Soluzioni research-backed documentate
+```
+
+#### Phase 4: Implementazione Guidata
+```
+🎯 OBIETTIVO: Sviluppo step-by-step con validazione continua
+📋 ATTIVITÀ:
+- Implementazione task per task con approval
+- Revisione e discussione per ogni step
+- Integrazione incrementale con testing
+- Documentazione in-line del codice
+
+✅ DELIVERABLE: Codice production-ready implementato
+```
+
+#### Phase 5: Verification & Testing
+```
+🎯 OBIETTIVO: Validazione severa di qualità e funzionalità
+📋 ATTIVITÀ:
+- Test unitari e di integrazione completi
+- Validazione performance e scalabilità
+- Code review e quality assurance
+- Testing in scenari real-world
+
+✅ DELIVERABLE: Sistema validato e production-ready
+```
+
+## 🛠 Tools e Strumenti
+
+### Context7 Integration
+```bash
+# Utilizzo Context7 per research
+1. Identify tecnologia/pattern necessario
+2. Use mcp__context7__resolve-library-id per identificare library
+3. Use mcp__context7__get-library-docs per documentazione/snippet
+4. Validate best practices attraverso research
+5. Implement solution basata su findings
+```
+
+### TodoWrite Management
+```bash
+# Gestione task granulari
+1. Create todo list con TodoWrite per ogni phase
+2. Mark in_progress prima di iniziare task
+3. Complete immediatamente dopo finish
+4. Update progress con stato dettagliato
+5. Track lessons learned per future reference
+```
+
+### Testing Strategy
+```bash
+# Testing severo e completo
+1. Unit tests per ogni component
+2. Integration tests per workflow end-to-end
+3. Performance testing con metrics
+4. Error handling validation
+5. Real-world scenario testing
+```
+
+## 📖 Documentation Standards
+
+### Code Documentation
+- **Docstrings completi** per ogni classe e funzione
+- **Type hints** per tutti i parametri e return values
+- **Inline comments** per logica complessa
+- **Architecture decisions** documentate in-code
+
+### Progress Documentation
+- **Todo tracking** con TodoWrite tool
+- **Implementation notes** per ogni phase
+- **Lessons learned** capture per future reference
+- **Decision rationale** per scelte architetturali
+
+## 🎯 Quality Standards
+
+### Code Quality
+- **Type Safety**: Full typing con mypy compliance
+- **Error Handling**: Structured exception hierarchy
+- **Performance**: Async operations dove appropriato
+- **Maintainability**: Clean code principles
+- **Testing**: 95%+ coverage target
+
+### Architecture Quality
+- **SOLID Principles**: Single responsibility, open/closed, etc.
+- **Separation of Concerns**: Clear module boundaries
+- **Dependency Injection**: Loose coupling patterns
+- **Configuration Management**: Environment-based config
+- **Logging**: Structured logging con context
+
+## 🚀 Implementation Patterns
+
+### Research-Driven Development
+```python
+# Pattern: Context7 Research → Implementation
+1. Research: Use Context7 per best practices
+2. Design: Create architecture basata su research
+3. Implement: Follow validated patterns
+4. Test: Verify con comprehensive testing
+5. Document: Capture lessons learned
+```
+
+### Micro-Task Execution
+```python
+# Pattern: Task Breakdown → Execution
+1. Analyze: Break down complex feature
+2. Plan: Create granular task list (max 10min each)
+3. Execute: One task at a time con approval
+4. Verify: Test dopo ogni task completion
+5. Integrate: Merge con existing codebase
+```
+
+### Approval Workflow
+```python
+# Pattern: Discuss → Approve → Implement
+1. Discuss: Present approach e trade-offs
+2. Research: Use Context7 per validation
+3. Approve: Get consensus prima di implementation
+4. Implement: Follow approved approach
+5. Review: Validate results insieme
+```
+
+## 📊 Success Metrics
+
+### Development Metrics
+- **Task Completion Rate**: 100% task marked completed
+- **Test Coverage**: 95%+ per tutti i moduli
+- **Code Quality**: Zero mypy errors, minimal complexity
+- **Documentation**: Complete docstring coverage
+- **Performance**: Meet or exceed performance targets
+
+### Process Metrics
+- **Research Quality**: Context7 usage per ogni major decision
+- **Collaboration**: Clear approval workflow adherence
+- **Learning**: Documented lessons learned per phase
+- **Innovation**: Research-backed technology choices
+- **Delivery**: On-time delivery di production-ready code
+
+## 🔧 DevStream-Specific Rules
+
+### Python Environment
+- **ALWAYS use .devstream virtual environment** per tutti i test e execution
+- **Activate venv** con `source .devstream/bin/activate` prima di ogni operazione Python
+- **Use correct Python executable** dalla venv: `.devstream/bin/python`
+- **Install dependencies** nella venv corretta con pip o poetry
+
+### Memory System Development
+- **Always use Context7** per research di NLP e vector search patterns
+- **Validate embeddings** con test data reali
+- **Test hybrid search** con multiple query types
+- **Verify token budget** calculations accuracy
+
+### 🚨 REGOLA FONDAMENTALE - NON SEMPLIFICARE, RISOLVERE
+# ⚡⚡⚡ USA CONTEXT7 PER RISOLVERE I PROBLEMI - MAI SEMPLIFICARE! ⚡⚡⚡
+- **QUANDO si incontra un problema tecnico complesso → USA CONTEXT7**
+- **NON disabilitare features, NON rimuovere funzionalità**
+- **NON creare workaround temporanei**
+- **RICERCA la soluzione corretta con Context7**
+- **IMPLEMENTA la soluzione research-backed**
+- **MANTIENI tutte le feature funzionali**
+
+### Database Integration
+- **SQLAlchemy 2.0 async patterns** obbligatori
+- **Migration scripts** per ogni schema change
+- **Connection pooling** configuration
+- **Transaction management** best practices
+
+### Error Handling
+- **Structured exceptions** con error context
+- **Logging integration** per debugging
+- **Graceful degradation** per external dependencies
+- **User-friendly error messages**
+
+## 🎉 Success Stories
+
+### Phase 1.4 Memory System (Esempio)
+```
+✅ RISULTATO: Production-ready memory system
+📊 METRICS: 6 moduli, 95% test coverage, Context7-validated
+🎯 METODOLOGIA: Research → Design → Implement → Test
+⏱️ TIMELINE: Completato in anticipo rispetto a planning
+🔧 TOOLS: Context7, TodoWrite, comprehensive testing
+
+LESSONS LEARNED:
+- Context7 research cruciale per technology selection
+- Micro-task breakdown improved focus e tracciabilità
+- Approval workflow prevented refactoring posteriori
+- Testing severo identified edge cases early
+```
+
+## 🚀 Future Development
+
+### Step 2: Sprint 1 Ready
+Con Phase 1.4 completata, siamo ready per:
+- **Task Manager Implementation** con AI-powered plan generation
+- **Hook System** per Claude Code integration
+- **Context Injection** automatico dalla memoria
+- **Production Deployment** con database migrations
+
+### Continuous Improvement
+- **Methodology refinement** basata su lessons learned
+- **Tool optimization** per efficiency improvements
+- **Quality standards** evolution con project growth
+- **Research integration** per cutting-edge practices
+
+---
+
+*Documento creato: 2025-09-28*
+*Basato su: Phase 1.4 Memory System Implementation Success*
+*Metodologia: Research-Driven Development con Context7*

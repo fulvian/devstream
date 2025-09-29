@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# DevStream Claude Code wrapper with extended MCP timeout
+export MCP_TIMEOUT=15000
+export MAX_MCP_OUTPUT_TOKENS=50000
+
+claude "$@"

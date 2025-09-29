@@ -1,0 +1,69 @@
+# Development configuration for DevStream
+# Override environment variables and default settings
+
+environment: development
+debug: true
+enable_vector_search: false  # Disable for faster dev iteration
+
+database:
+  db_path: "./data/devstream_dev.db"
+  connection_timeout: 30.0
+  max_connections: 5
+  wal_mode: true
+  cache_size: 1000
+  enable_vector_search: false
+  vector_dimension: 384
+  enable_fts: true
+  fts_tokenizer: "unicode61"
+
+ollama:
+  endpoint: "http://localhost:11434"
+  timeout: 30.0
+  max_retries: 3
+  embedding_model: "nomic-embed-text"
+  model_download_timeout: 300.0
+  batch_size: 16
+  max_workers: 2
+  memory_threshold: 0.8
+  enable_gpu: true
+  keep_alive: "5m"
+
+memory:
+  max_content_length: 5000
+  max_memories_per_task: 50
+  similarity_threshold: 0.6
+  max_search_results: 20
+  max_context_tokens: 1500
+  context_relevance_threshold: 0.5
+  enable_memory_decay: false  # Disable for development
+  decay_rate: 0.1
+  min_relevance_score: 0.1
+
+tasks:
+  max_task_duration_minutes: 10
+  max_task_context_tokens: 256000
+  max_objectives_per_plan: 5
+  max_phases_per_plan: 3
+  max_tasks_per_phase: 8
+  default_agent: "coder"
+  agent_timeout: 180.0
+  enable_time_tracking: true
+  enable_token_tracking: true
+
+hooks:
+  enable_hooks: true
+  hook_timeout: 15.0
+  max_concurrent_hooks: 3
+  force_task_creation: false  # More flexible in development
+  auto_save_memory: true
+  auto_inject_context: true
+  hook_log_retention_days: 7
+
+logging:
+  log_level: "DEBUG"
+  enable_structured_logging: true
+  log_to_file: true
+  log_file_path: "./logs/devstream_dev.log"
+  log_to_console: true
+  max_log_size_mb: 50
+  log_retention_days: 7
