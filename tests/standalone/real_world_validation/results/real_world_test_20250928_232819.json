@@ -1,0 +1,55 @@
+{
+  "personal_project_management": {
+    "status": "failed",
+    "execution_time": 0.007228851318359375,
+    "error": "'QueryManager' object has no attribute 'phases'"
+  },
+  "team_collaboration": {
+    "status": "failed",
+    "execution_time": 0.002469778060913086,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: task_type IN ('analysis', 'coding', 'documentation', 'testing', 'review', 'research')\n[SQL: INSERT INTO micro_tasks (id, phase_id, title, description, max_duration_minutes, max_context_tokens, assigned_agent, task_type, status, priority, input_files, output_files, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]\n[parameters: ('d1e42a882d1b4df2834057ff0c244d9b', 'b79e7fe4841b436ab89ab6da9e06cb0d', 'API Development - alice', 'Develop REST API endpoints', 10, 256000, 'alice', 'implementation', 'pending', 5, '\"[]\"', '\"[]\"', 0)]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "long_running_project": {
+    "status": "failed",
+    "execution_time": 0.0017752647399902344,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: task_type IN ('analysis', 'coding', 'documentation', 'testing', 'review', 'research')\n[SQL: INSERT INTO micro_tasks (id, phase_id, title, description, max_duration_minutes, max_context_tokens, assigned_agent, task_type, status, priority, input_files, output_files, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]\n[parameters: ('e2ce1d905f6a420f955ff99b4fb40f99', '6c90118386874a8f9e9d149f910479b1', 'Week 1 - Development Task 1', 'Development work for week 1, day 1', 10, 256000, 'developer', 'implementation', 'pending', 5, '\"[]\"', '\"[]\"', 0)]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "memory_system_validation": {
+    "status": "failed",
+    "execution_time": 0.009982109069824219,
+    "error": "'SemanticMemoryQueries' object has no attribute 'get_by_id'"
+  },
+  "task_system_validation": {
+    "status": "failed",
+    "execution_time": 0.0027458667755126953,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: task_type IN ('analysis', 'coding', 'documentation', 'testing', 'review', 'research')\n[SQL: INSERT INTO micro_tasks (id, phase_id, title, description, max_duration_minutes, max_context_tokens, assigned_agent, task_type, status, priority, input_files, output_files, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]\n[parameters: ('c65c8086afff4357a7860764c8cf5f47', 'bf7efcb57a1e47b9907f29c1aa59d2db', 'Test implementation task', 'Comprehensive test for implementation workflow', 10, 256000, 'test_agent', 'implementation', 'pending', 5, '\"[]\"', '\"[]\"', 0)]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "performance_under_load": {
+    "status": "success",
+    "execution_time": 0.2596609592437744,
+    "results": {
+      "plans_created": 10,
+      "memories_created": 50,
+      "concurrent_searches": 20,
+      "total_execution_time": 0.25963711738586426,
+      "average_search_results": 10.0
+    }
+  },
+  "error_recovery": {
+    "status": "success",
+    "execution_time": 0.0032660961151123047,
+    "results": {
+      "invalid_plan_creation": 0,
+      "invalid_memory_storage": 1,
+      "invalid_task_updates": 0,
+      "concurrent_operations": 0,
+      "system_recovery": 1
+    }
+  },
+  "summary": {
+    "total_execution_time": 0.2985811233520508,
+    "total_scenarios": 7,
+    "successful_scenarios": 2,
+    "failed_scenarios": 5
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "personal_project_management": {
+    "status": "failed",
+    "execution_time": 0.028036117553710938,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: status IN ('pending', 'active', 'completed', 'failed', 'skipped')\n[SQL: UPDATE micro_tasks SET status=?, started_at=? WHERE micro_tasks.id = ?]\n[parameters: ('in_progress', '2025-09-28 21:32:22.770329', '431cf82d865e4c4ba8cedcb7e10a72a3')]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "team_collaboration": {
+    "status": "success",
+    "execution_time": 0.011432886123657227,
+    "results": {
+      "project_created": true,
+      "developers_simulated": 3,
+      "tasks_created": 3,
+      "shared_memories": 3,
+      "cross_access_results": 5
+    }
+  },
+  "long_running_project": {
+    "status": "success",
+    "execution_time": 0.04452776908874512,
+    "results": {
+      "project_duration_weeks": 6,
+      "total_tasks_created": 18,
+      "total_memories_created": 18,
+      "memory_search_all": 0,
+      "memory_search_specific": 0,
+      "memory_system_performance": "stable"
+    }
+  },
+  "memory_system_validation": {
+    "status": "success",
+    "execution_time": 0.012933731079101562,
+    "results": {
+      "content_types_tested": 6,
+      "memories_created": 6,
+      "search_results": 10,
+      "retrieval_success_rate": 1.0
+    }
+  },
+  "task_system_validation": {
+    "status": "failed",
+    "execution_time": 0.008653879165649414,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: status IN ('pending', 'active', 'completed', 'failed', 'skipped')\n[SQL: UPDATE micro_tasks SET status=?, started_at=? WHERE micro_tasks.id = ?]\n[parameters: ('in_progress', '2025-09-28 21:32:22.848212', '8da76a6221ef4e03978c2742922d054f')]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "performance_under_load": {
+    "status": "success",
+    "execution_time": 0.24783897399902344,
+    "results": {
+      "plans_created": 10,
+      "memories_created": 50,
+      "concurrent_searches": 20,
+      "total_execution_time": 0.2478179931640625,
+      "average_search_results": 10.0
+    }
+  },
+  "error_recovery": {
+    "status": "success",
+    "execution_time": 0.0033910274505615234,
+    "results": {
+      "invalid_plan_creation": 0,
+      "invalid_memory_storage": 1,
+      "invalid_task_updates": 0,
+      "concurrent_operations": 0,
+      "system_recovery": 1
+    }
+  },
+  "summary": {
+    "total_execution_time": 0.36927270889282227,
+    "total_scenarios": 7,
+    "successful_scenarios": 5,
+    "failed_scenarios": 2
+  }
+}

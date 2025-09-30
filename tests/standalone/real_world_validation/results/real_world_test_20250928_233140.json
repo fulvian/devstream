@@ -1,0 +1,60 @@
+{
+  "personal_project_management": {
+    "status": "failed",
+    "execution_time": 0.024268150329589844,
+    "error": "'MicroTaskQueries' object has no attribute 'update_status'"
+  },
+  "team_collaboration": {
+    "status": "failed",
+    "execution_time": 0.0021491050720214844,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: task_type IN ('analysis', 'coding', 'documentation', 'testing', 'review', 'research')\n[SQL: INSERT INTO micro_tasks (id, phase_id, title, description, max_duration_minutes, max_context_tokens, assigned_agent, task_type, status, priority, input_files, output_files, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]\n[parameters: ('d35b1dfbd000482e82d5cffbaf3a8091', 'a59163d9c76b412bb8f16d29ae4390d8', 'API Development - alice', 'Develop REST API endpoints', 10, 256000, 'alice', 'implementation', 'pending', 5, '\"[]\"', '\"[]\"', 0)]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "long_running_project": {
+    "status": "failed",
+    "execution_time": 0.002092123031616211,
+    "error": "[WRITE_ERROR] Write failed: (sqlite3.IntegrityError) CHECK constraint failed: task_type IN ('analysis', 'coding', 'documentation', 'testing', 'review', 'research')\n[SQL: INSERT INTO micro_tasks (id, phase_id, title, description, max_duration_minutes, max_context_tokens, assigned_agent, task_type, status, priority, input_files, output_files, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]\n[parameters: ('e4935e686e5e4bd2acb8615abd6d310c', '0841a5c7c62342cc9eee012253e6684d', 'Week 1 - Development Task 1', 'Development work for week 1, day 1', 10, 256000, 'developer', 'implementation', 'pending', 5, '\"[]\"', '\"[]\"', 0)]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+  },
+  "memory_system_validation": {
+    "status": "success",
+    "execution_time": 0.011728048324584961,
+    "results": {
+      "content_types_tested": 6,
+      "memories_created": 6,
+      "search_results": 10,
+      "retrieval_success_rate": 1.0
+    }
+  },
+  "task_system_validation": {
+    "status": "failed",
+    "execution_time": 0.005552053451538086,
+    "error": "'MicroTaskQueries' object has no attribute 'update_status'"
+  },
+  "performance_under_load": {
+    "status": "success",
+    "execution_time": 0.2286510467529297,
+    "results": {
+      "plans_created": 10,
+      "memories_created": 50,
+      "concurrent_searches": 20,
+      "total_execution_time": 0.22863006591796875,
+      "average_search_results": 10.0
+    }
+  },
+  "error_recovery": {
+    "status": "success",
+    "execution_time": 0.005841970443725586,
+    "results": {
+      "invalid_plan_creation": 0,
+      "invalid_memory_storage": 1,
+      "invalid_task_updates": 0,
+      "concurrent_operations": 0,
+      "system_recovery": 1
+    }
+  },
+  "summary": {
+    "total_execution_time": 0.2928957939147949,
+    "total_scenarios": 7,
+    "successful_scenarios": 3,
+    "failed_scenarios": 4
+  }
+}

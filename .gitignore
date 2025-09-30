@@ -132,4 +132,4 @@ venv_test/
 # Local development
 .local/
 scratch/
-testing/
+testing/devstream-server.log
