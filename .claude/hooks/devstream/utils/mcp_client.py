@@ -401,15 +401,25 @@ class DevStreamMCPClient:
                 self.logger.logger.error(f"MCP server error: {error_msg}")
                 return None
 
-            # Parse response
+            # Parse response - extract JSON from last line (server logs to stdout before JSON)
             if stdout:
                 response_text = stdout.decode('utf-8').strip()
                 if response_text:
-                    try:
-                        return json.loads(response_text)
-                    except json.JSONDecodeError as e:
-                        self.logger.logger.error(f"Failed to parse MCP response: {e}")
-                        return None
+                    # Split by lines and find the last valid JSON line
+                    # MCP server outputs logs first, then JSON response on last line
+                    lines = response_text.split('\n')
+                    for line in reversed(lines):
+                        line = line.strip()
+                        if line and (line.startswith('{') or line.startswith('[')):
+                            try:
+                                return json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+
+                    # If no valid JSON found in any line, log the error
+                    self.logger.logger.error(f"Failed to parse MCP response: No valid JSON found in output")
+                    self.logger.logger.debug(f"Raw output (first 500 chars): {response_text[:500]}")
+                    return None
 
             return None
 

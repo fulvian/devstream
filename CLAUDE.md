@@ -187,6 +187,55 @@ Questo file definisce la metodologia di lavoro e le best practice per lo svilupp
 
 ## 🔧 DevStream-Specific Rules
 
+### 📁 File Organization & Project Structure
+
+**CRITICAL: SEMPRE seguire la struttura definita in PROJECT_STRUCTURE.md**
+
+#### Documentation Files
+- **NEVER create .md files in project root** (eccetto README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
+- **USE docs/ directory** con struttura organizzata per categoria:
+  ```
+  docs/
+  ├── architecture/     # System design, technical decisions, schema
+  ├── api/             # API reference, JSON schemas
+  ├── development/     # Developer guides, roadmap, methodology
+  ├── deployment/      # Production deployment, validation reports
+  ├── guides/          # Practical guides, quick references
+  ├── tutorials/       # Hands-on tutorials
+  └── idee_fondanti/   # Foundational concepts, vision
+  ```
+
+**Esempi corretti**:
+- ✅ `docs/deployment/post-restart-validation-issues.md`
+- ✅ `docs/architecture/hook-system-design.md`
+- ✅ `docs/development/phase-completion-report.md`
+- ❌ `POST_RESTART_VALIDATION_ISSUES.md` (root)
+- ❌ `hook_system_design.md` (root)
+
+#### Test Files
+- **NEVER create test files in project root**
+- **USE tests/ directory** con struttura per tipo:
+  ```
+  tests/
+  ├── unit/           # Fast, isolated unit tests
+  ├── integration/    # Integration tests
+  ├── standalone/     # Standalone validation tests
+  └── fixtures/       # Test fixtures and data
+  ```
+
+**Esempi corretti**:
+- ✅ `tests/unit/hooks/test_pre_tool_use.py`
+- ✅ `tests/integration/memory/test_hybrid_search.py`
+- ✅ `tests/standalone/test_mcp_server.py`
+- ❌ `test_hooks.py` (root)
+- ❌ `validation_test.py` (root)
+
+#### Before Creating ANY File
+1. **Check PROJECT_STRUCTURE.md** per la struttura corretta
+2. **Identify correct directory** basato sul tipo di file
+3. **Use appropriate naming convention** (kebab-case per docs, snake_case per code)
+4. **Create in correct location** seguendo la struttura definita
+
 ### Python Environment
 - **ALWAYS use .devstream virtual environment** per tutti i test e execution
 - **Activate venv** con `source .devstream/bin/activate` prima di ogni operazione Python
