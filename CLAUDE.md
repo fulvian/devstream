@@ -23,6 +23,224 @@ DevStream è un sistema integrato che combina:
 
 ---
 
+## 🤖 Custom Agent System - Multi-Stack Development
+
+**Status**: Phase 1 Complete ✅ | Production Ready
+
+DevStream implementa un sistema gerarchico di agenti specializzati per coordinare sviluppo multi-stack complesso.
+
+### Agent Architecture (4-Level Hierarchy)
+
+```
+Level 1: ORCHESTRATOR (@tech-lead)
+   ├─ Task decomposition & delegation
+   ├─ Multi-agent coordination
+   └─ Architectural decisions
+
+Level 2: DOMAIN SPECIALISTS
+   ├─ @python-specialist (FastAPI, Django, async)
+   ├─ @typescript-specialist (React, Next.js, Node.js)
+   ├─ @rust-specialist (Phase 2)
+   ├─ @go-specialist (Phase 2)
+   ├─ @database-specialist (Phase 2)
+   └─ @devops-specialist (Phase 2)
+
+Level 3: TASK SPECIALISTS (Phase 3+)
+   ├─ @api-architect
+   ├─ @performance-optimizer
+   └─ @testing-specialist
+
+Level 4: QUALITY ASSURANCE
+   └─ @code-reviewer (MANDATORY before commits)
+```
+
+### Agent Usage Patterns
+
+#### Direct Invocation (Single-Language Tasks)
+```bash
+@python-specialist Create FastAPI endpoint for user authentication
+@typescript-specialist Build React dashboard with real-time charts
+```
+
+#### Orchestrated Workflow (Multi-Stack Features)
+```bash
+@tech-lead Build full-stack user management system
+
+# tech-lead will:
+# 1. Analyze requirements across Python backend + TypeScript frontend
+# 2. Delegate @python-specialist for FastAPI implementation
+# 3. Delegate @typescript-specialist for React UI
+# 4. Coordinate integration and testing
+# 5. Invoke @code-reviewer for final validation
+```
+
+#### Quality Gate (MANDATORY)
+```bash
+# ALWAYS before marking tasks completed
+@code-reviewer Review implementation in src/api/users.py:45-120
+
+# Checks: OWASP Top 10, performance, architecture
+```
+
+### Agent Capabilities
+
+**@tech-lead** (Orchestrator)
+- **Use**: Complex features spanning multiple languages/stacks
+- **Capability**: Task decomposition, agent delegation, architecture decisions
+- **Tools**: Task, Read, Glob, Grep (focused coordination)
+- **Context**: Full conversation history + multi-agent coordination
+- **Memory**: Isolated context window per invocation
+
+**@python-specialist** (Domain)
+- **Use**: Python 3.11+, FastAPI, Django, async development
+- **Capability**: Type-safe Python, async patterns, pytest testing
+- **Tools**: Full tool access (inherits all Claude Code tools)
+- **Patterns**: Research-driven (Context7), test-first, type-safe
+
+**@typescript-specialist** (Domain)
+- **Use**: TypeScript, React, Next.js, Node.js APIs
+- **Capability**: Server Components, hooks, performance optimization
+- **Tools**: Full tool access (inherits all Claude Code tools)
+- **Patterns**: Component-driven, TypeScript strict mode, testing
+
+**@code-reviewer** (QA)
+- **Use**: Quality, security, performance validation
+- **Capability**: OWASP Top 10 analysis, performance bottlenecks, architecture review
+- **Tools**: Read, Grep, Glob, Bash (analysis focus)
+- **Mandatory**: ALWAYS invoke before git commits
+
+### Agent Principles (MANDATORY)
+
+1. **Isolated Context**: Each agent has independent context window
+2. **Tool Inheritance**: Domain specialists have full tool access
+3. **Tool Restriction**: Orchestrators/QA agents restrict tools for focus
+4. **Delegation Pattern**: Use `Task` tool for orchestrator → specialist
+5. **Quality First**: ALWAYS invoke @code-reviewer before task completion
+
+### When to Use Which Agent
+
+**Use @tech-lead when:**
+- Feature spans Python + TypeScript (e.g., full-stack CRUD)
+- Requires architectural decisions across stack
+- Need coordination between multiple specialists
+- Complex integration between backend/frontend
+
+**Use @python-specialist when:**
+- Pure Python implementation (FastAPI, async, testing)
+- Backend API development
+- Database models and migrations
+- Python testing and type safety
+
+**Use @typescript-specialist when:**
+- Pure TypeScript/React implementation
+- Frontend components and state management
+- Next.js Server Components
+- Frontend testing and optimization
+
+**Use @code-reviewer when:**
+- BEFORE every git commit (MANDATORY)
+- After significant code changes
+- Security-sensitive implementations
+- Performance-critical code paths
+
+### Example Workflow
+
+```bash
+User: "Create user authentication system with JWT"
+
+# Step 1: Orchestration
+@tech-lead Analyze requirements and delegate implementation
+
+# tech-lead response:
+# - Python backend: FastAPI JWT auth, password hashing, user model
+# - TypeScript frontend: Login form, auth context, protected routes
+# - Integration: API client, error handling, token refresh
+
+# Step 2: Backend Implementation
+Task(@python-specialist):
+  "Implement FastAPI JWT authentication:
+   - POST /auth/login endpoint
+   - POST /auth/register endpoint
+   - JWT token generation with refresh
+   - Password hashing with bcrypt
+   - User model with SQLAlchemy"
+
+# Step 3: Frontend Implementation
+Task(@typescript-specialist):
+  "Implement React authentication UI:
+   - LoginForm component with validation
+   - AuthContext for global state
+   - ProtectedRoute wrapper
+   - API client with token interceptor
+   - Error handling and loading states"
+
+# Step 4: Quality Review (MANDATORY)
+@code-reviewer Review complete auth implementation:
+  - Backend: src/api/auth.py, src/models/user.py
+  - Frontend: src/components/LoginForm.tsx, src/contexts/AuthContext.tsx
+  - Security: JWT secret management, password policies, XSS prevention
+```
+
+### Agent Configuration
+
+**Location**: `.claude/agents/`
+```
+.claude/agents/
+├── orchestrator/
+│   └── tech-lead.md           # Multi-stack coordination
+├── domain/
+│   ├── python-specialist.md   # Python + FastAPI
+│   ├── typescript-specialist.md  # TypeScript + React
+│   ├── rust-specialist.md     # Phase 2
+│   ├── go-specialist.md       # Phase 2
+│   ├── database-specialist.md # Phase 2
+│   └── devops-specialist.md   # Phase 2
+├── qa/
+│   └── code-reviewer.md       # Security + Quality
+└── README.md                   # Agent system docs
+```
+
+### Memory Optimization (Post Phase 1 Fix)
+
+**Problem Solved**: JavaScript heap exhaustion during agent execution
+- **Root Cause**: Float32Array/Buffer accumulation in hybrid search
+- **Fix**: Increased heap (8GB), explicit GC, memory cleanup patterns
+- **Status**: Production stable ✅
+
+**Configuration**:
+```bash
+# Node.js Memory Flags (start-devstream.sh)
+node --max-old-space-size=8192 --expose-gc start-production.js
+
+# Benefits:
+# - 8GB heap for large agent operations
+# - Explicit GC after vector search
+# - Prevents memory accumulation
+# - Stable for long-running sessions
+```
+
+### Future Phases
+
+**Phase 2** (Planned):
+- @rust-specialist: Memory-safe systems programming
+- @go-specialist: Cloud-native services
+- @database-specialist: Schema design, optimization
+- @devops-specialist: Docker, Kubernetes, CI/CD
+
+**Phase 3** (Planned):
+- @api-architect: API design and contracts
+- @performance-optimizer: Profiling and optimization
+- @testing-specialist: Test strategy and coverage
+- @documentation-specialist: Technical writing
+
+**Phase 4** (Planned):
+- @security-auditor: Deep security analysis
+- @debugger: Complex debugging workflows
+- @refactoring-specialist: Code modernization
+- @integration-specialist: Third-party integrations
+
+---
+
 ## 📋 REGOLE PRESCRITTIVE - Metodologia DevStream
 
 ### 🚨 Workflow Obbligatorio
