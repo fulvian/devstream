@@ -274,8 +274,17 @@ class DevStreamMcpServer {
    * Start the MCP server
    */
   async start(): Promise<void> {
-    // Initialize database connection
+    // Initialize database connection (sqlite-vec loaded automatically)
     await this.database.initialize();
+
+    // Verify vector search availability
+    const vectorStatus = this.database.getVectorSearchStatus();
+    if (vectorStatus) {
+      const diagnostics = await this.database.getVectorSearchDiagnostics();
+      console.error(`✅ Vector search ready: ${diagnostics.version}`);
+    } else {
+      console.error('⚠️ Vector search not available - using text-only fallback');
+    }
 
     // Context7 pattern: Initialize Ollama client for embedding generation
     console.error('🧠 Initializing Ollama client for automatic embedding generation...');
@@ -291,7 +300,7 @@ class DevStreamMcpServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    console.error('🚀 DevStream MCP Server started successfully - EMBEDDING INTEGRATION VERSION 1.2');
+    console.error('🚀 DevStream MCP Server started - HYBRID SEARCH v2.0 (better-sqlite3 + sqlite-vec)');
   }
 
   /**

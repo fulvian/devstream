@@ -7,6 +7,8 @@
 
 import { DevStreamDatabase, SemanticMemory } from '../database.js';
 import { getOllamaClient, DevStreamOllamaClient } from '../ollama-client.js';
+import { HybridSearchEngine } from './hybrid-search.js';
+import { MetricsCollector, memoryStorageCounter } from '../monitoring/metrics.js';
 import { z } from 'zod';
 
 // Input validation schemas
@@ -24,10 +26,13 @@ const SearchMemoryInputSchema = z.object({
 
 export class MemoryTools {
   private ollamaClient: DevStreamOllamaClient;
+  private hybridSearch: HybridSearchEngine;
 
   constructor(private database: DevStreamDatabase) {
     // Context7 pattern: initialize Ollama client for embedding generation
     this.ollamaClient = getOllamaClient();
+    // Context7 pattern: initialize hybrid search engine with RRF
+    this.hybridSearch = new HybridSearchEngine(database, this.ollamaClient);
   }
 
   /**
@@ -46,9 +51,12 @@ export class MemoryTools {
       // Calculate importance score based on content type and length
       const importanceScore = this.calculateImportanceScore(input.content_type, input.content);
 
-      // Context7 pattern: Generate embedding automatically for all content
+      // Context7 pattern: Generate embedding automatically for all content with metrics
       console.log(`🧠 Generating embedding for content (${input.content.length} chars)...`);
-      const embedding = await this.ollamaClient.generateEmbedding(input.content);
+      const embedding = await MetricsCollector.trackEmbeddingGeneration(
+        this.ollamaClient.getDefaultModel(),
+        async () => await this.ollamaClient.generateEmbedding(input.content)
+      );
 
       let embeddingJson: string | null = null;
       let embeddingModel: string | null = null;
@@ -63,32 +71,62 @@ export class MemoryTools {
         console.warn(`⚠️ Embedding generation failed - storing without vector search capability`);
       }
 
-      // Store in semantic memory with embedding (Context7 pattern: complete schema)
-      await this.database.execute(`
-        INSERT INTO semantic_memory (
-          id, content, content_type, content_format, keywords,
-          embedding, embedding_model, embedding_dimension,
-          relevance_score, access_count, context_snapshot
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        memoryId,
-        input.content,
-        input.content_type,
-        contentFormat,
-        JSON.stringify(input.keywords),
-        embeddingJson,
-        embeddingModel,
-        embeddingDimension,
-        importanceScore, // Use as relevance_score
-        0,
-        JSON.stringify({
-          stored_via: 'mcp_server',
-          timestamp: new Date().toISOString(),
-          content_length: input.content.length,
-          source: 'mcp_user_input',
-          embedding_status: embedding ? 'generated' : 'failed'
-        })
-      ]);
+      // Store in semantic memory with embedding (Context7 pattern: complete schema with metrics)
+      const result = await MetricsCollector.trackDatabaseOperation('memory_storage', async () =>
+        await this.database.execute(`
+          INSERT INTO semantic_memory (
+            id, content, content_type, content_format, keywords,
+            embedding, embedding_model, embedding_dimension,
+            relevance_score, access_count, context_snapshot
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          memoryId,
+          input.content,
+          input.content_type,
+          contentFormat,
+          JSON.stringify(input.keywords),
+          embeddingJson,
+          embeddingModel,
+          embeddingDimension,
+          importanceScore, // Use as relevance_score
+          0,
+          JSON.stringify({
+            stored_via: 'mcp_server',
+            timestamp: new Date().toISOString(),
+            content_length: input.content.length,
+            source: 'mcp_user_input',
+            embedding_status: embedding ? 'generated' : 'failed'
+          })
+        ])
+      );
+
+      // Track memory storage in metrics
+      memoryStorageCounter.inc({
+        content_type: input.content_type,
+        has_embedding: embedding ? 'true' : 'false'
+      });
+
+      // Context7 pattern: Sync to vec0 if embedding was generated
+      if (embedding && this.database.getVectorSearchStatus()) {
+        try {
+          console.log('📊 Syncing to vec0 vector search index...');
+          await MetricsCollector.trackDatabaseOperation('vec0_sync', async () =>
+            await this.database.execute(`
+              INSERT INTO vec_semantic_memory(embedding, content_type, memory_id, content_preview)
+              VALUES (?, ?, ?, ?)
+            `, [
+              embeddingJson,
+              input.content_type,
+              memoryId,
+              input.content.substring(0, 200)
+            ])
+          );
+          console.log('✅ vec0 sync completed');
+        } catch (vecError) {
+          console.warn('⚠️ vec0 sync failed:', vecError instanceof Error ? vecError.message : 'Unknown error');
+          // Continue - FTS5 will still work via trigger
+        }
+      }
 
       return {
         content: [
@@ -121,51 +159,28 @@ export class MemoryTools {
   }
 
   /**
-   * Search DevStream semantic memory for relevant information
+   * Search DevStream semantic memory using hybrid search (RRF)
+   * Context7 pattern: Combines vector similarity + FTS5 keyword search
    */
   async searchMemory(args: any) {
     try {
       const input = SearchMemoryInputSchema.parse(args);
 
-      // Build search query using actual database schema
-      let sql = `
-        SELECT
-          sm.*,
-          CASE
-            WHEN sm.content LIKE ? THEN 10
-            WHEN sm.keywords LIKE ? THEN 8
-            WHEN json_extract(sm.context_snapshot, '$.source') LIKE ? THEN 5
-            ELSE sm.relevance_score
-          END as search_relevance_score
-        FROM semantic_memory sm
-        WHERE (
-          sm.content LIKE ? OR
-          sm.keywords LIKE ? OR
-          json_extract(sm.context_snapshot, '$.source') LIKE ?
-        )
-      `;
+      // Context7 pattern: Use HybridSearchEngine with RRF
+      console.log(`🔍 Performing hybrid search for: "${input.query}"`);
+      const results = await this.hybridSearch.search(input.query, {
+        k: input.limit,
+        rrf_k: 60,
+        weight_fts: 1.0,
+        weight_vec: 1.0
+      });
 
-      const searchPattern = `%${input.query}%`;
-      const params = [
-        searchPattern, searchPattern, searchPattern,  // For relevance scoring
-        searchPattern, searchPattern, searchPattern   // For WHERE clause
-      ];
+      // Filter by content_type if specified
+      const filteredResults = input.content_type
+        ? results.filter(r => r.content_type === input.content_type)
+        : results;
 
-      // Add content type filter if specified
-      if (input.content_type) {
-        sql += ' AND sm.content_type = ?';
-        params.push(input.content_type);
-      }
-
-      sql += `
-        ORDER BY search_relevance_score DESC, sm.relevance_score DESC, sm.created_at DESC
-        LIMIT ?
-      `;
-      params.push(input.limit.toString());
-
-      const memories = await this.database.query<SemanticMemory & { relevance_score: number }>(sql, params);
-
-      if (memories.length === 0) {
+      if (filteredResults.length === 0) {
         return {
           content: [
             {
@@ -180,17 +195,24 @@ export class MemoryTools {
       }
 
       // Update access count for retrieved memories
-      const memoryIds = memories.map(m => `'${m.id}'`).join(',');
-      await this.database.execute(
-        `UPDATE semantic_memory SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id IN (${memoryIds})`,
-        [] // Empty params array
-      );
+      const memoryIds = filteredResults.map(m => `'${m.memory_id}'`).join(',');
+      if (memoryIds) {
+        await this.database.execute(
+          `UPDATE semantic_memory SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id IN (${memoryIds})`,
+          []
+        );
+      }
 
-      let output = `🔍 **DevStream Memory Search Results**\n\n`;
+      // Context7 pattern: Show hybrid search diagnostics
+      const diagnostics = await this.hybridSearch.getDiagnostics();
+      const searchMethod = diagnostics.vector_search.available ? 'Hybrid (Vector + Keyword)' : 'Keyword Only (FTS5)';
+
+      let output = `🔍 **DevStream Hybrid Search Results**\n\n`;
       output += `Query: "${input.query}"\n`;
-      output += `Found: ${memories.length} results\n\n`;
+      output += `Method: ${searchMethod}\n`;
+      output += `Found: ${filteredResults.length} results\n\n`;
 
-      memories.forEach((memory, index) => {
+      filteredResults.forEach((result, index) => {
         const typeEmoji = {
           code: '💻',
           documentation: '📚',
@@ -199,49 +221,35 @@ export class MemoryTools {
           error: '❌',
           decision: '🎯',
           learning: '🧠'
-        }[memory.content_type] || '📄';
+        }[result.content_type] || '📄';
 
-        const relevanceScore = (memory as any).search_relevance_score || memory.relevance_score || 0;
-        const relevanceText = relevanceScore >= 8 ? 'HIGH' : relevanceScore >= 5 ? 'MEDIUM' : 'LOW';
+        // Context7 pattern: Show RRF combined rank
+        const rankScore = (result.combined_rank * 100).toFixed(1);
+        const rankText = result.combined_rank > 0.05 ? 'HIGH' : result.combined_rank > 0.02 ? 'MEDIUM' : 'LOW';
 
-        output += `${index + 1}. ${typeEmoji} **${memory.content_type.toUpperCase()}** Memory\n`;
-        output += `   📊 Relevance: ${relevanceText} (${relevanceScore}/10) • Score: ${memory.relevance_score?.toFixed(2) || 'N/A'}\n`;
+        output += `${index + 1}. ${typeEmoji} **${result.content_type.toUpperCase()}** Memory\n`;
+        output += `   📊 Relevance: ${rankText} (RRF Score: ${rankScore})\n`;
 
-        // Extract source from context_snapshot
-        try {
-          const contextSnapshot = JSON.parse(memory.context_snapshot || '{}');
-          output += `   📍 Source: ${contextSnapshot.source || 'unknown'}\n`;
-        } catch (e) {
-          output += `   📍 Source: unknown\n`;
-        }
-
-        // Parse and display keywords
-        try {
-          const keywords = memory.keywords ? JSON.parse(memory.keywords) : [];
-          if (Array.isArray(keywords) && keywords.length > 0) {
-            output += `   🏷️ Keywords: ${keywords.join(', ')}\n`;
-          }
-        } catch (e) {
-          // Skip if keywords is not valid JSON
+        // Show search method contribution
+        if (result.vec_rank && result.fts_rank) {
+          output += `   🔬 Vector Rank: #${result.vec_rank} • Keyword Rank: #${result.fts_rank}\n`;
+        } else if (result.vec_rank) {
+          output += `   🔬 Vector Rank: #${result.vec_rank} (distance: ${result.vec_distance?.toFixed(4)})\n`;
+        } else if (result.fts_rank) {
+          output += `   🔬 Keyword Rank: #${result.fts_rank}\n`;
         }
 
         // Show content preview
-        const contentPreview = memory.content.length > 200
-          ? memory.content.substring(0, 200) + '...'
-          : memory.content;
+        const contentPreview = result.content.length > 200
+          ? result.content.substring(0, 200) + '...'
+          : result.content;
 
         output += `   💾 Content: ${contentPreview}\n`;
-        output += `   🆔 ID: \`${memory.id}\`\n`;
-        output += `   📅 Created: ${new Date(memory.created_at).toLocaleDateString()}\n`;
-
-        if (memory.access_count && memory.access_count > 0) {
-          output += `   👁️ Accessed: ${memory.access_count + 1} times\n`;
-        }
-
-        output += '\n';
+        output += `   🆔 ID: \`${result.memory_id}\`\n`;
+        output += `   📅 Created: ${new Date(result.created_at).toLocaleDateString()}\n\n`;
       });
 
-      output += `💡 **Tip**: Use specific keywords or content types to refine your search results.`;
+      output += `💡 **Tip**: Hybrid search combines semantic similarity and keyword matching for better results.`;
 
       return {
         content: [

@@ -2,56 +2,138 @@
  * DevStream Database Connection Layer
  *
  * SQLite database connection and query utilities for DevStream MCP server.
- * Handles connections to the existing DevStream database schema.
+ * Uses better-sqlite3 for synchronous API and sqlite-vec for vector search.
+ *
+ * Context7-compliant implementation using official sqlite-vec npm package.
  */
 
-import sqlite3 from 'sqlite3';
-import { promisify } from 'util';
+import Database from 'better-sqlite3';
+import * as sqliteVec from 'sqlite-vec';
 
 /**
- * Database connection wrapper with async query support
+ * Database connection wrapper with sync/async query support
+ * Context7 pattern: Use better-sqlite3 for reliable extension loading
  */
 export class DevStreamDatabase {
-  private db: sqlite3.Database | null = null;
+  private db: Database.Database | null = null;
   private dbPath: string;
+  private vectorSearchAvailable: boolean = false;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
   }
 
   /**
-   * Initialize database connection
+   * Initialize database connection and load sqlite-vec extension
+   * Context7 pattern: Load sqlite-vec using official npm package
    */
   async initialize(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE, (err) => {
-        if (err) {
-          reject(new Error(`Failed to connect to DevStream database: ${err.message}`));
-        } else {
-          console.error(`Connected to DevStream database: ${this.dbPath}`);
-          resolve();
-        }
+    try {
+      // Open database connection
+      this.db = new Database(this.dbPath, {
+        readonly: false,
+        fileMustExist: true
       });
-    });
+
+      console.error(`✅ Connected to DevStream database: ${this.dbPath}`);
+
+      // Load sqlite-vec extension using official package
+      await this.loadVectorExtension();
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to initialize DevStream database: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Load sqlite-vec extension using official npm package
+   * Context7 pattern: Use sqliteVec.load() for reliable extension loading
+   */
+  private async loadVectorExtension(): Promise<void> {
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    try {
+      // Load sqlite-vec using official package - this handles all extension complexity
+      sqliteVec.load(this.db);
+
+      // Verify extension loaded correctly
+      const result = this.db.prepare('SELECT vec_version() as version').get() as { version: string };
+      console.error(`✅ sqlite-vec extension loaded: ${result.version}`);
+
+      this.vectorSearchAvailable = true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`⚠️  Failed to load sqlite-vec extension: ${errorMessage}`);
+      console.error(`⚠️  Continuing without vector search - text-only search will be used`);
+      this.vectorSearchAvailable = false;
+    }
+  }
+
+  /**
+   * Get vector search availability status
+   * Context7 pattern: Allow queries to check capability before using vector functions
+   */
+  getVectorSearchStatus(): boolean {
+    return this.vectorSearchAvailable;
+  }
+
+  /**
+   * Get diagnostic information about vector search configuration
+   * Context7 pattern: Provide observability into vector search status
+   */
+  async getVectorSearchDiagnostics(): Promise<{
+    available: boolean;
+    version: string | null;
+    error: string | null;
+  }> {
+    if (!this.vectorSearchAvailable) {
+      return {
+        available: false,
+        version: null,
+        error: 'Vector search extension not loaded'
+      };
+    }
+
+    try {
+      if (!this.db) throw new Error('Database not initialized');
+
+      const result = this.db.prepare('SELECT vec_version() as version').get() as { version: string };
+
+      return {
+        available: true,
+        version: result.version,
+        error: null
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        available: false,
+        version: null,
+        error: `Version check failed: ${errorMessage}`
+      };
+    }
   }
 
   /**
    * Execute a SELECT query and return results
+   * Context7 pattern: Synchronous API with better-sqlite3
    */
   async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
     if (!this.db) {
       throw new Error('Database not initialized');
     }
 
-    return new Promise((resolve, reject) => {
-      this.db!.all(sql, params, (err, rows) => {
-        if (err) {
-          reject(new Error(`Query failed: ${err.message}`));
-        } else {
-          resolve(rows as T[]);
-        }
-      });
-    });
+    try {
+      const stmt = this.db.prepare(sql);
+      const rows = stmt.all(...params) as T[];
+      return rows;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Query failed: ${errorMessage}`);
+    }
   }
 
   /**
@@ -62,15 +144,14 @@ export class DevStreamDatabase {
       throw new Error('Database not initialized');
     }
 
-    return new Promise((resolve, reject) => {
-      this.db!.get(sql, params, (err, row) => {
-        if (err) {
-          reject(new Error(`Query failed: ${err.message}`));
-        } else {
-          resolve(row as T || null);
-        }
-      });
-    });
+    try {
+      const stmt = this.db.prepare(sql);
+      const row = stmt.get(...params) as T | undefined;
+      return row || null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Query failed: ${errorMessage}`);
+    }
   }
 
   /**
@@ -81,15 +162,17 @@ export class DevStreamDatabase {
       throw new Error('Database not initialized');
     }
 
-    return new Promise((resolve, reject) => {
-      this.db!.run(sql, params, function(err) {
-        if (err) {
-          reject(new Error(`Execute failed: ${err.message}`));
-        } else {
-          resolve({ lastID: this.lastID, changes: this.changes });
-        }
-      });
-    });
+    try {
+      const stmt = this.db.prepare(sql);
+      const info = stmt.run(...params);
+      return {
+        lastID: info.lastInsertRowid as number,
+        changes: info.changes
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Execute failed: ${errorMessage}`);
+    }
   }
 
   /**
@@ -100,24 +183,21 @@ export class DevStreamDatabase {
       return;
     }
 
-    return new Promise((resolve, reject) => {
-      this.db!.close((err) => {
-        if (err) {
-          reject(new Error(`Failed to close database: ${err.message}`));
-        } else {
-          console.error('DevStream database connection closed');
-          this.db = null;
-          resolve();
-        }
-      });
-    });
+    try {
+      this.db.close();
+      console.error('✅ DevStream database connection closed');
+      this.db = null;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to close database: ${errorMessage}`);
+    }
   }
 
   /**
    * Check if database is connected
    */
   isConnected(): boolean {
-    return this.db !== null;
+    return this.db !== null && this.db.open;
   }
 
   /**
