@@ -143,8 +143,9 @@ start_mcp_server() {
     return 0
   fi
 
-  # Start production server in background
-  nohup node start-production.js > "$PROJECT_ROOT/devstream-server.log" 2>&1 &
+  # Start production server in background with memory optimization flags
+  # Context7 best practice: Increase heap size and expose GC for long-running Node.js processes
+  nohup node --max-old-space-size=8192 --expose-gc start-production.js > "$PROJECT_ROOT/devstream-server.log" 2>&1 &
   local server_pid=$!
 
   print_info "Server PID: $server_pid"

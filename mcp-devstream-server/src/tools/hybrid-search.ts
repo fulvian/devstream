@@ -63,7 +63,7 @@ export class HybridSearchEngine {
   /**
    * Perform hybrid search combining vector and keyword search with RRF
    * Context7 pattern: Based on sqlite-vec NBC headlines example
-   * With performance metrics collection
+   * With performance metrics collection and memory optimization
    */
   async search(
     query: string,
@@ -92,7 +92,8 @@ export class HybridSearchEngine {
         return this.ftsOnlySearch(query, searchConfig.k);
       }
 
-      // Convert embedding to Buffer for sqlite-vec
+      // Context7 best practice: Convert embedding to Buffer for sqlite-vec
+      // Memory optimization: Use typed array directly, let Node.js handle buffer lifecycle
       const embeddingFloat32 = new Float32Array(queryEmbedding);
       const embeddingBuffer = Buffer.from(embeddingFloat32.buffer);
 
@@ -118,7 +119,7 @@ export class HybridSearchEngine {
         ),
         combined AS (
           SELECT
-            semantic_memory.id,
+            semantic_memory.id as memory_id,
             semantic_memory.content,
             semantic_memory.content_type,
             semantic_memory.created_at,
@@ -167,6 +168,16 @@ export class HybridSearchEngine {
         // Track query performance over time
         if (results.length > 0 && results[0].combined_rank) {
           globalQueryTracker.recordQuery(query, results[0].combined_rank);
+        }
+
+        // Context7 best practice: Explicit cleanup to help V8 GC
+        // Clear references to help Node.js garbage collector reclaim memory faster
+        // This is critical for preventing heap exhaustion in long-running processes
+        queryEmbedding.length = 0;  // Clear embedding array
+
+        // Trigger GC if available (requires --expose-gc flag)
+        if (global.gc && results.length > 0) {
+          global.gc();
         }
 
         return results;
