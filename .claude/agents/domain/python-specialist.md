@@ -1,6 +1,6 @@
 ---
 name: python-specialist
-description: Use this agent for Python development tasks including FastAPI, Django, async programming, type hints, and testing. Specializes in modern Python 3.11+ patterns, pytest, and production-ready code. Invoke for Python APIs, async operations, type-safe implementations, or Python performance optimization.
+description: MUST BE USED for Python development tasks including FastAPI, Django, async programming, and testing. Use PROACTIVELY for Python 3.11+ implementations requiring type safety, pytest testing, or async patterns. Specializes in production-ready, type-safe Python code.
 model: sonnet
 ---
 

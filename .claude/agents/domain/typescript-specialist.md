@@ -1,6 +1,6 @@
 ---
 name: typescript-specialist
-description: Use this agent for TypeScript development including React, Next.js, Node.js APIs, and frontend architecture. Specializes in type-safe React patterns, Server Components, performance optimization, and modern TypeScript 5.0+ features. Invoke for React components, Next.js applications, Node.js backends, or TypeScript refactoring.
+description: MUST BE USED for TypeScript development including React, Next.js, and Node.js APIs. Use PROACTIVELY for type-safe React patterns, Server Components, or TypeScript 5.0+ features. Specializes in frontend architecture and performance optimization.
 model: sonnet
 ---
 
