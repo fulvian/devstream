@@ -48,10 +48,13 @@ class DevStreamLogger:
         """
         Configure structlog per DevStream needs.
 
+        Context7 Best Practice: Use structlog.configure with cache_logger_on_first_use
+        for thread-safe, performance-optimized logging without logging.basicConfig issues.
+
         Args:
             log_level: Logging level string
         """
-        # Configure processors
+        # Configure structlog ONLY (Context7 pattern - avoid logging.basicConfig in multi-logger scenarios)
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -66,20 +69,24 @@ class DevStreamLogger:
             ],
             context_class=dict,
             logger_factory=structlog.stdlib.LoggerFactory(),
-            cache_logger_on_first_use=True,
+            cache_logger_on_first_use=True,  # Performance optimization + thread safety
         )
 
-        # Setup standard logging
-        logging.basicConfig(
-            format="%(message)s",
-            level=getattr(logging, log_level.upper()),
-            handlers=[
-                logging.FileHandler(
-                    self.log_dir / f'{self.hook_name}.jsonl'
-                ),
-                logging.StreamHandler(sys.stderr)
-            ]
-        )
+        # Setup standard logging handlers manually (Context7 pattern - avoid basicConfig)
+        root_logger = logging.getLogger()
+        if not root_logger.handlers:
+            # Set level
+            root_logger.setLevel(getattr(logging, log_level.upper()))
+
+            # Add file handler
+            file_handler = logging.FileHandler(self.log_dir / f'{self.hook_name}.jsonl')
+            file_handler.setFormatter(logging.Formatter('%(message)s'))
+            root_logger.addHandler(file_handler)
+
+            # Add stderr handler
+            stream_handler = logging.StreamHandler(sys.stderr)
+            stream_handler.setFormatter(logging.Formatter('%(message)s'))
+            root_logger.addHandler(stream_handler)
 
     def log_hook_start(
         self,
