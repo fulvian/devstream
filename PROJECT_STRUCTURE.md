@@ -8,7 +8,14 @@ This document outlines the organized structure of the DevStream project followin
 devstream/
 ├── .archive/                    # Archived files (prototypes, deprecated, temp)
 ├── .benchmarks/                 # Performance benchmarks data
-├── .claude/                     # Claude Code session state
+├── .claude/                     # Claude Code session state and agents
+│   ├── agents/                  # Custom agent definitions
+│   │   ├── README.md           # Agent system overview
+│   │   ├── orchestrator/       # Orchestrator agents (tech-lead)
+│   │   ├── domain/             # Domain specialist agents (python, typescript)
+│   │   └── qa/                 # Quality assurance agents (code-reviewer)
+│   ├── hooks/                  # Hook system implementations
+│   └── state/                  # Session state files
 ├── .config/                     # Tool-specific configurations
 ├── config/                      # Application configuration files
 ├── data/                        # Runtime data (databases, logs)
@@ -105,6 +112,37 @@ Organized deprecated and prototype files:
 └── temp/                    # Temporary development artifacts
     └── memory_system_test_results.md
 ```
+
+## 🤖 Custom Agents (`.claude/agents/`)
+
+DevStream includes a hierarchical team of specialized AI agents:
+
+```
+.claude/agents/
+├── README.md                    # Agent system documentation
+├── orchestrator/
+│   └── tech-lead.md            # Multi-stack coordination agent
+├── domain/
+│   ├── python-specialist.md    # Python development specialist
+│   └── typescript-specialist.md # TypeScript/React specialist
+└── qa/
+    └── code-reviewer.md        # Code quality and security reviewer
+```
+
+**Agent Types**:
+- **Orchestrator**: Coordinates complex multi-stack tasks (tech-lead)
+- **Domain Specialists**: Language/framework experts (python, typescript)
+- **QA Agents**: Quality, security, performance validation (code-reviewer)
+
+**Usage**:
+```bash
+@tech-lead Build full-stack user management feature    # Orchestrates workflow
+@python-specialist Create FastAPI endpoint            # Direct Python tasks
+@typescript-specialist Build React dashboard          # Direct TypeScript tasks
+@code-reviewer Review implementation before commit    # Quality gate (MANDATORY)
+```
+
+See `.claude/agents/README.md` for complete agent documentation.
 
 ## 🔧 Configuration Files
 
