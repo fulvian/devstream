@@ -75,6 +75,121 @@ Questo file definisce la metodologia di lavoro e le best practice per lo svilupp
 ✅ DELIVERABLE: Sistema validato e production-ready
 ```
 
+## 🐍 Python Virtual Environment Management
+
+### 🚨 REGOLA CRITICA: Gestione Ambiente Python
+
+**SEMPRE utilizzare il venv di progetto per TUTTI i comandi Python.**
+
+#### Configurazione Venv Standard
+```bash
+# Nome venv: .[nome_root_progetto]
+# Per DevStream: .devstream
+# Python version: 3.11
+# Location: project_root/.devstream/
+```
+
+#### Workflow Obbligatorio
+
+**1. All'Inizio di OGNI Sessione**
+```bash
+# Check 1: Verificare esistenza venv
+if [ ! -d ".devstream" ]; then
+  echo "❌ Venv non trovato - creazione necessaria"
+  # Trigger creazione (vedi sotto)
+fi
+
+# Check 2: Verificare Python version
+.devstream/bin/python --version  # Must be Python 3.11.x
+
+# Check 3: Verificare dipendenze critiche
+.devstream/bin/python -m pip list | grep -E "(cchooks|aiohttp|structlog)"
+# Se mancanti → installare
+```
+
+**2. Prima Installazione (Se Venv Non Esiste)**
+```bash
+# Step 1: Creare venv con Python 3.11
+python3.11 -m venv .devstream
+
+# Step 2: Upgrade pip
+.devstream/bin/python -m pip install --upgrade pip
+
+# Step 3: Installare dipendenze base
+.devstream/bin/python -m pip install -r requirements.txt
+
+# Step 4: Installare dipendenze hook system
+.devstream/bin/python -m pip install "cchooks>=0.1.4" "aiohttp>=3.8.0" "structlog>=23.0.0" "python-dotenv>=1.0.0"
+
+# Step 5: Verificare installazione
+.devstream/bin/python -m pip list | head -20
+```
+
+**3. Esecuzione Comandi Python**
+```bash
+# ❌ MAI usare python globale
+python script.py                    # WRONG
+python3 script.py                   # WRONG
+uv run --script script.py           # WRONG (crea ambiente isolato)
+
+# ✅ SEMPRE usare venv di progetto
+.devstream/bin/python script.py     # CORRECT
+.devstream/bin/python -m pytest     # CORRECT
+.devstream/bin/python -m pip install pkg  # CORRECT
+```
+
+**4. Hook System Configuration**
+```json
+// .claude/settings.json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "hooks": [{
+        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py"
+      }]
+    }]
+  }
+}
+```
+
+#### Troubleshooting Common Issues
+
+**Problema**: `ModuleNotFoundError: No module named 'xxx'`
+```bash
+# Soluzione:
+.devstream/bin/python -m pip install xxx
+```
+
+**Problema**: Hook non si eseguono
+```bash
+# Check 1: Venv esiste?
+ls -la .devstream/bin/python
+
+# Check 2: Dipendenze hook presenti?
+.devstream/bin/python -m pip list | grep cchooks
+
+# Check 3: Settings.json corretto?
+cat .claude/settings.json | grep -A 2 "command"
+```
+
+**Problema**: Python version sbagliata
+```bash
+# Ricreare venv con version corretta
+rm -rf .devstream
+python3.11 -m venv .devstream
+.devstream/bin/python -m pip install -r requirements.txt
+```
+
+#### Best Practices
+
+1. **✅ Commit `.python-version`** se usi pyenv
+2. **❌ NON committare `.devstream/`** (già in .gitignore)
+3. **✅ Documentare dipendenze** in requirements.txt o pyproject.toml
+4. **✅ Pin versioni critiche** (e.g., `cchooks==0.1.4`)
+5. **✅ Test su venv pulito** prima di commit
+
+---
+
 ## 🛠 Tools e Strumenti
 
 ### Context7 Integration

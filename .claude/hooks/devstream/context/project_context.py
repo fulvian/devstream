@@ -98,6 +98,27 @@ class SessionStartHook:
 
         return "\n".join(context_parts)
 
+    def get_previous_session_summary(self) -> Optional[str]:
+        """
+        Read previous session summary if available.
+
+        Returns:
+            Previous session summary or None
+        """
+        summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+        if not summary_file.exists():
+            return None
+
+        try:
+            summary = summary_file.read_text()
+            # Delete file after reading (one-time display)
+            summary_file.unlink()
+            return summary
+        except Exception as e:
+            self.base.debug_log(f"Failed to read session summary: {e}")
+            return None
+
     async def process(self, context: SessionStartContext) -> None:
         """
         Main hook processing logic.
@@ -114,14 +135,28 @@ class SessionStartHook:
         self.base.debug_log("Session start - initializing project context")
 
         try:
+            # Check for previous session summary FIRST
+            prev_summary = self.get_previous_session_summary()
+
             # Get project information
             project_info = self.get_project_info()
 
             # Format context
             project_context = self.format_project_context(project_info)
 
+            # If we have a previous session summary, prepend it to the project context
+            if prev_summary:
+                summary_section = (
+                    "\n" + "=" * 60 + "\n"
+                    "📋 Previous Session Summary\n"
+                    + "=" * 60 + "\n"
+                    + prev_summary + "\n"
+                    + "=" * 60 + "\n\n"
+                )
+                project_context = summary_section + project_context
+
             if project_context:
-                # Inject project context
+                # Inject combined context (summary + project info)
                 self.base.inject_context(project_context)
                 self.base.success_feedback("Project context loaded")
             else:

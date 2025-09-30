@@ -174,9 +174,9 @@ export class TaskTools {
         const planId = this.generateId();
         await this.database.execute(`
           INSERT INTO intervention_plans (
-            id, title, description, objectives, status, priority,
+            id, title, description, objectives, expected_outcome, status, priority,
             estimated_hours, actual_hours, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
         `, [
           planId,
           input.project,
@@ -186,6 +186,7 @@ export class TaskTools {
             'Implement core functionality',
             'Ensure quality and testing'
           ]),
+          `Successful completion of ${input.project} with all objectives met`,
           'active',
           7, // Default priority
           100, // Default estimated hours
@@ -220,7 +221,7 @@ export class TaskTools {
           await this.database.execute(`
             INSERT INTO phases (
               id, plan_id, name, description, sequence_order, status,
-              estimated_hours, actual_hours, created_at, updated_at
+              estimated_minutes, actual_minutes, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
           `, [
             phaseId,
@@ -229,8 +230,8 @@ export class TaskTools {
             `Auto-created phase for ${input.phase_name}`,
             phaseOrder,
             'active',
-            20, // Default estimated hours for phase
-            0   // Initial actual hours
+            1200, // Default estimated minutes for phase (20 hours)
+            0     // Initial actual minutes
           ]);
 
           console.error(`[DEBUG] Phase INSERT completed`);
