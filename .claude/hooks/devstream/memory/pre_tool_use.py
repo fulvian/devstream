@@ -2,426 +2,236 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "pydantic>=2.0.0",
-#     "python-dotenv>=1.0.0",
+#     "cchooks>=0.1.4",
 #     "aiohttp>=3.8.0",
+#     "structlog>=23.0.0",
+#     "python-dotenv>=1.0.0",
 # ]
 # ///
 
 """
-DevStream PreToolUse Hook - Context Injection dalla Memoria
-Context7-compliant intelligent context injection da DevStream semantic memory.
+DevStream PreToolUse Hook - Context Injection before Write/Edit
+Context7 + DevStream hybrid context assembly con graceful fallback.
 """
 
-import json
 import sys
-import os
 import asyncio
-import time
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Optional, Dict, Any
 
-# Import DevStream utilities
-sys.path.append(str(Path(__file__).parent.parent / 'utils'))
-from common import DevStreamHookBase, get_project_context
-from logger import get_devstream_logger
+# Add parent directories to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
-# Import Intelligent Context Injector
-sys.path.append(str(Path(__file__).parent.parent / 'context'))
-from intelligent_context_injector import IntelligentContextInjector
+from cchooks import safe_create_context, PreToolUseContext
+from devstream_base import DevStreamHookBase
+from context7_client import Context7Client
+from mcp_client import get_mcp_client
 
-class PreToolUseHook(DevStreamHookBase):
+
+class PreToolUseHook:
     """
-    PreToolUse hook per intelligent context injection da memoria semantica.
-    Implementa Context7-validated patterns per context assembly.
+    PreToolUse hook for intelligent context injection.
+    Combines Context7 library docs + DevStream semantic memory.
     """
 
     def __init__(self):
-        super().__init__('pre_tool_use')
-        self.structured_logger = get_devstream_logger('pre_tool_use')
-        self.start_time = time.time()
+        self.base = DevStreamHookBase("pre_tool_use")
+        self.mcp_client = get_mcp_client()
+        self.context7 = Context7Client(self.mcp_client)
 
-        # Initialize intelligent context injector
-        self.context_injector = IntelligentContextInjector()
-
-        # Legacy fallback thresholds (for compatibility)
-        self.min_relevance_threshold = 0.3
-        self.max_context_tokens = 1000
-        self.max_memories = 5
-
-    async def process_tool_call(self, input_data: dict) -> None:
+    async def get_context7_docs(self, file_path: str, content: str) -> Optional[str]:
         """
-        Process tool call e inject relevant context.
+        Get Context7 documentation if relevant library detected.
 
         Args:
-            input_data: JSON input from Claude Code PreToolUse
+            file_path: Path to file being edited
+            content: File content
+
+        Returns:
+            Formatted Context7 docs or None
         """
-        self.structured_logger.log_hook_start(input_data, {"phase": "pre_tool_use"})
-
         try:
-            # Extract tool information
-            tool_name = input_data.get('tool_name', 'unknown')
-            tool_input = input_data.get('tool_input', {})
-            session_id = input_data.get('session_id', 'unknown')
+            # Build query from file path and content preview
+            query = f"{file_path} {content[:500]}"
 
-            # Determine if context injection is needed
-            injection_needed = await self.should_inject_context(tool_name, tool_input)
+            # Check if Context7 should trigger
+            if not await self.context7.should_trigger_context7(query):
+                self.base.debug_log("Context7 not triggered for this file")
+                return None
 
-            if not injection_needed:
-                self.logger.debug(f"No context injection needed for {tool_name}")
-                self.success_exit()
-                return
+            self.base.debug_log("Context7 triggered - searching for docs")
 
-            # Generate context query from tool call
-            context_query = await self.generate_context_query(tool_name, tool_input)
+            # Search and retrieve documentation
+            result = await self.context7.search_and_retrieve(query)
 
-            # Use intelligent context injection
-            tool_context = {
-                'tool_name': tool_name,
-                'tool_input': tool_input,
-                'session_id': session_id
-            }
-
-            intelligent_context = await self.context_injector.inject_intelligent_context(
-                query_context={},  # Empty query context for tool-driven injection
-                tool_context=tool_context
-            )
-
-            # Inject intelligent context if found
-            if intelligent_context:
-                await self.inject_context(intelligent_context)
-                self.logger.info(f"Injected intelligent context for {tool_name}")
+            if result.success and result.docs:
+                self.base.success_feedback(f"Context7 docs retrieved: {result.library_id}")
+                return self.context7.format_docs_for_context(result)
             else:
-                # Fallback to legacy context retrieval
-                context_query = await self.generate_context_query(tool_name, tool_input)
-                legacy_context = await self.retrieve_context(context_query, session_id)
-
-                if legacy_context:
-                    await self.inject_context(legacy_context)
-                    self.logger.info(f"Injected legacy context for {tool_name}")
-                else:
-                    self.logger.debug(f"No relevant context found for {tool_name}")
-
-            # Log performance metrics
-            execution_time = (time.time() - self.start_time) * 1000
-            self.structured_logger.log_performance_metrics(execution_time)
+                self.base.debug_log(f"Context7 search failed: {result.error}")
+                return None
 
         except Exception as e:
-            self.structured_logger.log_hook_error(e, {"tool_name": tool_name})
-            raise
+            self.base.debug_log(f"Context7 error: {e}")
+            return None
 
-    async def should_inject_context(self, tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    async def get_devstream_memory(self, file_path: str, content: str) -> Optional[str]:
         """
-        Determine if context injection is beneficial per questo tool call.
+        Search DevStream memory for relevant context.
 
         Args:
-            tool_name: Name of tool being called
-            tool_input: Tool input parameters
+            file_path: Path to file being edited
+            content: File content preview
 
         Returns:
-            True if context injection should be performed
+            Formatted memory context or None
         """
-        # Always inject for MCP DevStream tools
-        if tool_name.startswith('mcp__devstream__'):
-            return True
+        try:
+            # Build search query
+            query = f"{Path(file_path).name} {content[:300]}"
 
-        # Inject for code editing operations
-        if tool_name in ['Edit', 'MultiEdit', 'Write', 'NotebookEdit']:
-            # Check if working on DevStream-related files
-            file_path = tool_input.get('file_path', '')
-            if any(keyword in file_path.lower() for keyword in [
-                'devstream', 'hook', 'memory', 'task', 'claude'
-            ]):
-                return True
+            self.base.debug_log(f"Searching DevStream memory: {query[:50]}...")
 
-        # Inject for search operations that might benefit from context
-        if tool_name in ['Grep', 'Glob', 'WebSearch']:
-            pattern_or_query = tool_input.get('pattern', tool_input.get('query', ''))
-            if any(keyword in pattern_or_query.lower() for keyword in [
-                'devstream', 'memory', 'hook', 'task', 'claude', 'mcp'
-            ]):
-                return True
+            # Search memory via MCP
+            result = await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_search_memory",
+                {
+                    "query": query,
+                    "limit": 3
+                }
+            )
 
-        # Inject for bash commands related to DevStream
-        if tool_name == 'Bash':
-            command = tool_input.get('command', '')
-            if any(keyword in command.lower() for keyword in [
-                'devstream', 'uv run', '.claude', 'hook', 'mcp'
-            ]):
-                return True
+            if not result or not result.get("results"):
+                self.base.debug_log("No relevant memory found")
+                return None
 
-        return False
+            # Format memory results
+            memory_items = result.get("results", [])
+            if not memory_items:
+                return None
 
-    async def generate_context_query(
+            formatted = "# DevStream Memory Context\n\n"
+            for i, item in enumerate(memory_items[:3], 1):
+                content = item.get("content", "")[:300]
+                score = item.get("relevance_score", 0.0)
+                formatted += f"## Result {i} (relevance: {score:.2f})\n{content}\n\n"
+
+            self.base.success_feedback(f"Found {len(memory_items)} relevant memories")
+            return formatted
+
+        except Exception as e:
+            self.base.debug_log(f"Memory search error: {e}")
+            return None
+
+    async def assemble_context(
         self,
-        tool_name: str,
-        tool_input: Dict[str, Any]
-    ) -> str:
-        """
-        Generate search query per context retrieval.
-
-        Args:
-            tool_name: Tool name
-            tool_input: Tool input parameters
-
-        Returns:
-            Context search query
-        """
-        query_parts = [tool_name]
-
-        # Add specific query parts based on tool type
-        if tool_name in ['Edit', 'MultiEdit', 'Write']:
-            file_path = tool_input.get('file_path', '')
-            if file_path:
-                # Add file extension and directory
-                path_obj = Path(file_path)
-                query_parts.append(path_obj.suffix.lstrip('.'))
-                query_parts.extend(path_obj.parts[-2:])  # Last 2 path components
-
-            # Add content keywords if available
-            content = tool_input.get('new_string', tool_input.get('content', ''))
-            if content:
-                # Extract key terms from content
-                content_words = content.split()[:10]  # First 10 words
-                query_parts.extend([w for w in content_words if len(w) > 3])
-
-        elif tool_name == 'Bash':
-            command = tool_input.get('command', '')
-            command_words = command.split()[:5]  # First 5 command words
-            query_parts.extend(command_words)
-
-        elif tool_name in ['Grep', 'Glob']:
-            pattern = tool_input.get('pattern', '')
-            query_parts.append(pattern)
-
-        elif tool_name.startswith('mcp__devstream__'):
-            # Extract MCP operation
-            operation = tool_name.replace('mcp__devstream__', '')
-            query_parts.append(operation)
-
-            # Add specific parameters
-            if 'query' in tool_input:
-                query_parts.append(tool_input['query'])
-            if 'content_type' in tool_input:
-                query_parts.append(tool_input['content_type'])
-
-        # Clean and join query parts
-        query_parts = [part.strip() for part in query_parts if part.strip()]
-        return ' '.join(query_parts[:8])  # Limit query length
-
-    async def retrieve_context(
-        self,
-        query: str,
-        session_id: str
+        file_path: str,
+        content: str
     ) -> Optional[str]:
         """
-        Retrieve relevant context from DevStream memory.
+        Assemble hybrid context from Context7 + DevStream memory.
 
         Args:
-            query: Context search query
-            session_id: Current session ID
+            file_path: File being edited
+            content: File content
 
         Returns:
             Assembled context string or None
         """
-        # Search DevStream memory via MCP
-        search_params = {
-            'query': query,
-            'limit': self.max_memories,
-            'content_type': None  # Search all types
-        }
+        context_parts = []
 
-        search_response = await self.call_devstream_mcp(
-            'devstream_search_memory',
-            search_params
-        )
+        # Get Context7 docs (if relevant)
+        context7_docs = await self.get_context7_docs(file_path, content)
+        if context7_docs:
+            context_parts.append(context7_docs)
 
-        if not search_response:
-            self.logger.warning("Failed to search DevStream memory")
+        # Get DevStream memory
+        memory_context = await self.get_devstream_memory(file_path, content)
+        if memory_context:
+            context_parts.append(memory_context)
+
+        if not context_parts:
             return None
 
-        # Extract and process search results
-        memories = self.extract_memory_results(search_response)
+        # Assemble final context
+        assembled = "\n\n---\n\n".join(context_parts)
+        return f"# Enhanced Context for {Path(file_path).name}\n\n{assembled}"
 
-        if not memories:
-            return None
-
-        # Assemble context with token budget
-        assembled_context = await self.assemble_context(memories, query)
-
-        # Log context retrieval
-        self.structured_logger.log_context_injection(
-            context_type="memory_retrieval",
-            content_size=len(assembled_context) if assembled_context else 0,
-            keywords=query.split()[:5]
-        )
-
-        return assembled_context
-
-    def extract_memory_results(self, search_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def process(self, context: PreToolUseContext) -> None:
         """
-        Extract memory results from MCP response.
+        Main hook processing logic.
 
         Args:
-            search_response: MCP search response
-
-        Returns:
-            List of memory entries
+            context: PreToolUse context from cchooks
         """
-        # This would need to parse actual MCP response format
-        # For now, simulate the structure
-        memories = []
+        # Check if hook should run
+        if not self.base.should_run():
+            self.base.debug_log("Hook disabled via config")
+            context.output.exit_success()
+            return
 
-        # Extract from response content (placeholder logic)
-        content = search_response.get('content', [])
-        if content and len(content) > 0:
-            text_content = content[0].get('text', '')
+        # Extract tool information
+        tool_name = context.tool_name
+        tool_input = context.tool_input
 
-            # Simple parsing - in real implementation would parse structured results
-            if 'Memory ID' in text_content and 'Content Preview' in text_content:
-                # Simulate extracted memory
-                memories.append({
-                    'id': 'simulated-memory-id',
-                    'content': text_content[:500],
-                    'relevance_score': 0.8,
-                    'content_type': 'context',
-                    'keywords': []
-                })
+        self.base.debug_log(f"Processing {tool_name} for {tool_input.get('file_path', 'unknown')}")
 
-        return memories
+        # Only process Write/Edit operations
+        if tool_name not in ["Write", "Edit", "MultiEdit"]:
+            context.output.exit_success()
+            return
 
-    async def assemble_context(
-        self,
-        memories: List[Dict[str, Any]],
-        query: str
-    ) -> str:
-        """
-        Assemble context from memories con token budget management.
+        # Extract file information
+        file_path = tool_input.get("file_path", "")
+        content = tool_input.get("content", "") or tool_input.get("new_string", "")
 
-        Args:
-            memories: List of memory entries
-            query: Original query
+        if not file_path:
+            self.base.debug_log("No file path in tool input")
+            context.output.exit_success()
+            return
 
-        Returns:
-            Assembled context string
-        """
-        if not memories:
-            return ""
+        try:
+            # Assemble context from multiple sources
+            enhanced_context = await self.assemble_context(file_path, content)
 
-        context_parts = [
-            "📋 DevStream Context (from memory):",
-            f"🔍 Query: {query}",
-            ""
-        ]
+            if enhanced_context:
+                # Inject context
+                self.base.inject_context(enhanced_context)
+                self.base.success_feedback(f"Context injected for {Path(file_path).name}")
+            else:
+                self.base.debug_log("No relevant context found")
 
-        current_tokens = self.estimate_tokens(' '.join(context_parts))
+            # Always allow the operation to proceed
+            context.output.exit_success()
 
-        for i, memory in enumerate(memories[:self.max_memories]):
-            memory_content = memory.get('content', '')
-            memory_tokens = self.estimate_tokens(memory_content)
+        except Exception as e:
+            # Non-blocking error - log and continue
+            self.base.warning_feedback(f"Context injection failed: {str(e)[:50]}")
+            context.output.exit_success()
 
-            # Check token budget
-            if current_tokens + memory_tokens > self.max_context_tokens:
-                break
 
-            # Add memory to context
-            relevance = memory.get('relevance_score', 0.0)
-            memory_preview = memory_content[:200] + "..." if len(memory_content) > 200 else memory_content
+def main():
+    """Main entry point for PreToolUse hook."""
+    # Create context using cchooks
+    ctx = safe_create_context()
 
-            context_parts.extend([
-                f"💾 Memory {i+1} (relevance: {relevance:.2f}):",
-                memory_preview,
-                ""
-            ])
+    # Verify it's PreToolUse context
+    if not isinstance(ctx, PreToolUseContext):
+        print(f"Error: Expected PreToolUseContext, got {type(ctx)}", file=sys.stderr)
+        sys.exit(1)
 
-            current_tokens += memory_tokens
-
-        # Add footer
-        context_parts.extend([
-            "---",
-            "🎯 Use this context to inform your approach and maintain consistency with DevStream patterns."
-        ])
-
-        return '\n'.join(context_parts)
-
-    def estimate_tokens(self, text: str) -> int:
-        """
-        Estimate token count for text.
-
-        Args:
-            text: Text to estimate
-
-        Returns:
-            Estimated token count
-        """
-        # Simple estimation: ~4 characters per token
-        return len(text) // 4
-
-    async def inject_context(self, context: str) -> None:
-        """
-        Inject context into Claude Code stream.
-
-        Args:
-            context: Context string to inject
-        """
-        # Output context (Context7 pattern)
-        self.output_context(context)
-
-        # Log injection
-        self.structured_logger.log_context_injection(
-            context_type="devstream_memory",
-            content_size=len(context),
-            keywords=context.split()[:10]
-        )
-
-    def should_approve_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
-        """
-        Determine if tool should be auto-approved con context.
-
-        Args:
-            tool_name: Tool name
-            tool_input: Tool input
-
-        Returns:
-            Approval reason or None
-        """
-        # Auto-approve DevStream MCP tools
-        if tool_name.startswith('mcp__devstream__'):
-            return "DevStream MCP operation - auto-approved with context"
-
-        # Auto-approve DevStream-related file operations
-        if tool_name in ['Edit', 'MultiEdit', 'Write']:
-            file_path = tool_input.get('file_path', '')
-            if 'devstream' in file_path.lower() or '.claude' in file_path:
-                return "DevStream file operation - auto-approved with context"
-
-        return None
-
-async def main():
-    """Main hook execution following Context7 patterns."""
+    # Create and run hook
     hook = PreToolUseHook()
 
     try:
-        # Read JSON input from stdin (Context7 pattern)
-        input_data = hook.read_stdin_json()
-
-        # Process the tool call
-        await hook.process_tool_call(input_data)
-
-        # Check for auto-approval
-        tool_name = input_data.get('tool_name', 'unknown')
-        tool_input = input_data.get('tool_input', {})
-
-        approval_reason = hook.should_approve_tool(tool_name, tool_input)
-        if approval_reason:
-            hook.approve_with_reason(approval_reason)
-        else:
-            # Success exit without approval
-            hook.success_exit()
-
+        # Run async processing
+        asyncio.run(hook.process(ctx))
     except Exception as e:
-        hook.error_exit(f"PreToolUse hook failed: {e}")
+        # Graceful failure - non-blocking
+        print(f"⚠️  DevStream: PreToolUse error", file=sys.stderr)
+        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

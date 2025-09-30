@@ -2,110 +2,161 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "pydantic>=2.0.0",
-#     "python-dotenv>=1.0.0",
+#     "cchooks>=0.1.4",
+#     "aiohttp>=3.8.0",
 #     "structlog>=23.0.0",
+#     "python-dotenv>=1.0.0",
 # ]
 # ///
 
 """
-DevStream Project Context Hook - Basic Project Context Injection
-Context7-compliant basic project context per session initialization.
+DevStream SessionStart Hook - Project Context Initialization
+Lightweight project context injection at session start.
 """
 
-import json
 import sys
-import os
-import time
-from datetime import datetime
+import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Optional, Dict, Any
 
-# Import DevStream utilities
-sys.path.append(str(Path(__file__).parent.parent / 'utils'))
-from common import DevStreamHookBase, get_project_context
-from logger import get_devstream_logger
+# Add parent directories to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
-class ProjectContextHook(DevStreamHookBase):
+from cchooks import safe_create_context, SessionStartContext
+from devstream_base import DevStreamHookBase
+
+
+class SessionStartHook:
     """
-    Basic project context hook per session initialization.
-    Lightweight context injection per DevStream projects.
+    SessionStart hook for lightweight project context injection.
+    Provides basic project overview at session initialization.
     """
 
     def __init__(self):
-        super().__init__('project_context')
-        self.structured_logger = get_devstream_logger('project_context')
-        self.start_time = time.time()
+        self.base = DevStreamHookBase("session_start")
 
-    async def process_context_injection(self, input_data: dict) -> None:
+    def get_project_info(self) -> Dict[str, Any]:
         """
-        Process basic project context injection.
-
-        Args:
-            input_data: Session input data
-        """
-        self.structured_logger.log_hook_start(input_data, {"phase": "project_context"})
-
-        try:
-            # Get project context
-            context = get_project_context()
-
-            # Generate basic context
-            basic_context = self.generate_basic_context(context)
-
-            # Inject if significant
-            if basic_context and len(basic_context) > 100:
-                self.output_context(basic_context)
-                self.logger.info("Basic project context injected")
-
-            # Log performance
-            execution_time = (time.time() - self.start_time) * 1000
-            self.structured_logger.log_performance_metrics(execution_time)
-
-        except Exception as e:
-            self.structured_logger.log_hook_error(e, {"input_data": input_data})
-            # Don't raise - context injection is optional
-            pass
-
-    def generate_basic_context(self, context: Dict[str, Any]) -> str:
-        """
-        Generate basic project context.
-
-        Args:
-            context: Project context
+        Get basic project information.
 
         Returns:
-            Basic context string
+            Project info dict
         """
-        if not context.get('is_devstream_project', False):
+        project_root = Path.cwd()
+
+        # Check if this is a DevStream project
+        is_devstream = (
+            (project_root / ".claude" / "hooks" / "devstream").exists() and
+            (project_root / "data" / "devstream.db").exists()
+        )
+
+        if not is_devstream:
+            return {"is_devstream_project": False}
+
+        return {
+            "is_devstream_project": True,
+            "project_name": project_root.name,
+            "methodology": "Research-Driven Development",
+            "features": [
+                "Task Management & Tracking",
+                "Semantic Memory Storage",
+                "Context7 Library Integration",
+                "Hook System with cchooks"
+            ]
+        }
+
+    def format_project_context(self, project_info: Dict[str, Any]) -> str:
+        """
+        Format project context for display.
+
+        Args:
+            project_info: Project information
+
+        Returns:
+            Formatted context string
+        """
+        if not project_info.get("is_devstream_project"):
             return ""
 
         context_parts = [
-            "📁 DevStream Project Context",
-            f"🏗️ Methodology: {context.get('methodology', 'Research-Driven Development')}",
-            f"🎯 Focus: Task management + semantic memory",
-            ""
+            "# 📁 DevStream Project",
+            "",
+            f"**Project**: {project_info['project_name']}",
+            f"**Methodology**: {project_info['methodology']}",
+            "",
+            "**Key Features**:",
         ]
 
-        return '\n'.join(context_parts)
+        for feature in project_info.get("features", []):
+            context_parts.append(f"- {feature}")
 
-async def main():
-    """Main hook execution."""
-    hook = ProjectContextHook()
+        context_parts.extend([
+            "",
+            "💡 *All hooks using cchooks with graceful fallback strategy*",
+            ""
+        ])
+
+        return "\n".join(context_parts)
+
+    async def process(self, context: SessionStartContext) -> None:
+        """
+        Main hook processing logic.
+
+        Args:
+            context: SessionStart context from cchooks
+        """
+        # Check if hook should run
+        if not self.base.should_run():
+            self.base.debug_log("Hook disabled via config")
+            context.output.exit_success()
+            return
+
+        self.base.debug_log("Session start - initializing project context")
+
+        try:
+            # Get project information
+            project_info = self.get_project_info()
+
+            # Format context
+            project_context = self.format_project_context(project_info)
+
+            if project_context:
+                # Inject project context
+                self.base.inject_context(project_context)
+                self.base.success_feedback("Project context loaded")
+            else:
+                self.base.debug_log("Not a DevStream project")
+
+            # Always allow the operation to proceed
+            context.output.exit_success()
+
+        except Exception as e:
+            # Non-blocking error - log and continue
+            self.base.warning_feedback(f"Project context failed: {str(e)[:50]}")
+            context.output.exit_success()
+
+
+def main():
+    """Main entry point for SessionStart hook."""
+    # Create context using cchooks
+    ctx = safe_create_context()
+
+    # Verify it's SessionStart context
+    if not isinstance(ctx, SessionStartContext):
+        print(f"Error: Expected SessionStartContext, got {type(ctx)}", file=sys.stderr)
+        sys.exit(1)
+
+    # Create and run hook
+    hook = SessionStartHook()
 
     try:
-        # Read input
-        input_data = hook.read_stdin_json()
-
-        # Process context injection
-        await hook.process_context_injection(input_data)
-
-        # Success exit
-        hook.success_exit()
-
+        # Run async processing
+        asyncio.run(hook.process(ctx))
     except Exception as e:
-        hook.error_exit(f"Project context hook failed: {e}")
+        # Graceful failure - non-blocking
+        print(f"⚠️  DevStream: SessionStart error", file=sys.stderr)
+        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()

@@ -2,451 +2,290 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "pydantic>=2.0.0",
-#     "python-dotenv>=1.0.0",
+#     "cchooks>=0.1.4",
 #     "aiohttp>=3.8.0",
 #     "structlog>=23.0.0",
+#     "python-dotenv>=1.0.0",
 # ]
 # ///
 
 """
-DevStream User Query Context Enhancer - Enhanced UserPromptSubmit Hook
-Context7-compliant intelligent context enhancement per user queries con semantic memory.
+DevStream UserPromptSubmit Hook - Context Enhancement before User Query
+Combines Context7 library docs, DevStream memory, and task detection.
 """
 
-import json
 import sys
-import os
 import asyncio
-import time
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Optional, Dict, Any, List
 
-# Import DevStream utilities
-sys.path.append(str(Path(__file__).parent.parent / 'utils'))
-from common import DevStreamHookBase, get_project_context
-from logger import get_devstream_logger
+# Add parent directories to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
+
+from cchooks import safe_create_context, UserPromptSubmitContext
+from devstream_base import DevStreamHookBase
+from context7_client import Context7Client
 from mcp_client import get_mcp_client
 
-# Import Intelligent Context Injector
-sys.path.append(str(Path(__file__).parent))
-from intelligent_context_injector import IntelligentContextInjector
 
-# Import Task Lifecycle Manager
-sys.path.append(str(Path(__file__).parent.parent / 'tasks'))
-from task_lifecycle_manager import TaskLifecycleManager, TaskLifecycleEvent
-
-class UserQueryContextEnhancer(DevStreamHookBase):
+class UserPromptSubmitHook:
     """
-    Enhanced UserPromptSubmit hook con intelligent context injection.
-    Combina memory storage, context enhancement e task lifecycle management.
+    UserPromptSubmit hook for intelligent query enhancement.
+    Combines Context7 research + DevStream memory + task lifecycle detection.
     """
 
     def __init__(self):
-        super().__init__('user_query_context_enhancer')
-        self.structured_logger = get_devstream_logger('user_query_context_enhancer')
+        self.base = DevStreamHookBase("user_prompt_submit")
         self.mcp_client = get_mcp_client()
-        self.start_time = time.time()
+        self.context7 = Context7Client(self.mcp_client)
 
-        # Initialize intelligent systems
-        self.context_injector = IntelligentContextInjector()
-        self.lifecycle_manager = TaskLifecycleManager()
-
-        # Enhanced processing configuration
-        self.enable_context_enhancement = True
-        self.enable_task_lifecycle = True
-        self.min_query_length = 10
-        self.context_injection_threshold = 0.5
-
-    async def process_enhanced_user_prompt(self, input_data: dict) -> None:
+    async def detect_context7_trigger(self, user_input: str) -> bool:
         """
-        Process user prompt con enhanced context injection e task lifecycle management.
-
-        Args:
-            input_data: JSON input from Claude Code UserPromptSubmit
-        """
-        self.structured_logger.log_hook_start(input_data, {
-            "phase": "enhanced_user_prompt_processing"
-        })
-
-        try:
-            # Extract user input
-            user_input = input_data.get('user_input', '')
-            session_id = input_data.get('session_id', 'unknown')
-
-            if len(user_input) < self.min_query_length:
-                self.logger.debug("User input too short for enhancement")
-                self.success_exit()
-                return
-
-            self.logger.info(f"Processing enhanced user prompt: {len(user_input)} chars")
-
-            # 1. Store user prompt in memory (always)
-            await self.store_user_prompt(user_input, session_id)
-
-            # 2. Intelligent context enhancement
-            enhanced_context = None
-            if self.enable_context_enhancement:
-                enhanced_context = await self.enhance_query_context(user_input, session_id)
-
-            # 3. Task lifecycle management
-            if self.enable_task_lifecycle:
-                await self.handle_task_lifecycle_implications(user_input, session_id)
-
-            # 4. Inject enhanced context if significant
-            if enhanced_context and self.should_inject_context(enhanced_context, user_input):
-                await self.inject_enhanced_context(enhanced_context)
-                self.logger.info("Enhanced context injected for user query")
-
-            # 5. Generate continuation hints if applicable
-            continuation_hints = await self.generate_continuation_hints(user_input)
-            if continuation_hints:
-                await self.inject_continuation_hints(continuation_hints)
-
-            # Log performance metrics
-            execution_time = (time.time() - self.start_time) * 1000
-            self.structured_logger.log_performance_metrics(execution_time)
-
-            self.logger.info(f"Enhanced user prompt processing completed")
-
-        except Exception as e:
-            self.structured_logger.log_hook_error(e, {"user_input": user_input})
-            raise
-
-    async def store_user_prompt(self, user_input: str, session_id: str) -> None:
-        """
-        Store user prompt in DevStream memory.
+        Detect if Context7 should be triggered for this query.
 
         Args:
             user_input: User input text
-            session_id: Session ID
-        """
-        # Classify prompt type
-        prompt_type = self.classify_prompt_type(user_input)
-
-        # Extract keywords
-        keywords = self.extract_keywords(user_input)
-
-        # Create memory content
-        memory_content = (
-            f"USER QUERY [{session_id}]: {user_input}. "
-            f"Type: {prompt_type}, Keywords: {', '.join(keywords[:5])}, "
-            f"Timestamp: {datetime.now().isoformat()}"
-        )
-
-        # Store in memory
-        await self.mcp_client.store_memory(
-            content=memory_content,
-            content_type="context",
-            keywords=keywords + ["user-query", prompt_type, session_id[:8]]
-        )
-
-        # Log memory operation
-        self.structured_logger.log_memory_operation(
-            operation="store",
-            content_type="context",
-            content_size=len(memory_content),
-            keywords=keywords[:3]
-        )
-
-    def classify_prompt_type(self, user_input: str) -> str:
-        """
-        Classify user prompt type.
-
-        Args:
-            user_input: User input
 
         Returns:
-            Prompt classification
+            True if Context7 should search for library docs
         """
-        input_lower = user_input.lower()
+        return await self.context7.should_trigger_context7(user_input)
 
-        # Implementation requests
-        if any(keyword in input_lower for keyword in [
-            'implement', 'create', 'build', 'develop', 'make', 'add'
-        ]):
-            return 'implementation'
-
-        # Debug/fix requests
-        elif any(keyword in input_lower for keyword in [
-            'fix', 'debug', 'error', 'problem', 'issue', 'bug'
-        ]):
-            return 'debugging'
-
-        # Questions/explanation requests
-        elif any(keyword in input_lower for keyword in [
-            'what', 'how', 'why', 'explain', 'show', 'tell'
-        ]):
-            return 'question'
-
-        # Analysis requests
-        elif any(keyword in input_lower for keyword in [
-            'analyze', 'review', 'check', 'examine', 'look'
-        ]):
-            return 'analysis'
-
-        # Task management
-        elif any(keyword in input_lower for keyword in [
-            'task', 'todo', 'complete', 'finish', 'done'
-        ]):
-            return 'task_management'
-
-        # General conversation
-        else:
-            return 'general'
-
-    def extract_keywords(self, text: str) -> List[str]:
+    async def get_context7_research(self, user_input: str) -> Optional[str]:
         """
-        Extract keywords from user input.
+        Get Context7 research for user query.
 
         Args:
-            text: Input text
+            user_input: User input text
 
         Returns:
-            List of keywords
+            Formatted Context7 docs or None
         """
-        # Use the same extraction method as intelligent context injector
-        from intelligent_context_injector import IntelligentContextInjector
-        injector = IntelligentContextInjector()
-        return injector.extract_key_terms(text)
+        try:
+            self.base.debug_log("Context7 triggered - searching for docs")
 
-    async def enhance_query_context(self, user_input: str, session_id: str) -> Optional[str]:
+            # Search and retrieve documentation
+            result = await self.context7.search_and_retrieve(user_input)
+
+            if result.success and result.docs:
+                self.base.success_feedback(f"Context7 docs: {result.library_id}")
+                return self.context7.format_docs_for_context(result)
+            else:
+                self.base.debug_log(f"Context7 search failed: {result.error}")
+                return None
+
+        except Exception as e:
+            self.base.debug_log(f"Context7 error: {e}")
+            return None
+
+    async def search_devstream_memory(self, user_input: str) -> Optional[str]:
         """
-        Enhance user query with intelligent context.
+        Search DevStream memory for relevant context.
 
         Args:
-            user_input: User input
-            session_id: Session ID
+            user_input: User input text
 
         Returns:
-            Enhanced context or None
+            Formatted memory context or None
         """
-        query_context = {
-            'user_input': user_input,
-            'session_id': session_id,
-            'timestamp': datetime.now().isoformat()
-        }
+        try:
+            self.base.debug_log(f"Searching DevStream memory: {user_input[:50]}...")
 
-        # Use intelligent context injector
-        enhanced_context = await self.context_injector.inject_intelligent_context(
-            query_context=query_context,
-            tool_context=None
-        )
-
-        return enhanced_context
-
-    async def handle_task_lifecycle_implications(self, user_input: str, session_id: str) -> None:
-        """
-        Handle task lifecycle implications of user query.
-
-        Args:
-            user_input: User input
-            session_id: Session ID
-        """
-        input_lower = user_input.lower()
-
-        # Check for task-related implications
-        event_data = {
-            'user_input': user_input,
-            'session_id': session_id,
-            'timestamp': datetime.now().isoformat()
-        }
-
-        # Task creation implications
-        if any(keyword in input_lower for keyword in [
-            'new task', 'create task', 'add task'
-        ]):
-            await self.lifecycle_manager.handle_lifecycle_event(
-                TaskLifecycleEvent.TASK_CREATED,
-                event_data
+            # Search memory via MCP
+            result = await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_search_memory",
+                {
+                    "query": user_input,
+                    "limit": 3
+                }
             )
 
-        # Task completion implications
-        elif any(keyword in input_lower for keyword in [
-            'complete', 'finished', 'done with'
-        ]):
-            await self.lifecycle_manager.handle_lifecycle_event(
-                TaskLifecycleEvent.TASK_COMPLETED,
-                event_data
-            )
+            if not result or not result.get("results"):
+                self.base.debug_log("No relevant memory found")
+                return None
 
-        # General task progress implications
-        elif any(keyword in input_lower for keyword in [
-            'working on', 'implementing', 'building'
-        ]):
-            await self.lifecycle_manager.handle_lifecycle_event(
-                TaskLifecycleEvent.PROGRESS_UPDATE,
-                event_data
-            )
+            # Format memory results
+            memory_items = result.get("results", [])
+            if not memory_items:
+                return None
 
-    def should_inject_context(self, context: str, user_input: str) -> bool:
+            formatted = "# DevStream Memory Context\n\n"
+            for i, item in enumerate(memory_items[:3], 1):
+                content = item.get("content", "")[:300]
+                score = item.get("relevance_score", 0.0)
+                formatted += f"## Result {i} (relevance: {score:.2f})\n{content}\n\n"
+
+            self.base.success_feedback(f"Found {len(memory_items)} relevant memories")
+            return formatted
+
+        except Exception as e:
+            self.base.debug_log(f"Memory search error: {e}")
+            return None
+
+    async def detect_task_lifecycle_event(self, user_input: str) -> Optional[Dict[str, str]]:
         """
-        Determine if context should be injected.
+        Detect task lifecycle events from user input.
 
         Args:
-            context: Enhanced context
-            user_input: User input
+            user_input: User input text
 
         Returns:
-            True if context should be injected
-        """
-        # Don't inject for very short contexts
-        if len(context) < 200:
-            return False
-
-        # Always inject for implementation and debugging queries
-        input_lower = user_input.lower()
-        high_value_patterns = [
-            'implement', 'create', 'build', 'fix', 'debug', 'error',
-            'devstream', 'hook', 'memory', 'task'
-        ]
-
-        if any(pattern in input_lower for pattern in high_value_patterns):
-            return True
-
-        # Check context relevance
-        context_lower = context.lower()
-        query_terms = set(user_input.lower().split())
-        context_terms = set(context_lower.split())
-
-        # Calculate overlap
-        overlap = len(query_terms.intersection(context_terms))
-        if overlap >= 3:  # Significant term overlap
-            return True
-
-        return False
-
-    async def inject_enhanced_context(self, context: str) -> None:
-        """
-        Inject enhanced context.
-
-        Args:
-            context: Context to inject
-        """
-        # Enhance context with user-friendly formatting
-        enhanced_context = f"""
-🔍 DevStream Context Enhancement
-
-{context}
-
-💡 This enhanced context was assembled from your previous work and DevStream's semantic memory to help provide more relevant and informed responses.
-
----
-"""
-
-        # Output enhanced context
-        self.output_context(enhanced_context)
-
-        # Log injection
-        self.structured_logger.log_context_injection(
-            context_type="enhanced_user_context",
-            content_size=len(enhanced_context),
-            keywords=["user-query", "enhancement", "devstream"]
-        )
-
-    async def generate_continuation_hints(self, user_input: str) -> Optional[str]:
-        """
-        Generate continuation hints for user query.
-
-        Args:
-            user_input: User input
-
-        Returns:
-            Continuation hints or None
+            Event data if detected, None otherwise
         """
         input_lower = user_input.lower()
 
-        # Implementation hints
-        if any(keyword in input_lower for keyword in ['implement', 'create', 'build']):
-            # Check if this relates to current active tasks
-            current_tasks = await self.get_current_active_tasks()
+        # Task creation patterns
+        if any(pattern in input_lower for pattern in [
+            "create task",
+            "new task",
+            "add task",
+            "start working on"
+        ]):
+            return {
+                "event_type": "task_creation",
+                "pattern": "User initiated new task",
+                "query": user_input[:100]
+            }
 
-            if current_tasks:
-                task_titles = [task.get('title', '') for task in current_tasks[:3]]
-                hints = [
-                    "💼 Active DevStream Tasks:",
-                    *[f"   • {title}" for title in task_titles if title],
-                    "",
-                    "Consider breaking implementation into TodoWrite tasks for better tracking."
-                ]
-                return '\n'.join(hints)
+        # Task completion patterns
+        elif any(pattern in input_lower for pattern in [
+            "complete",
+            "finished",
+            "done with",
+            "completed the",
+            "task complete"
+        ]):
+            return {
+                "event_type": "task_completion",
+                "pattern": "User indicated task completion",
+                "query": user_input[:100]
+            }
 
-        # Task management hints
-        elif 'task' in input_lower and any(keyword in input_lower for keyword in ['complete', 'done', 'finish']):
-            return """
-📋 Task Completion Tips:
-   • Use TodoWrite to mark tasks as completed
-   • The DevStream system will auto-detect completion patterns
-   • Progress is automatically tracked and stored in memory
-"""
-
-        # Hook development hints
-        elif 'hook' in input_lower:
-            return """
-🔗 DevStream Hook Development:
-   • All hooks are located in .claude/hooks/devstream/
-   • Follow Context7-compliant UV script patterns
-   • Include structured logging and error handling
-   • Test hooks individually before integration
-"""
+        # Implementation progress patterns
+        elif any(pattern in input_lower for pattern in [
+            "implement",
+            "build",
+            "create",
+            "working on"
+        ]):
+            return {
+                "event_type": "implementation_progress",
+                "pattern": "User starting implementation work",
+                "query": user_input[:100]
+            }
 
         return None
 
-    async def inject_continuation_hints(self, hints: str) -> None:
+    async def assemble_enhanced_context(
+        self,
+        user_input: str
+    ) -> Optional[str]:
         """
-        Inject continuation hints.
+        Assemble enhanced context from multiple sources.
 
         Args:
-            hints: Hints to inject
-        """
-        hint_context = f"""
-{hints}
-
----
-"""
-
-        self.output_context(hint_context)
-
-    async def get_current_active_tasks(self) -> List[Dict[str, Any]]:
-        """
-        Get current active tasks.
+            user_input: User input text
 
         Returns:
-            List of active tasks
+            Assembled enhanced context or None
         """
-        try:
-            tasks_response = await self.mcp_client.list_tasks(status="active")
+        context_parts = []
 
-            if tasks_response and tasks_response.get('content'):
-                content = tasks_response.get('content', [])
-                if content and len(content) > 0:
-                    text_content = content[0].get('text', '')
-                    # Parse tasks from response (simplified)
-                    if "Task ID:" in text_content:
-                        return [{"title": "Hook System Implementation", "id": "active-1"}]
+        # Check if Context7 should trigger
+        if await self.detect_context7_trigger(user_input):
+            context7_docs = await self.get_context7_research(user_input)
+            if context7_docs:
+                context_parts.append(context7_docs)
+
+        # Search DevStream memory
+        memory_context = await self.search_devstream_memory(user_input)
+        if memory_context:
+            context_parts.append(memory_context)
+
+        # Detect task lifecycle events
+        task_event = await self.detect_task_lifecycle_event(user_input)
+        if task_event:
+            event_context = f"""# Task Lifecycle Event Detected
+
+**Event Type**: {task_event['event_type']}
+**Pattern**: {task_event['pattern']}
+
+This query appears to be related to task management. Consider using TodoWrite for tracking progress.
+"""
+            context_parts.append(event_context)
+
+        if not context_parts:
+            return None
+
+        # Assemble final context
+        assembled = "\n\n---\n\n".join(context_parts)
+        return f"# Enhanced Context for Query\n\n{assembled}"
+
+    async def process(self, context: UserPromptSubmitContext) -> None:
+        """
+        Main hook processing logic.
+
+        Args:
+            context: UserPromptSubmit context from cchooks
+        """
+        # Check if hook should run
+        if not self.base.should_run():
+            self.base.debug_log("Hook disabled via config")
+            context.output.exit_success()
+            return
+
+        # Extract user input
+        user_input = context.user_input
+
+        if not user_input or len(user_input) < 10:
+            self.base.debug_log("User input too short for enhancement")
+            context.output.exit_success()
+            return
+
+        self.base.debug_log(f"Processing user query: {len(user_input)} chars")
+
+        try:
+            # Assemble enhanced context
+            enhanced_context = await self.assemble_enhanced_context(user_input)
+
+            if enhanced_context:
+                # Inject context
+                self.base.inject_context(enhanced_context)
+                self.base.success_feedback("Query context enhanced")
+            else:
+                self.base.debug_log("No relevant context found")
+
+            # Always allow the operation to proceed
+            context.output.exit_success()
 
         except Exception as e:
-            self.logger.warning(f"Failed to get active tasks: {e}")
+            # Non-blocking error - log and continue
+            self.base.warning_feedback(f"Context enhancement failed: {str(e)[:50]}")
+            context.output.exit_success()
 
-        return []
 
-async def main():
-    """Main hook execution following Context7 patterns."""
-    enhancer = UserQueryContextEnhancer()
+def main():
+    """Main entry point for UserPromptSubmit hook."""
+    # Create context using cchooks
+    ctx = safe_create_context()
+
+    # Verify it's UserPromptSubmit context
+    if not isinstance(ctx, UserPromptSubmitContext):
+        print(f"Error: Expected UserPromptSubmitContext, got {type(ctx)}", file=sys.stderr)
+        sys.exit(1)
+
+    # Create and run hook
+    hook = UserPromptSubmitHook()
 
     try:
-        # Read JSON input from stdin (Context7 pattern)
-        input_data = enhancer.read_stdin_json()
-
-        # Process enhanced user prompt
-        await enhancer.process_enhanced_user_prompt(input_data)
-
-        # Success exit
-        enhancer.success_exit()
-
+        # Run async processing
+        asyncio.run(hook.process(ctx))
     except Exception as e:
-        enhancer.error_exit(f"User query context enhancer failed: {e}")
+        # Graceful failure - non-blocking
+        print(f"⚠️  DevStream: UserPromptSubmit error", file=sys.stderr)
+        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
