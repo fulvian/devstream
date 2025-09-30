@@ -144,6 +144,15 @@ class DevStreamHookBase:
 
         return True
 
+    def is_memory_store_enabled(self) -> bool:
+        """
+        Check if memory storage is enabled.
+
+        Returns:
+            True if memory storage should be used
+        """
+        return os.getenv('DEVSTREAM_MEMORY_ENABLED', 'true').lower() == 'true'
+
     def inject_context(self, context_data: str) -> None:
         """
         Inject additional context into Claude session.
