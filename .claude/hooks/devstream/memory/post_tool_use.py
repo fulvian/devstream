@@ -6,18 +6,26 @@
 #     "aiohttp>=3.8.0",
 #     "structlog>=23.0.0",
 #     "python-dotenv>=1.0.0",
+#     "ollama>=0.1.0",
+#     "sqlite-vec>=0.1.0",
 # ]
 # ///
 
 """
-DevStream PostToolUse Hook - Memory Storage after Write/Edit
-Stores modified file content in DevStream semantic memory with embeddings.
+DevStream PostToolUse Hook - Memory Storage after Write/Edit with Embeddings
+
+Stores modified file content in DevStream semantic memory and generates
+embeddings using Ollama for semantic search capabilities.
+
+Phase 2 Enhancement: Inline embedding generation with graceful degradation.
 """
 
 import sys
 import asyncio
+import sqlite3
+import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
@@ -25,17 +33,30 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from cchooks import safe_create_context, PostToolUseContext
 from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
+from ollama_client import OllamaEmbeddingClient
+from sqlite_vec_helper import get_db_connection_with_vec
 
 
 class PostToolUseHook:
     """
-    PostToolUse hook for automatic memory storage.
-    Stores file modifications in DevStream semantic memory.
+    PostToolUse hook for automatic memory storage with embeddings.
+
+    Stores file modifications in DevStream semantic memory and generates
+    embeddings using Ollama for semantic search.
+
+    Phase 2 Enhancement: Inline embedding generation with graceful degradation.
     """
 
     def __init__(self):
         self.base = DevStreamHookBase("post_tool_use")
         self.mcp_client = get_mcp_client()
+
+        # Initialize Ollama client for embedding generation
+        self.ollama_client = OllamaEmbeddingClient()
+
+        # Database path for direct embedding updates
+        project_root = Path(__file__).parent.parent.parent.parent.parent
+        self.db_path = str(project_root / 'data' / 'devstream.db')
 
     def extract_content_preview(self, content: str, max_length: int = 300) -> str:
         """
@@ -113,14 +134,68 @@ class PostToolUseHook:
 
         return keywords
 
+    def update_memory_embedding(
+        self,
+        memory_id: str,
+        embedding: List[float]
+    ) -> bool:
+        """
+        Update semantic_memory record with embedding vector.
+
+        Direct SQLite UPDATE for embedding storage. Database triggers
+        will automatically sync to vec_semantic_memory virtual table.
+
+        Context7 Pattern: Uses sqlite_vec_helper for proper extension loading.
+
+        Args:
+            memory_id: Memory record ID
+            embedding: Embedding vector (list of floats)
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        try:
+            # Convert embedding to JSON string for SQLite storage
+            embedding_json = json.dumps(embedding)
+
+            # Context7 Pattern: Use helper for proper vec0 loading
+            conn = get_db_connection_with_vec(self.db_path)
+            cursor = conn.cursor()
+
+            # Update embedding in semantic_memory
+            cursor.execute(
+                "UPDATE semantic_memory SET embedding = ? WHERE id = ?",
+                (embedding_json, memory_id)
+            )
+
+            conn.commit()
+            rows_updated = cursor.rowcount
+            conn.close()
+
+            if rows_updated > 0:
+                self.base.debug_log(
+                    f"Embedding updated: {memory_id[:8]}... "
+                    f"({len(embedding)} dimensions)"
+                )
+                return True
+            else:
+                self.base.debug_log(f"No record found to update: {memory_id}")
+                return False
+
+        except Exception as e:
+            self.base.debug_log(f"Embedding update error: {e}")
+            return False
+
     async def store_in_memory(
         self,
         file_path: str,
         content: str,
         operation: str
-    ) -> bool:
+    ) -> Optional[str]:
         """
-        Store file modification in DevStream memory.
+        Store file modification in DevStream memory with embedding.
+
+        Phase 2 Enhancement: Now generates embedding and stores it inline.
 
         Args:
             file_path: Path to modified file
@@ -128,7 +203,7 @@ class PostToolUseHook:
             operation: Operation type (Write, Edit, MultiEdit)
 
         Returns:
-            True if storage successful, False otherwise
+            Memory ID if storage successful, None otherwise
         """
         try:
             # Extract content preview
@@ -150,7 +225,7 @@ class PostToolUseHook:
 
             self.base.debug_log(f"Storing memory: {len(preview)} chars, {len(keywords)} keywords")
 
-            # Store via MCP
+            # Store via MCP (without embedding initially)
             result = await self.base.safe_mcp_call(
                 self.mcp_client,
                 "devstream_store_memory",
@@ -161,16 +236,51 @@ class PostToolUseHook:
                 }
             )
 
-            if result:
-                self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
-                return True
-            else:
+            if not result:
                 self.base.debug_log("Memory storage returned no result")
-                return False
+                return None
+
+            # Extract memory_id from MCP result
+            # MCP returns: {"success": true, "memory_id": "...", ...}
+            memory_id = None
+            if isinstance(result, dict):
+                memory_id = result.get('memory_id')
+
+            if not memory_id:
+                self.base.debug_log("No memory_id in MCP response")
+                return None
+
+            self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
+
+            # Phase 2: Generate and store embedding (graceful degradation)
+            try:
+                self.base.debug_log("Generating embedding via Ollama...")
+
+                # Generate embedding for full content (not just preview)
+                embedding = self.ollama_client.generate_embedding(content)
+
+                if embedding:
+                    # Update memory record with embedding
+                    if self.update_memory_embedding(memory_id, embedding):
+                        self.base.debug_log(
+                            f"✓ Embedding stored: {len(embedding)}D"
+                        )
+                    else:
+                        self.base.debug_log("Embedding update failed")
+                else:
+                    self.base.debug_log("Embedding generation returned None")
+
+            except Exception as embed_error:
+                # Graceful degradation - log but don't fail
+                self.base.debug_log(
+                    f"Embedding generation failed (non-blocking): {embed_error}"
+                )
+
+            return memory_id
 
         except Exception as e:
             self.base.debug_log(f"Memory storage error: {e}")
-            return False
+            return None
 
     async def process(self, context: PostToolUseContext) -> None:
         """
@@ -227,14 +337,14 @@ class PostToolUseHook:
             return
 
         try:
-            # Store in memory
-            success = await self.store_in_memory(file_path, content, tool_name)
+            # Store in memory with embedding (Phase 2 enhanced)
+            memory_id = await self.store_in_memory(file_path, content, tool_name)
 
-            if not success:
+            if not memory_id:
                 # Non-blocking warning
                 self.base.warning_feedback("Memory storage unavailable")
 
-            # Always allow the operation to proceed
+            # Always allow the operation to proceed (graceful degradation)
             context.output.exit_success()
 
         except Exception as e:
