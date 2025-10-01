@@ -22,6 +22,7 @@ import { TaskTools } from './tools/tasks.js';
 import { PlanTools } from './tools/plans.js';
 import { MemoryTools } from './tools/memory.js';
 import { initializeOllamaClient } from './ollama-client.js';
+import { AutoSaveService } from './services/auto-save.js';
 
 /**
  * Main MCP Server class for DevStream integration
@@ -32,6 +33,7 @@ class DevStreamMcpServer {
   private taskTools: TaskTools;
   private planTools: PlanTools;
   private memoryTools: MemoryTools;
+  private autoSaveService: AutoSaveService;
 
   constructor(dbPath: string) {
     // Initialize MCP server
@@ -54,6 +56,12 @@ class DevStreamMcpServer {
     this.taskTools = new TaskTools(this.database);
     this.planTools = new PlanTools(this.database);
     this.memoryTools = new MemoryTools(this.database);
+
+    // Initialize auto-save background service
+    this.autoSaveService = new AutoSaveService(this.database, {
+      intervalMs: 300000, // 5 minutes
+      enabled: true
+    });
 
     this.setupHandlers();
   }
@@ -223,6 +231,22 @@ class DevStreamMcpServer {
             required: ['query'],
             additionalProperties: false
           }
+        },
+        {
+          name: 'devstream_trigger_checkpoint',
+          description: 'Trigger immediate checkpoint for all active tasks (used by PostToolUse hook after critical tool executions)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              reason: {
+                type: 'string',
+                enum: ['manual', 'tool_trigger', 'shutdown'],
+                default: 'tool_trigger',
+                description: 'Reason for checkpoint: manual (user request), tool_trigger (PostToolUse hook), shutdown (graceful shutdown)'
+              }
+            },
+            additionalProperties: false
+          }
         }
       ];
 
@@ -253,6 +277,10 @@ class DevStreamMcpServer {
           case 'devstream_search_memory':
             return await this.memoryTools.searchMemory(args);
 
+          // Checkpoint tools
+          case 'devstream_trigger_checkpoint':
+            return await this.triggerCheckpoint(args);
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -268,6 +296,48 @@ class DevStreamMcpServer {
         };
       }
     });
+  }
+
+  /**
+   * Trigger immediate checkpoint for all active tasks
+   *
+   * Context7 Pattern: Exposes AutoSaveService checkpoint functionality via MCP.
+   * Used by PostToolUse hook to save progress after critical tool executions.
+   *
+   * @param args - Tool arguments
+   * @returns MCP tool response
+   */
+  private async triggerCheckpoint(args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
+    try {
+      const reason = args.reason || 'tool_trigger';
+
+      // Trigger immediate checkpoint via AutoSaveService
+      const checkpointCount = await this.autoSaveService.triggerImmediateCheckpoint(reason);
+
+      const message = checkpointCount > 0
+        ? `✅ Checkpoint triggered: ${checkpointCount} active task${checkpointCount !== 1 ? 's' : ''} saved (reason: ${reason})`
+        : `ℹ️ No active tasks found - checkpoint skipped`;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: message
+          }
+        ]
+      };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `⚠️ Checkpoint failed: ${errorMessage}`
+          }
+        ]
+      };
+    }
   }
 
   /**
@@ -301,12 +371,29 @@ class DevStreamMcpServer {
     await this.server.connect(transport);
 
     console.error('🚀 DevStream MCP Server started - HYBRID SEARCH v2.0 (better-sqlite3 + sqlite-vec)');
+
+    // Start auto-save background service
+    try {
+      await this.autoSaveService.start();
+      console.error('✅ Auto-save service started successfully');
+    } catch (error) {
+      console.error('⚠️ Failed to start auto-save service:', error instanceof Error ? error.message : 'Unknown error');
+      console.error('⚠️ Continuing without auto-save - manual checkpoints still available');
+    }
   }
 
   /**
    * Cleanup and close connections
    */
   async close(): Promise<void> {
+    // Stop auto-save service first (graceful shutdown)
+    try {
+      await this.autoSaveService.stop();
+    } catch (error) {
+      console.error('⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
+    }
+
+    // Close database connection
     await this.database.close();
   }
 }

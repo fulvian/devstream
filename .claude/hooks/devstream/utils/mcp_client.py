@@ -195,6 +195,64 @@ class DevStreamMCPClient:
             )
             return None
 
+    async def trigger_checkpoint(
+        self,
+        reason: str = "tool_trigger"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Trigger immediate checkpoint for all active tasks via MCP.
+
+        Context7 Pattern: Non-blocking checkpoint trigger for PostToolUse hook.
+        Used after critical tool executions (Write, Edit, Bash, TodoWrite).
+
+        Args:
+            reason: Checkpoint reason ('tool_trigger', 'manual', 'shutdown')
+
+        Returns:
+            MCP response or None on failure
+        """
+        mcp_request = {
+            "jsonrpc": "2.0",
+            "id": f"checkpoint_{datetime.now().timestamp()}",
+            "method": "tools/call",
+            "params": {
+                "name": "devstream_trigger_checkpoint",
+                "arguments": {
+                    "reason": reason
+                }
+            }
+        }
+
+        try:
+            response = await self._call_mcp_server(mcp_request)
+
+            if response and response.get("result"):
+                self.logger.log_mcp_call(
+                    tool="devstream_trigger_checkpoint",
+                    parameters=mcp_request["params"]["arguments"],
+                    success=True,
+                    response=response.get("result")
+                )
+                return response.get("result")
+            else:
+                self.logger.log_mcp_call(
+                    tool="devstream_trigger_checkpoint",
+                    parameters=mcp_request["params"]["arguments"],
+                    success=False,
+                    error="No result in MCP response"
+                )
+                return None
+
+        except Exception as e:
+            # Context7 Pattern: Graceful degradation - log but don't fail
+            self.logger.log_mcp_call(
+                tool="devstream_trigger_checkpoint",
+                parameters=mcp_request["params"]["arguments"],
+                success=False,
+                error=str(e)
+            )
+            return None
+
     async def create_task(
         self,
         title: str,

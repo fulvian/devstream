@@ -134,6 +134,41 @@ class PostToolUseHook:
 
         return keywords
 
+    async def trigger_checkpoint_for_critical_tool(self, tool_name: str) -> None:
+        """
+        Trigger immediate checkpoint after critical tool execution.
+
+        Context7 Pattern: Non-blocking checkpoint trigger via MCP.
+        Implements B1.3 requirement for immediate task checkpoint saves.
+
+        Critical tools: Write, Edit, MultiEdit, Bash, TodoWrite
+
+        Args:
+            tool_name: Name of the critical tool that was executed
+        """
+        try:
+            self.base.debug_log(f"Triggering checkpoint for critical tool: {tool_name}")
+
+            # Call MCP checkpoint trigger (non-blocking)
+            result = await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_trigger_checkpoint",
+                {"reason": "tool_trigger"}
+            )
+
+            if result:
+                # Extract checkpoint count from result
+                # MCP returns: {content: [{type: "text", text: "✅ Checkpoint triggered..."}]}
+                if isinstance(result, dict) and "content" in result:
+                    content_text = result["content"][0]["text"] if result["content"] else ""
+                    self.base.debug_log(f"Checkpoint result: {content_text}")
+            else:
+                self.base.debug_log("Checkpoint trigger returned no result (non-blocking)")
+
+        except Exception as e:
+            # Context7 Pattern: Graceful degradation - log but don't fail
+            self.base.debug_log(f"Checkpoint trigger failed (non-blocking): {e}")
+
     def update_memory_embedding(
         self,
         memory_id: str,
@@ -307,8 +342,16 @@ class PostToolUseHook:
 
         self.base.debug_log(f"Processing {tool_name} for {tool_input.get('file_path', 'unknown')}")
 
-        # Only process Write/Edit operations
+        # Define critical tools that trigger checkpoints
+        critical_tools = ["Write", "Edit", "MultiEdit", "Bash", "TodoWrite"]
+        is_critical_tool = tool_name in critical_tools
+
+        # Only process Write/Edit operations for memory storage
         if tool_name not in ["Write", "Edit", "MultiEdit"]:
+            # Check if it's another critical tool (Bash, TodoWrite)
+            if is_critical_tool:
+                # Trigger checkpoint for critical non-file tools
+                await self.trigger_checkpoint_for_critical_tool(tool_name)
             context.output.exit_success()
             return
 
@@ -343,6 +386,10 @@ class PostToolUseHook:
             if not memory_id:
                 # Non-blocking warning
                 self.base.warning_feedback("Memory storage unavailable")
+
+            # B1.3: Trigger checkpoint for critical tool execution
+            if is_critical_tool:
+                await self.trigger_checkpoint_for_critical_tool(tool_name)
 
             # Always allow the operation to proceed (graceful degradation)
             context.output.exit_success()
