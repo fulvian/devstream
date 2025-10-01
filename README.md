@@ -118,6 +118,27 @@ The `install.sh` script provides **zero-configuration setup**:
 
 **No manual configuration needed!**
 
+### Context7 MCP Setup (Optional but Recommended)
+
+Context7 provides up-to-date library documentation for research-driven development (used in DevStream RESEARCH phase).
+
+**Steps:**
+
+1. **Get API Key**: Visit [https://context7.com](https://context7.com) and sign up for a free account
+
+2. **Configure**: Add your API key to `.env.devstream`:
+   ```bash
+   echo "CONTEXT7_API_KEY=your_api_key_here" >> .env.devstream
+   ```
+
+3. **Verify**: Restart Claude Code and test:
+   ```bash
+   # Context7 will be automatically configured by post-install.py
+   # Test with: mcp__context7__resolve-library-id tool in Claude Code
+   ```
+
+**Note**: Context7 integration is optional but highly recommended for DevStream's research-driven workflow. It enables automatic documentation retrieval for libraries during the RESEARCH phase of the 7-step workflow.
+
 ### Troubleshooting
 
 If hooks don't work after installation:

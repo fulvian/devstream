@@ -215,6 +215,50 @@ class PostInstallConfig:
 
         return settings
 
+    def configure_context7_mcp(self, settings: Dict[str, Any]) -> None:
+        """
+        Add Context7 MCP server to Claude Code settings.
+
+        Args:
+            settings: Claude Code settings dictionary
+
+        Note:
+            Reads CONTEXT7_API_KEY from .env.devstream file.
+            Skips configuration if API key not found.
+        """
+        self.log_info("Configuring Context7 MCP server...")
+
+        # Read API key from .env.devstream
+        env_file = self.project_root / ".env.devstream"
+        context7_api_key: Optional[str] = None
+
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if line.startswith('CONTEXT7_API_KEY='):
+                        context7_api_key = line.split('=', 1)[1].strip()
+                        break
+
+        if not context7_api_key:
+            self.log_warning("Context7 API key not found in .env.devstream - skipping")
+            print("   ⚠️  Context7 MCP not configured (API key missing)")
+            print("   Add CONTEXT7_API_KEY to .env.devstream to enable")
+            print()
+            return
+
+        # Initialize mcpServers if not exists
+        if "mcpServers" not in settings:
+            settings["mcpServers"] = {}
+
+        # Add Context7 configuration
+        settings["mcpServers"]["context7"] = {
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp", "--api-key", context7_api_key]
+        }
+
+        self.log_success("Context7 MCP server configured")
+        print()
+
     def write_settings(self, settings: Dict[str, Any]) -> None:
         """
         Write settings to settings.json file.
@@ -291,6 +335,10 @@ class PostInstallConfig:
 
         # Create and write settings
         settings = self.create_settings_json()
+
+        # Configure Context7 MCP server
+        self.configure_context7_mcp(settings)
+
         self.write_settings(settings)
 
         self.print_next_steps()

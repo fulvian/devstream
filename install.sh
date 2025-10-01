@@ -440,11 +440,42 @@ initialize_database() {
 }
 
 #------------------------------------------------------------------------------
-# Step 4: MCP Server Setup
+# Step 4: Environment Configuration
+#------------------------------------------------------------------------------
+
+create_env_file() {
+    print_header "Step 4: Creating Environment Configuration"
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY RUN] Would create .env.devstream from .env.example"
+        return 0
+    fi
+
+    local env_file="${PROJECT_ROOT}/.env.devstream"
+    local env_example="${PROJECT_ROOT}/.env.example"
+
+    if [ -f "$env_file" ]; then
+        print_success ".env.devstream already exists (preserving existing configuration)"
+        print_verbose "Existing .env.devstream: $env_file"
+    elif [ -f "$env_example" ]; then
+        cp "$env_example" "$env_file"
+        chmod 600 "$env_file"
+        print_success ".env.devstream created from .env.example"
+        print_info "Edit .env.devstream to customize configuration"
+        print_verbose "Created: $env_file"
+        print_verbose "Permissions: 600 (owner read/write only)"
+    else
+        print_warning ".env.example not found, skipping .env.devstream creation"
+        print_info "You may need to create .env.devstream manually"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Step 5: MCP Server Setup
 #------------------------------------------------------------------------------
 
 setup_mcp_server() {
-    print_header "Step 4: Setting up MCP Server"
+    print_header "Step 5: Setting up MCP Server"
 
     if [ "$DRY_RUN" = true ]; then
         print_info "[DRY-RUN] Would run npm install and build in: $MCP_SERVER_DIR"
@@ -500,11 +531,11 @@ setup_mcp_server() {
 }
 
 #------------------------------------------------------------------------------
-# Step 5: Hook Configuration Check
+# Step 6: Hook Configuration Check
 #------------------------------------------------------------------------------
 
 check_hook_configuration() {
-    print_header "Step 5: Checking Hook Configuration"
+    print_header "Step 6: Checking Hook Configuration"
 
     if [ "$DRY_RUN" = true ]; then
         print_info "[DRY-RUN] Would check for: $CLAUDE_SETTINGS"
@@ -574,7 +605,63 @@ EOF
 }
 
 #------------------------------------------------------------------------------
-# Step 6: Final Steps
+# Step 7: Configure Context7 MCP Server
+#------------------------------------------------------------------------------
+
+configure_context7_mcp() {
+    print_header "Step 7: Configuring Context7 MCP Server"
+
+    # Check if running in dry-run mode
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY RUN] Would configure Context7 MCP"
+        return 0
+    fi
+
+    # Check for API key in environment or .env.devstream
+    if [ -z "${CONTEXT7_API_KEY:-}" ]; then
+        print_warning "Context7 API key not found in environment"
+        print_info "Context7 provides library documentation for research (optional but recommended)"
+        print_info "Get your free API key at: https://context7.com"
+        echo
+        read -p "Do you have a Context7 API key? [y/N] " -n 1 -r
+        echo
+
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            read -sp "Enter your Context7 API key: " CONTEXT7_API_KEY
+            echo
+
+            if [ -n "$CONTEXT7_API_KEY" ]; then
+                # Validate API key format (basic check)
+                if [[ ! "$CONTEXT7_API_KEY" =~ ^[a-zA-Z0-9_-]{10,}$ ]]; then
+                    print_warning "API key format appears invalid (expected alphanumeric + - _)"
+                    print_info "Saving anyway - Context7 server will validate"
+                fi
+
+                # Append to .env.devstream
+                echo "" >> "${PROJECT_ROOT}/.env.devstream"
+                echo "# Context7 MCP Configuration" >> "${PROJECT_ROOT}/.env.devstream"
+                echo "CONTEXT7_API_KEY=${CONTEXT7_API_KEY}" >> "${PROJECT_ROOT}/.env.devstream"
+
+                # Set secure permissions (defense-in-depth)
+                chmod 600 "${PROJECT_ROOT}/.env.devstream"
+                print_verbose "Set permissions: 600 for .env.devstream"
+
+                print_success "Context7 API key saved to .env.devstream"
+            else
+                print_warning "No API key entered, skipping Context7 configuration"
+            fi
+        else
+            print_warning "Skipping Context7 configuration (can be added later)"
+            print_info "To configure later, add CONTEXT7_API_KEY to .env.devstream"
+        fi
+    else
+        print_success "Context7 API key found in environment"
+        print_verbose "Context7 API key: ${CONTEXT7_API_KEY:0:10}..."
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Step 8: Final Steps
 #------------------------------------------------------------------------------
 
 final_steps() {
@@ -587,9 +674,7 @@ final_steps() {
     echo "Next Steps"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "1. Configure environment variables:"
-    echo "   cp .env.example .env.devstream"
-    echo "   # Edit .env.devstream with your settings"
+    echo "1. Review and customize .env.devstream (already created)"
     echo ""
     echo "2. Configure Claude hooks (see instructions above)"
     echo ""
@@ -642,8 +727,10 @@ main() {
     check_prerequisites
     setup_python_environment
     initialize_database
+    create_env_file
     setup_mcp_server
     check_hook_configuration
+    configure_context7_mcp
 
     # CRITICAL: Auto-configure Claude Code settings.json
     print_header "Configuring Claude Code Hooks"

@@ -35,6 +35,7 @@ Before installing DevStream, ensure your system meets these requirements:
 
 | Software | Purpose | Installation |
 |----------|---------|--------------|
+| **Context7 API Key** | Library documentation (optional) | [Get Key](https://context7.com) |
 | **Ollama** | Semantic embeddings (recommended) | [ollama.ai](https://ollama.ai/) |
 | **sqlite3** | Database inspection | Usually pre-installed |
 
@@ -96,6 +97,50 @@ curl -fsSL https://ollama.ai/install.sh | sh
 # Pull embedding model
 ollama pull nomic-embed-text
 ```
+
+---
+
+## Context7 MCP Configuration (Optional)
+
+Context7 provides real-time library documentation for DevStream's RESEARCH phase.
+
+### Getting API Key
+
+1. Visit [https://context7.com](https://context7.com)
+2. Sign up for free account
+3. Copy your API key from dashboard
+
+### Configuration
+
+**Method 1: During Installation**
+```bash
+# Set environment variable before running install.sh
+export CONTEXT7_API_KEY="your_api_key_here"
+./install.sh
+```
+
+**Method 2: Post-Installation**
+```bash
+# Add to .env.devstream
+echo "CONTEXT7_API_KEY=your_api_key_here" >> .env.devstream
+
+# Re-run post-install configuration
+.devstream/bin/python scripts/post-install.py
+```
+
+### Verification
+
+Test Context7 MCP integration:
+```bash
+# In Claude Code, test the tool:
+# mcp__context7__resolve-library-id with library name "fastapi"
+# Should return Context7-compatible library ID
+```
+
+**Troubleshooting**:
+- If tool not available: Check `~/.claude/settings.json` has "context7" in mcpServers
+- If authentication fails: Verify API key in `.env.devstream`
+- Restart Claude Code after configuration changes
 
 ---
 
