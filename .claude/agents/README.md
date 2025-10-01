@@ -12,7 +12,7 @@ DevStream utilizes a hierarchical team of specialized AI agents for efficient mu
 3. **Task Specialists** - Cross-domain skills *(Phase 2+)*
 4. **Quality Assurance** - Code review, security, debugging
 
-## Phase 1 Agents (Production Ready)
+## Phase 1 Agents (Production Ready ✅)
 
 ### tech-lead (Orchestrator)
 - **Purpose**: Multi-stack coordination and architecture decisions
@@ -33,6 +33,50 @@ DevStream utilizes a hierarchical team of specialized AI agents for efficient mu
 - **Purpose**: Quality, security, performance validation
 - **Tools**: Read, Grep, Glob, Bash (analysis focus)
 - **Use**: Auto-invoked before commits, manual reviews
+
+## Phase 2 Agents (Production Ready ✅)
+
+### rust-specialist (Domain)
+- **Purpose**: Rust development, memory safety, systems programming
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Memory-safe systems, zero-cost abstractions, high-performance
+
+### go-specialist (Domain)
+- **Purpose**: Go development, goroutines, cloud-native services
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Microservices, concurrent systems, simple deployment
+
+### database-specialist (Domain)
+- **Purpose**: Database design, optimization, query development
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Schema design, index optimization, query performance
+
+### devops-specialist (Domain)
+- **Purpose**: Containerization, CI/CD, infrastructure automation
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Docker, Kubernetes, deployment pipelines, IaC
+
+## Phase 3 Agents (Production Ready ✅)
+
+### testing-specialist (Task)
+- **Purpose**: Test strategy, coverage analysis, E2E testing
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Test architecture, quality validation, cross-stack testing
+
+### api-architect (Task)
+- **Purpose**: API design, OpenAPI specs, multi-stack coordination
+- **Tools**: Inherits all (full flexibility)
+- **Use**: RESTful architecture, API contracts, versioning strategies
+
+### performance-optimizer (Task)
+- **Purpose**: Profiling, optimization, scalability improvements
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Bottleneck identification, memory optimization, latency reduction
+
+### documentation-specialist (Task)
+- **Purpose**: Technical writing, API docs, architecture diagrams
+- **Tools**: Inherits all (full flexibility)
+- **Use**: User guides, OpenAPI docs, system documentation
 
 ## Usage
 
@@ -81,11 +125,17 @@ System prompt defining agent expertise...
 - ✅ Agents have isolated context (no interference)
 - ✅ Tool inheritance (omit `tools:`) gives full flexibility
 
-## Future Phases
+## Agent Statistics
 
-**Phase 2**: rust-specialist, go-specialist, database-specialist, devops-specialist
-**Phase 3**: api-architect, performance-optimizer, testing-specialist, documentation-specialist
-**Phase 4**: security-auditor, debugger, refactoring-specialist, integration-specialist
+**Total Agents**: 12/17 (71% complete)
+- Phase 1: 4 agents ✅
+- Phase 2: 4 agents ✅
+- Phase 3: 4 agents ✅
+- Phase 4: 5 agents (planned)
+
+## Future Phase
+
+**Phase 4**: security-auditor, debugger, refactoring-specialist, integration-specialist, migration-specialist
 
 ---
 
