@@ -644,6 +644,20 @@ main() {
     initialize_database
     setup_mcp_server
     check_hook_configuration
+
+    # CRITICAL: Auto-configure Claude Code settings.json
+    print_header "Configuring Claude Code Hooks"
+    if [ -f "${PROJECT_ROOT}/scripts/post-install.py" ]; then
+        "${VENV_DIR}/bin/python" "${PROJECT_ROOT}/scripts/post-install.py"
+        if [ $? -eq 0 ]; then
+            print_success "Hook configuration automated successfully"
+        else
+            print_error "Hook configuration failed - run manually: ./scripts/post-install.py"
+        fi
+    else
+        print_warning "post-install.py not found - hooks must be configured manually"
+    fi
+
     final_steps
 
     echo ""

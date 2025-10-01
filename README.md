@@ -86,35 +86,65 @@ ollama pull nomic-embed-text
 
 ### Installation
 
+**✅ PRODUCTION-READY: Zero Manual Configuration Required**
+
 ```bash
 # Clone repository
 git clone <repository-url>
 cd devstream
 
-# Install dependencies
-make install
+# Run automated installation (configures EVERYTHING)
+./install.sh
 
-# Setup development environment
-make setup
+# CRITICAL: Restart Claude Code to load hook configuration
+# (hooks will NOT work until restart)
 
 # Verify installation
+./scripts/verify-install.py
 make check-env
+```
+
+### What the Installation Script Does
+
+The `install.sh` script provides **zero-configuration setup**:
+
+✅ **Creates Python 3.11+ virtual environment** (`.devstream/`)
+✅ **Installs all dependencies** (cchooks, aiohttp, structlog, etc.)
+✅ **Builds MCP server** (if Node.js installed)
+✅ **Configures hook files** (chmod +x for all hooks)
+✅ **AUTO-CONFIGURES `~/.claude/settings.json`** ← **CRITICAL**
+✅ **Creates database directory** (`data/`)
+✅ **Verifies complete setup**
+
+**No manual configuration needed!**
+
+### Troubleshooting
+
+If hooks don't work after installation:
+
+```bash
+# 1. Verify configuration
+./scripts/validate-config.py
+
+# 2. Manually re-configure hooks (if needed)
+./scripts/post-install.py
+
+# 3. Check hook logs
+tail -50 ~/.claude/logs/devstream/pre_tool_use.log
+tail -50 ~/.claude/logs/devstream/post_tool_use.log
 ```
 
 ### First Use
 
 ```bash
-# Start DevStream CLI
-poetry run devstream --help
+# Open project in Claude Code
+# Hooks activate automatically after restart
 
-# Create your first intervention plan
-poetry run devstream plan "Implement REST API for user management"
-
-# Execute micro-task with context injection
-poetry run devstream execute <task-id>
+# Verify hooks are working (create test file, check logs)
+tail -f ~/.claude/logs/devstream/post_tool_use.log
 
 # Search semantic memory
-poetry run devstream search "authentication patterns"
+# (Use MCP tools in Claude Code)
 ```
 
 ## 📋 Development Workflow
