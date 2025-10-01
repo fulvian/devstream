@@ -12,32 +12,60 @@
 """
 DevStream PreToolUse Hook - Context Injection before Write/Edit
 Context7 + DevStream hybrid context assembly con graceful fallback.
+Agent Auto-Delegation System integration for intelligent agent routing.
 """
 
 import sys
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # Add devstream hooks dir to path
 
 from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
 from context7_client import Context7Client
 from mcp_client import get_mcp_client
 
+# Agent Auto-Delegation imports (with graceful degradation)
+try:
+    from agents.pattern_matcher import PatternMatcher
+    from agents.agent_router import AgentRouter, TaskAssessment
+    AGENT_DELEGATION_AVAILABLE = True
+except ImportError as e:
+    AGENT_DELEGATION_AVAILABLE = False
+    _IMPORT_ERROR = str(e)
+    # Provide fallback type for type hints when delegation unavailable
+    TaskAssessment = Any  # type: ignore
+
 
 class PreToolUseHook:
     """
     PreToolUse hook for intelligent context injection.
-    Combines Context7 library docs + DevStream semantic memory.
+    Combines Context7 library docs + DevStream semantic memory + Agent Auto-Delegation.
     """
 
     def __init__(self):
         self.base = DevStreamHookBase("pre_tool_use")
         self.mcp_client = get_mcp_client()
         self.context7 = Context7Client(self.mcp_client)
+
+        # Agent Auto-Delegation components (graceful degradation)
+        self.pattern_matcher: Optional[PatternMatcher] = None
+        self.agent_router: Optional[AgentRouter] = None
+
+        if AGENT_DELEGATION_AVAILABLE:
+            try:
+                self.pattern_matcher = PatternMatcher()
+                self.agent_router = AgentRouter()
+                self.base.debug_log("Agent Auto-Delegation enabled")
+            except Exception as e:
+                self.base.debug_log(f"Agent Auto-Delegation init failed: {e}")
+        else:
+            self.base.debug_log(f"Agent Auto-Delegation unavailable: {_IMPORT_ERROR}")
 
     async def get_context7_docs(self, file_path: str, content: str) -> Optional[str]:
         """
@@ -124,6 +152,138 @@ class PreToolUseHook:
             self.base.debug_log(f"Memory search error: {e}")
             return None
 
+    async def check_agent_delegation(
+        self,
+        file_path: Optional[str],
+        content: Optional[str],
+        tool_name: Optional[str],
+        user_query: Optional[str] = None
+    ) -> Optional[TaskAssessment]:
+        """
+        Check if task should be delegated to specialized agent.
+
+        Args:
+            file_path: Optional file path being worked on
+            content: Optional file content
+            tool_name: Optional tool name (e.g., 'Write', 'Edit')
+            user_query: Optional user query string
+
+        Returns:
+            TaskAssessment if delegation match found, None otherwise
+
+        Note:
+            Gracefully degrades if Agent Auto-Delegation unavailable
+        """
+        # Check if Agent Auto-Delegation is enabled via config
+        if not os.getenv("DEVSTREAM_AGENT_AUTO_DELEGATION_ENABLED", "true").lower() == "true":
+            self.base.debug_log("Agent Auto-Delegation disabled via config")
+            return None
+
+        # Check if components available
+        if not self.pattern_matcher or not self.agent_router:
+            return None
+
+        try:
+            # Match patterns
+            pattern_match = self.pattern_matcher.match_patterns(
+                file_path=file_path,
+                content=content,
+                user_query=user_query,
+                tool_name=tool_name
+            )
+
+            if not pattern_match:
+                self.base.debug_log("No agent pattern match found")
+                return None
+
+            # Assess task complexity
+            context = {
+                "file_path": file_path,
+                "content": content,
+                "user_query": user_query or "",
+                "tool_name": tool_name,
+                "affected_files": [file_path] if file_path else []
+            }
+
+            assessment = await self.agent_router.assess_task_complexity(
+                pattern_match=pattern_match,
+                context=context
+            )
+
+            self.base.debug_log(
+                f"Agent delegation assessment: {assessment.recommendation} "
+                f"({assessment.suggested_agent}, confidence={assessment.confidence:.2f})"
+            )
+
+            # Log delegation decision to DevStream memory (non-blocking)
+            await self._log_delegation_decision(assessment, pattern_match)
+
+            return assessment
+
+        except Exception as e:
+            # Non-blocking error - log and continue
+            self.base.debug_log(f"Agent delegation check failed: {e}")
+            return None
+
+    async def _log_delegation_decision(
+        self,
+        assessment: TaskAssessment,
+        pattern_match: Dict[str, Any]
+    ) -> None:
+        """
+        Log delegation decision to DevStream memory.
+
+        Args:
+            assessment: Task assessment with delegation recommendation
+            pattern_match: Pattern match information
+
+        Note:
+            Non-blocking - errors are logged but do not interrupt execution
+        """
+        # Check if memory is enabled
+        if not os.getenv("DEVSTREAM_MEMORY_ENABLED", "true").lower() == "true":
+            return
+
+        try:
+            # Format delegation decision log
+            agent = assessment.suggested_agent
+            confidence = assessment.confidence
+            recommendation = assessment.recommendation
+            reason = assessment.reason
+            complexity = assessment.complexity
+            impact = assessment.architectural_impact
+
+            content = (
+                f"Agent Delegation: @{agent} (confidence {confidence:.2f}, {recommendation})\n"
+                f"Reason: {reason}\n"
+                f"Complexity: {complexity} | Impact: {impact}"
+            )
+
+            # Extract keywords
+            keywords = [
+                "agent-delegation",
+                agent,
+                recommendation.lower(),
+                complexity.lower()
+            ]
+
+            # Store in memory via MCP
+            await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_store_memory",
+                {
+                    "content": content,
+                    "content_type": "decision",
+                    "keywords": keywords
+                }
+            )
+
+            self.base.debug_log(f"Delegation decision logged to memory: @{agent}")
+
+        except Exception as e:
+            # Non-blocking error - log and continue
+            self.base.debug_log(f"Failed to log delegation decision: {e}")
+
     async def assemble_context(
         self,
         file_path: str,
@@ -161,6 +321,7 @@ class PreToolUseHook:
     async def process(self, context: PreToolUseContext) -> None:
         """
         Main hook processing logic.
+        Integrates Agent Auto-Delegation + Context7 + DevStream memory.
 
         Args:
             context: PreToolUse context from cchooks
@@ -192,12 +353,47 @@ class PreToolUseHook:
             return
 
         try:
-            # Assemble context from multiple sources
-            enhanced_context = await self.assemble_context(file_path, content)
+            context_parts = []
 
+            # PHASE 1: Agent Auto-Delegation (BEFORE Context7/memory injection)
+            try:
+                assessment = await self.check_agent_delegation(
+                    file_path=file_path,
+                    content=content,
+                    tool_name=tool_name,
+                    user_query=None  # user_query not available in PreToolUse context
+                )
+
+                if assessment and self.agent_router:
+                    # Format advisory message
+                    advisory_message = self.agent_router.format_advisory_message(assessment)
+
+                    # Prepend advisory to context injection
+                    advisory_header = (
+                        "# Agent Auto-Delegation Advisory\n\n"
+                        f"{advisory_message}\n\n"
+                        "---\n\n"
+                    )
+                    context_parts.append(advisory_header)
+
+                    self.base.success_feedback(
+                        f"Agent delegation: {assessment.recommendation} "
+                        f"({assessment.suggested_agent})"
+                    )
+
+            except Exception as e:
+                # Non-blocking error - log and continue
+                self.base.debug_log(f"Agent delegation failed: {e}")
+
+            # PHASE 2: Context7 + DevStream memory injection
+            enhanced_context = await self.assemble_context(file_path, content)
             if enhanced_context:
-                # Inject context
-                self.base.inject_context(enhanced_context)
+                context_parts.append(enhanced_context)
+
+            # PHASE 3: Inject assembled context
+            if context_parts:
+                final_context = "\n".join(context_parts)
+                self.base.inject_context(final_context)
                 self.base.success_feedback(f"Context injected for {Path(file_path).name}")
             else:
                 self.base.debug_log("No relevant context found")
