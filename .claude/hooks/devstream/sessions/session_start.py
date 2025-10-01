@@ -123,6 +123,38 @@ class SessionStartHook:
 
         return results
 
+    async def display_previous_summary(self) -> None:
+        """
+        Display previous session summary if available.
+
+        B2 Behavioral Refinement: Shows summary from marker file.
+        """
+        summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+        if not summary_file.exists():
+            return
+
+        try:
+            with open(summary_file, "r") as f:
+                summary = f.read()
+
+            if summary and len(summary.strip()) > 0:
+                # Display summary to user
+                print("\n" + "=" * 70)
+                print("📋 PREVIOUS SESSION SUMMARY")
+                print("=" * 70)
+                print(summary)
+                print("=" * 70 + "\n")
+
+                self.logger.info("Displayed previous session summary")
+
+                # Delete marker file after display
+                summary_file.unlink()
+                self.logger.debug("Deleted summary marker file")
+
+        except Exception as e:
+            self.logger.error(f"Failed to display previous summary: {e}")
+
     async def run_hook(self, hook_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute SessionStart hook.
@@ -136,6 +168,9 @@ class SessionStartHook:
         self.structured_logger.log_hook_start(hook_data or {}, {
             "phase": "session_start"
         })
+
+        # Display previous session summary (if available)
+        await self.display_previous_summary()
 
         # Get session ID
         session_id = self.get_session_id()
