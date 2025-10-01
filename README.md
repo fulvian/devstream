@@ -1,87 +1,90 @@
-# DevStream: Sistema Integrato Task Management & Memoria Cross-Session
+# DevStream: Integrated Task Management & Cross-Session Memory System
 
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/yourusername/devstream)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Poetry](https://img.shields.io/badge/dependency%20management-poetry-blue.svg)](https://python-poetry.org/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Linting: ruff](https://img.shields.io/badge/linting-ruff-red.svg)](https://github.com/astral-sh/ruff)
 [![Type checking: mypy](https://img.shields.io/badge/type%20checking-mypy-blue.svg)](https://mypy.readthedocs.io/)
+[![CI Status](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/yourusername/devstream/actions)
 
-Un framework rivoluzionario che trasforma l'interazione utente-AI imponendo un workflow strutturato basato su task granulari con memoria semantica persistente per Claude Code.
+A revolutionary framework that transforms user-AI interaction by enforcing a structured workflow based on granular tasks with persistent semantic memory for Claude Code.
 
-## 🎯 Caratteristiche Principali
+## 🎯 Key Features
 
 ### Task-Forced Workflow
-- **Ogni interazione** utente deve passare attraverso task creation
-- **Micro-task granulari**: max 10 minuti, 256K token
-- **Piani strutturati**: Obiettivi → Fasi → Micro-task
-- **Validazione automatica** per mantenere granularità
+- **Every user interaction** must flow through task creation
+- **Granular micro-tasks**: max 10 minutes, 256K tokens
+- **Structured plans**: Goals → Phases → Micro-tasks
+- **Automatic validation** to maintain granularity
 
-### Memoria Semantica Cross-Session
-- **Embedding vettoriali** con Ollama embeddinggemma
-- **Ricerca ibrida** semantic + keyword con scoring pesato
-- **Context injection automatico** dalla memoria rilevante
-- **Learning incrementale** da ogni task completato
+### Cross-Session Semantic Memory
+- **Vector embeddings** with Ollama embeddinggemma
+- **Hybrid search** semantic + keyword with weighted scoring
+- **Automatic context injection** from relevant memory
+- **Incremental learning** from every completed task
 
-### Team Virtuale Agenti
-- **Architect**: System design e technology selection
-- **Coder**: Implementation e debugging
-- **Reviewer**: Quality assurance e testing
-- **Documenter**: Technical writing e API docs
+### Virtual Agent Team
+- **Architect**: System design and technology selection
+- **Coder**: Implementation and debugging
+- **Reviewer**: Quality assurance and testing
+- **Documenter**: Technical writing and API docs
 
-### Hook System Avanzato
-- **Event-driven**: Hook su user interaction, task completion, context limits
-- **Auto-enforcement**: Forza workflow task-based
-- **Memory automation**: Salvataggio e retrieval automatico
+### Advanced Hook System
+- **Event-driven**: Hooks on user interaction, task completion, context limits
+- **Auto-enforcement**: Enforces task-based workflow
+- **Memory automation**: Automatic save and retrieval
 
-## 🛠 Stack Tecnologico
+## 🛠 Technology Stack
 
-- **Python 3.11+** con type hints completi
-- **SQLite + FTS5** per storage e full-text search
-- **Ollama + embeddinggemma** per embedding semantici locali
-- **Pydantic v2** per validazione dati e configuration
-- **Poetry** per dependency management
-- **AsyncIO** per operazioni non-blocking
+- **Python 3.11+** with complete type hints
+- **SQLite + FTS5** for storage and full-text search
+- **Ollama + embeddinggemma** for local semantic embeddings
+- **Pydantic v2** for data validation and configuration
+- **Poetry** for dependency management
+- **AsyncIO** for non-blocking operations
 
-## 📚 Metodologia di Sviluppo
+## 📚 Development Methodology
 
-DevStream utilizza una **metodologia research-driven** con 4 fasi fondamentali:
+DevStream uses a **research-driven methodology** with 4 fundamental phases:
 
-1. **🎯 Discussione & Analisi** - Confronto su obiettivi e specifiche tecniche
-2. **📋 Divisione Strutturata** - Breakdown in fasi e micro-task granulari
-3. **🔍 Research Context7** - Best practice e documentazione tecnica
-4. **✅ Verification & Testing** - Test severi e validazione completa
+1. **🎯 Discussion & Analysis** - Align on objectives and technical specifications
+2. **📋 Structured Division** - Breakdown into phases and granular micro-tasks
+3. **🔍 Context7 Research** - Best practices and technical documentation
+4. **✅ Verification & Testing** - Rigorous testing and complete validation
 
 ### Quick Reference
 ```bash
-# Workflow completo
+# Complete workflow
 Discuss → Divide → Research → Implement → Test → Validate
 
-# Tools principali
-- Context7: Research e best practice
-- TodoWrite: Task management granulare
+# Main tools
+- Context7: Research and best practices
+- TodoWrite: Granular task management
 - Testing: 95%+ coverage target
 ```
 
-**Dettagli completi**: Vedi [`CLAUDE.md`](./CLAUDE.md) e [`CLAUDE.quick-reference.md`](./CLAUDE.quick-reference.md)
+**Complete details**: See [`CLAUDE.md`](./CLAUDE.md) and [`CLAUDE.quick-reference.md`](./CLAUDE.quick-reference.md)
 
 ## 🚀 Quick Start
 
-### Prerequisiti
+### Prerequisites
 
 ```bash
 # Python 3.11+
 python --version
 
-# Poetry per dependency management
+# Poetry for dependency management
 curl -sSL https://install.python-poetry.org | python3 -
 
-# Ollama per embedding generation
+# Ollama for embedding generation
 curl -fsSL https://ollama.ai/install.sh | sh
 ollama serve
 ollama pull nomic-embed-text
 ```
 
-### Installazione
+### Installation
 
 ```bash
 # Clone repository
@@ -98,7 +101,7 @@ make setup
 make check-env
 ```
 
-### Primo Utilizzo
+### First Use
 
 ```bash
 # Start DevStream CLI
@@ -116,7 +119,7 @@ poetry run devstream search "authentication patterns"
 
 ## 📋 Development Workflow
 
-### Setup Ambiente di Sviluppo
+### Development Environment Setup
 
 ```bash
 # Complete development setup
@@ -129,7 +132,7 @@ make install-hooks
 make check-env
 ```
 
-### Comandi di Sviluppo
+### Development Commands
 
 ```bash
 # Code quality
@@ -169,9 +172,9 @@ pytest tests/e2e -m "requires_docker" -v
 pytest tests/ --benchmark-only
 ```
 
-## 📖 Architettura
+## 📖 Architecture
 
-### Struttura del Progetto
+### Project Structure
 
 ```
 devstream/
@@ -188,21 +191,21 @@ devstream/
 └── scripts/                # Utility scripts
 ```
 
-### Componenti Principali
+### Main Components
 
 1. **Database Layer** (`devstream.database`)
-   - SQLite con FTS5 e optional vector search
+   - SQLite with FTS5 and optional vector search
    - Async connection management
    - Schema migrations
 
 2. **Memory System** (`devstream.memory`)
-   - Ollama integration per embedding
+   - Ollama integration for embeddings
    - Hybrid search (semantic + keyword)
-   - Context assembly e injection
+   - Context assembly and injection
 
 3. **Task Management** (`devstream.tasks`)
    - InterventionPlan → Phase → MicroTask hierarchy
-   - Agent dispatcher con capability matching
+   - Agent dispatcher with capability matching
    - Task state tracking
 
 4. **Hook System** (`devstream.hooks`)
@@ -210,7 +213,7 @@ devstream/
    - Claude Code integration
    - Configurable hook chains
 
-## ⚙️ Configurazione
+## ⚙️ Configuration
 
 ### Environment Variables
 
@@ -264,10 +267,10 @@ pytest -m "not slow"                # Skip slow tests
 
 ### Mocking Strategy
 
-- **Ollama**: Mock embedding generation per unit tests
-- **Database**: In-memory SQLite per fast tests
+- **Ollama**: Mock embedding generation for unit tests
+- **Database**: In-memory SQLite for fast tests
 - **File System**: Temporary directories
-- **Time**: Freezegun per time-dependent tests
+- **Time**: Freezegun for time-dependent tests
 
 ## 📈 Performance
 
@@ -288,8 +291,8 @@ make profile
 
 - **Database**: Use WAL mode, appropriate indexes
 - **Memory**: Batch embedding generation, context caching
-- **Search**: Hybrid search con relevance thresholds
-- **Tasks**: Parallel micro-task execution quando possibile
+- **Search**: Hybrid search with relevance thresholds
+- **Tasks**: Parallel micro-task execution when possible
 
 ## 🔍 Debugging
 
@@ -311,7 +314,7 @@ sqlite3 data/devstream.db ".schema"
 
 ### Logging
 
-Structured logging con configurazione flessibile:
+Structured logging with flexible configuration:
 
 ```python
 import structlog
@@ -324,21 +327,21 @@ logger.info("Task completed", task_id="123", duration_ms=1500)
 
 ### Code Quality Standards
 
-- **Type Hints**: Tutti i parametri e return types
+- **Type Hints**: All parameters and return types
 - **Docstrings**: Google-style docstrings
-- **Testing**: 90%+ coverage per nuovo codice
-- **Linting**: Pre-commit hooks automatici
+- **Testing**: 90%+ coverage for new code
+- **Linting**: Automatic pre-commit hooks
 
 ### Development Process
 
-1. Fork repository e create feature branch
-2. Implement changes con test coverage
-3. Run `make check` per code quality
-4. Submit pull request con description dettagliata
+1. Fork repository and create feature branch
+2. Implement changes with test coverage
+3. Run `make check` for code quality
+4. Submit pull request with detailed description
 
 ### Commit Convention
 
-Usa [Conventional Commits](https://www.conventionalcommits.org/):
+Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
 feat: add semantic search with Ollama integration
@@ -349,8 +352,8 @@ test: add integration tests for hook system
 
 ## 📚 Documentation
 
-- **[Architecture](docs/architecture.md)**: System design dettagliato
-- **[Database Schema](docs/database.md)**: Schema e migrations
+- **[Architecture](docs/architecture.md)**: Detailed system design
+- **[Database Schema](docs/database.md)**: Schema and migrations
 - **[API Reference](docs/api/)**: Complete API documentation
 - **[Configuration](docs/configuration.md)**: Configuration options
 - **[Deployment](docs/deployment.md)**: Production deployment guide
@@ -358,7 +361,7 @@ test: add integration tests for hook system
 ### Generate Documentation
 
 ```bash
-# Serve locally con hot reload
+# Serve locally with hot reload
 make docs
 
 # Build static documentation
@@ -389,7 +392,7 @@ DEVSTREAM_OLLAMA_ENDPOINT=http://ollama:11434
 
 ### Monitoring
 
-- **Structured Logging**: JSON logs per aggregation
+- **Structured Logging**: JSON logs for aggregation
 - **Performance Metrics**: Task completion times, memory usage
 - **Health Checks**: Database connectivity, Ollama availability
 - **Alerts**: Failed tasks, memory threshold exceeded
@@ -400,11 +403,11 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- **Claude Code Team** per la vision del task-forced workflow
-- **Ollama Project** per local embedding capabilities
-- **SQLite Team** per FTS5 e performance optimizations
-- **Python Community** per excellent typing e async support
+- **Claude Code Team** for the vision of task-forced workflow
+- **Ollama Project** for local embedding capabilities
+- **SQLite Team** for FTS5 and performance optimizations
+- **Python Community** for excellent typing and async support
 
 ---
 
-**Nota**: Questo sistema rappresenta un paradigm shift nell'interazione con AI development tools, trasformando Claude Code da tool reattivo a sistema proattivo di project management con memoria permanente.
+**Note**: This system represents a paradigm shift in AI development tool interaction, transforming Claude Code from a reactive tool to a proactive project management system with permanent memory.

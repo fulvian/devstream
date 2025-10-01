@@ -30,6 +30,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.devstream/
+venv_test/
 
 # IDEs
 .vscode/
@@ -57,13 +59,14 @@ docs/_build/
 .ipynb_checkpoints
 *.ipynb
 
-# DevStream specific
+# DevStream specific - User data (project-specific)
 data/
 logs/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.log
 
 # Temporary files
 *.tmp
@@ -125,11 +128,19 @@ Thumbs.db
 *.backup
 *~
 
-# Test virtual environments
-venv_test/
-.devstream/
+# Internal documentation (development logs) - NEW
+.docs-archive/
 
 # Local development
 .local/
 scratch/
-testing/devstream-server.log
+testing/
+
+# Obsolete directories (to be removed)
+deployment/
+sqlite:/
+sqlite+aiosqlite:/
+app/
+async_tcp_server/
+test_go_server/
+init-scripts/

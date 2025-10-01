@@ -2,15 +2,15 @@
 
 **Version**: 2.1.0 | **Date**: 2025-10-01 | **Status**: Production Ready - Phase 3 Complete
 
-⚠️ **CRITICAL**: Queste regole sono **OBBLIGATORIE** e integrate nel sistema DevStream tramite hook automatici. La loro violazione può causare malfunzionamenti del sistema.
+⚠️ **CRITICAL**: These rules are **MANDATORY** and integrated into the DevStream system through automatic hooks. Violating them may cause system malfunctions.
 
 ---
 
 ## 🎯 DevStream System Architecture
 
-DevStream combina: (1) Task Lifecycle Management, (2) Semantic Memory System, (3) Context Injection (Context7 + DevStream Memory), (4) Hook Automation (PreToolUse, PostToolUse, UserPromptSubmit via cchooks).
+DevStream combines: (1) Task Lifecycle Management, (2) Semantic Memory System, (3) Context Injection (Context7 + DevStream Memory), (4) Hook Automation (PreToolUse, PostToolUse, UserPromptSubmit via cchooks).
 
-**🔄 Sistema Automatico**: I hook eseguono automaticamente memory storage e context injection senza intervento manuale.
+**🔄 Automatic System**: Hooks automatically execute memory storage and context injection without manual intervention.
 
 ---
 
@@ -269,90 +269,90 @@ DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer for com
 
 ---
 
-## 📋 REGOLE PRESCRITTIVE - Metodologia DevStream
+## 📋 PRESCRIPTIVE RULES - DevStream Methodology
 
-### 🚨 Workflow Obbligatorio: 7 Step Sequenziali
+### 🚨 Mandatory Workflow: 7 Sequential Steps
 
-**OGNI task DEVE seguire**: DISCUSSIONE → ANALISI → RICERCA → PIANIFICAZIONE → APPROVAZIONE → IMPLEMENTAZIONE → VERIFICA/TEST
+**EVERY task MUST follow**: DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION/TEST
 
-#### Step 1: DISCUSSIONE (MANDATORY)
-- ✅ Presentare problema/obiettivo, discutere trade-offs, identificare vincoli, ottenere consensus
-- 🔒 Hook registra discussioni in memory (content_type: "decision")
-- 📊 Validation: Ogni task deve avere ≥1 discussion record
+#### Step 1: DISCUSSION (MANDATORY)
+- ✅ Present problem/objective, discuss trade-offs, identify constraints, obtain consensus
+- 🔒 Hook registers discussions in memory (content_type: "decision")
+- 📊 Validation: Every task must have ≥1 discussion record
 
-#### Step 2: ANALISI (MANDATORY)
-- ✅ Analizzare codebase per pattern simili, identificare file da modificare, stimare complessità, definire acceptance criteria
-- 🔒 Hook richiede context injection da memory
-- 📊 Validation: Verificare analisi codebase patterns
+#### Step 2: ANALYSIS (MANDATORY)
+- ✅ Analyze codebase for similar patterns, identify files to modify, estimate complexity, define acceptance criteria
+- 🔒 Hook requires context injection from memory
+- 📊 Validation: Verify codebase pattern analysis
 
-#### Step 3: RICERCA (MANDATORY - Context7)
-- ✅ Usare Context7 per decisioni tecniche, ricercare best practices, documentare findings, validare approccio
-- 🔒 Context7 integration automatica via PreToolUse hook
-- 📊 Validation: Verificare Context7 docs in context injection log
+#### Step 3: RESEARCH (MANDATORY - Context7)
+- ✅ Use Context7 for technical decisions, research best practices, document findings, validate approach
+- 🔒 Context7 integration automatic via PreToolUse hook
+- 📊 Validation: Verify Context7 docs in context injection log
 
-#### Step 4: PIANIFICAZIONE (MANDATORY - TodoWrite)
-- ✅ Creare TodoWrite list per task non-triviali, micro-task MAX 10-15 min, definire dipendenze, stabilire completion criteria
-- 🔒 TodoWrite tool integrato in Claude Code
-- 📊 Validation: Task list deve esistere prima di implementazione
+#### Step 4: PLANNING (MANDATORY - TodoWrite)
+- ✅ Create TodoWrite list for non-trivial tasks, micro-tasks MAX 10-15 min, define dependencies, establish completion criteria
+- 🔒 TodoWrite tool integrated in Claude Code
+- 📊 Validation: Task list must exist before implementation
 
-#### Step 5: APPROVAZIONE (MANDATORY)
-- ✅ Presentare piano completo, mostrare Context7 findings, ottenere approvazione esplicita ("OK", "procedi", "approvato")
-- 🔒 Memory registra approval come "decision"
-- 📊 Validation: Verificare approval record prima di commit
+#### Step 5: APPROVAL (MANDATORY)
+- ✅ Present complete plan, show Context7 findings, obtain explicit approval ("OK", "proceed", "approved")
+- 🔒 Memory registers approval as "decision"
+- 📊 Validation: Verify approval record before commit
 
-#### Step 6: IMPLEMENTAZIONE (MANDATORY - Guided)
-- ✅ Un micro-task alla volta, mark "in_progress" → work → mark "completed", documentare con docstrings + type hints
-- 🔒 PostToolUse hook registra codice in memory automaticamente
-- 📊 Validation: Verificare ogni file scritto registrato in memory
+#### Step 6: IMPLEMENTATION (MANDATORY - Guided)
+- ✅ One micro-task at a time, mark "in_progress" → work → mark "completed", document with docstrings + type hints
+- 🔒 PostToolUse hook registers code in memory automatically
+- 📊 Validation: Verify every written file registered in memory
 
-#### Step 7: VERIFICA/TEST (MANDATORY)
-- ✅ Test per OGNI feature, 95%+ coverage, validare performance, integration tests E2E, error handling
-- 🔒 Hook richiede test validation prima di completion
-- 📊 Validation: Test results documentati in memory
+#### Step 7: VERIFICATION/TEST (MANDATORY)
+- ✅ Tests for EVERY feature, 95%+ coverage, validate performance, E2E integration tests, error handling
+- 🔒 Hook requires test validation before completion
+- 📊 Validation: Test results documented in memory
 
 ---
 
-## 🔄 REGOLE PRESCRITTIVE - Task Lifecycle Management
+## 🔄 PRESCRIPTIVE RULES - Task Lifecycle Management
 
 ### Task Creation
-**WHEN**: Lavoro > 30 minuti
-**RULES**: ✅ Use `mcp__devstream__devstream_create_task`, definire title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name, registrare in MCP | ❌ Task manuali senza MCP
-**ENFORCEMENT**: Task non MCP non tracciati
+**WHEN**: Work > 30 minutes
+**RULES**: ✅ Use `mcp__devstream__devstream_create_task`, define title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name, register in MCP | ❌ Manual tasks without MCP
+**ENFORCEMENT**: Non-MCP tasks not tracked
 
 ### Task Execution
-**WHEN**: Durante implementazione
-**RULES**: ✅ Mark "active" via `mcp__devstream__devstream_update_task`, seguire 7-step workflow, update progress, registrare decisions/learnings, TodoWrite real-time | ❌ Multiple task simultaneously senza approval
-**ENFORCEMENT**: Hook monitora task status e tool usage
+**WHEN**: During implementation
+**RULES**: ✅ Mark "active" via `mcp__devstream__devstream_update_task`, follow 7-step workflow, update progress, register decisions/learnings, TodoWrite real-time | ❌ Multiple tasks simultaneously without approval
+**ENFORCEMENT**: Hook monitors task status and tool usage
 
 ### Task Completion
-**WHEN**: Tutti acceptance criteria completati
-**RULES**: ✅ Verificare TodoWrite "completed", test 100% pass, mark "completed", registrare lessons learned, commit, push se richiesto | ❌ Mark "completed" con test failing o TodoWrite pending
-**ENFORCEMENT**: Hook valida completion criteria automaticamente
+**WHEN**: All acceptance criteria completed
+**RULES**: ✅ Verify TodoWrite "completed", tests 100% pass, mark "completed", register lessons learned, commit, push if requested | ❌ Mark "completed" with failing tests or pending TodoWrite
+**ENFORCEMENT**: Hook validates completion criteria automatically
 
 ---
 
-## 💾 REGOLE PRESCRITTIVE - Memory System
+## 💾 PRESCRIPTIVE RULES - Memory System
 
 ### Automatic Memory Storage (PostToolUse Hook)
-**WHEN**: Automatico dopo OGNI tool execution (Write, Edit, Bash, etc.)
+**WHEN**: Automatic after EVERY tool execution (Write, Edit, Bash, etc.)
 **CONTENT TYPES**: code, documentation, context, output, error, decision, learning
 **PROCESS**: ✅ AUTOMATIC - PostToolUse hook → content preview (300 chars) → keywords extraction → vector embeddings (Ollama) → SQLite + sqlite-vec storage
-**USER ACTION**: Nessuna - completamente automatico
+**USER ACTION**: None - completely automatic
 
 ### Memory Search & Retrieval (PreToolUse Hook)
-**WHEN**: Automatico prima di OGNI tool execution
+**WHEN**: Automatic before EVERY tool execution
 **FLOW**: (1) Detect libraries (Context7) → (2) Search DevStream memory → (3) Assemble hybrid context → (4) Inject in Claude context → (5) Token budget management
 **ALGORITHM**: Hybrid search (semantic + keyword) via RRF (Reciprocal Rank Fusion), threshold 0.5, token budget: Context7 5000 + Memory 2000
-**USER ACTION**: Nessuna - completamente automatico
+**USER ACTION**: None - completely automatic
 
 ### Manual Memory Operations (OPTIONAL)
 **TOOLS**: `mcp__devstream__devstream_store_memory` (content, content_type, keywords), `mcp__devstream__devstream_search_memory` (query, content_type, limit)
-**USE CASE**: Query avanzate, store context critico pre-session end
-**NOTE**: Sistema automatico gestisce 99% dei casi
+**USE CASE**: Advanced queries, store critical context pre-session end
+**NOTE**: Automatic system handles 99% of cases
 
 ---
 
-## 🔍 REGOLE PRESCRITTIVE - Context Injection
+## 🔍 PRESCRIPTIVE RULES - Context Injection
 
 ### Context7 Integration (PreToolUse Hook)
 **TRIGGERS**: Import statements, library mentions, code patterns (async/await, decorators), documentation requests
@@ -366,11 +366,11 @@ DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer for com
 
 ---
 
-## 🐍 REGOLE PRESCRITTIVE - Python Environment
+## 🐍 PRESCRIPTIVE RULES - Python Environment
 
 ### 🚨 MANDATORY: Virtual Environment Usage
 
-**CRITICAL RULE**: SEMPRE utilizzare `.devstream` venv per TUTTI i comandi Python.
+**CRITICAL RULE**: ALWAYS use `.devstream` venv for ALL Python commands.
 
 **Configuration**: Venv: `.devstream` | Python: 3.11.x | Interpreter: `.devstream/bin/python`
 
@@ -408,24 +408,24 @@ if [ ! -d ".devstream" ]; then python3.11 -m venv .devstream; fi
 
 ---
 
-## 🛠 REGOLE PRESCRITTIVE - Tools & Configuration
+## 🛠 PRESCRIPTIVE RULES - Tools & Configuration
 
 ### Context7 Usage (MANDATORY for Research)
-**WORKFLOW**: (1) `mcp__context7__resolve-library-id` (library name → Context7 ID) → (2) `mcp__context7__get-library-docs` (ID → docs max 5000 tokens) → (3) Analyze findings → (4) Apply research-backed patterns | ❌ Skip Context7 per nuove tecnologie
+**WORKFLOW**: (1) `mcp__context7__resolve-library-id` (library name → Context7 ID) → (2) `mcp__context7__get-library-docs` (ID → docs max 5000 tokens) → (3) Analyze findings → (4) Apply research-backed patterns | ❌ Skip Context7 for new technologies
 
 ### TodoWrite Usage (MANDATORY for Planning)
-**WHEN**: Task non-triviali (>15 min)
-**RULES**: ✅ Create TodoWrite BEFORE implementation, micro-task 10-15 min, mark "in_progress" → work → "completed", ONE task "in_progress" at a time | ❌ Start without TodoWrite, mark "completed" con pending sub-tasks
+**WHEN**: Non-trivial tasks (>15 min)
+**RULES**: ✅ Create TodoWrite BEFORE implementation, micro-tasks 10-15 min, mark "in_progress" → work → "completed", ONE task "in_progress" at a time | ❌ Start without TodoWrite, mark "completed" with pending sub-tasks
 **FORMAT**: `{"content": "Imperative form", "activeForm": "Present continuous", "status": "pending|in_progress|completed"}`
 
 ### Testing Requirements (MANDATORY)
-**COVERAGE**: ✅ 95%+ for NEW code, 100% pass rate before commit, integration tests E2E, performance validation, error handling | ❌ Commit con failing tests, commit senza test
+**COVERAGE**: ✅ 95%+ for NEW code, 100% pass rate before commit, E2E integration tests, performance validation, error handling | ❌ Commit with failing tests, commit without tests
 **STRUCTURE**: `tests/unit/` (fast <1s), `tests/integration/` (E2E <10s), `tests/fixtures/` (test data)
 **EXECUTION**: `.devstream/bin/python -m pytest tests/ -v --cov=.claude/hooks/devstream --cov-report=html`
 
 ---
 
-## 📖 REGOLE PRESCRITTIVE - Documentation
+## 📖 PRESCRIPTIVE RULES - Documentation
 
 ### Code Documentation (MANDATORY)
 **EVERY function/class MUST have**: Docstring (description, Args, Returns, Raises, Note), full type hints, inline comments for complex logic (>5 lines) | ❌ Missing docstrings, missing type hints
@@ -459,57 +459,57 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 
 ### Progress Documentation (MANDATORY)
 **MUST Document**: TodoWrite tracking, implementation notes per phase, lessons learned per completed task, decision rationale, test results
-**STORAGE**: Automatico via PostToolUse hook in memory (content_type: "learning", "decision")
+**STORAGE**: Automatic via PostToolUse hook in memory (content_type: "learning", "decision")
 
 ---
 
-## 🎯 REGOLE PRESCRITTIVE - Quality Standards
+## 🎯 PRESCRIPTIVE RULES - Quality Standards
 
 ### Code Quality (MANDATORY)
 **Type Safety**: ✅ Full type hints ALL functions/methods, mypy --strict (zero errors) | ❌ Any type hints, mypy errors in production
-**Error Handling**: ✅ Structured exception hierarchy, logging per OGNI exception, graceful degradation, user-friendly messages | ❌ Bare except:, silent failures
-**Performance**: ✅ async/await per I/O, connection pooling, token budget enforcement, performance testing | ❌ Blocking I/O in async, no performance validation
+**Error Handling**: ✅ Structured exception hierarchy, logging for EVERY exception, graceful degradation, user-friendly messages | ❌ Bare except:, silent failures
+**Performance**: ✅ async/await for I/O, connection pooling, token budget enforcement, performance testing | ❌ Blocking I/O in async, no performance validation
 **Maintainability**: ✅ SOLID principles, single responsibility, max function length 50 lines, max cyclomatic complexity 10 | ❌ God objects, cryptic abbreviations
 
 ### Architecture Quality (MANDATORY)
 **Separation**: ✅ Clear module boundaries, layered architecture (hooks → utils → core), interface segregation | ❌ Circular dependencies, tight coupling
-**Configuration**: ✅ Environment-based (.env.devstream), validation ALL config, defaults, documentation | ❌ Hardcoded values, config in code
+**Configuration**: ✅ Environment-based (.env.devstream), validate ALL config, defaults, documentation | ❌ Hardcoded values, config in code
 **Logging**: ✅ Structured logging (structlog), context ALL log messages, appropriate levels (DEBUG/INFO/WARNING/ERROR), log rotation | ❌ print() statements, logging sensitive data
 
 ---
 
-## 🚀 REGOLE PRESCRITTIVE - Implementation Patterns
+## 🚀 PRESCRIPTIVE RULES - Implementation Patterns
 
 ### Research-Driven Development (MANDATORY)
-**SEQUENCE**: (1) RESEARCH (Context7 → best practices → document findings) → (2) DESIGN (architecture basata su research → clear interfaces) → (3) IMPLEMENT (validated patterns → one micro-task at a time) → (4) TEST (95%+ coverage → validate assumptions) → (5) DOCUMENT (lessons learned → update docs)
-**ENFORCEMENT**: Hook registra research findings in memory
+**SEQUENCE**: (1) RESEARCH (Context7 → best practices → document findings) → (2) DESIGN (research-based architecture → clear interfaces) → (3) IMPLEMENT (validated patterns → one micro-task at a time) → (4) TEST (95%+ coverage → validate assumptions) → (5) DOCUMENT (lessons learned → update docs)
+**ENFORCEMENT**: Hook registers research findings in memory
 
 ### Micro-Task Execution (MANDATORY)
-**SEQUENCE**: (1) ANALYZE (break down feature → 10-15 min micro-tasks → dependencies) → (2) PLAN (TodoWrite list → completion criteria) → (3) EXECUTE (one task at a time → mark "in_progress" → work → "completed") → (4) VERIFY (test after OGNI task → verify integration) → (5) INTEGRATE (merge codebase → update docs)
+**SEQUENCE**: (1) ANALYZE (break down feature → 10-15 min micro-tasks → dependencies) → (2) PLAN (TodoWrite list → completion criteria) → (3) EXECUTE (one task at a time → mark "in_progress" → work → "completed") → (4) VERIFY (test after EVERY task → verify integration) → (5) INTEGRATE (merge codebase → update docs)
 **ENFORCEMENT**: TodoWrite tool tracks compliance
 
 ### Approval Workflow (MANDATORY)
-**SEQUENCE**: (1) DISCUSS (present approach + trade-offs → identify risks) → (2) RESEARCH (Context7 validation → alternative approaches) → (3) APPROVE (explicit approval → confirm acceptance criteria) → (4) IMPLEMENT (follow approved approach → no deviations senza approval) → (5) REVIEW (validate results → document learnings)
-**ENFORCEMENT**: Memory registra approval as "decision"
+**SEQUENCE**: (1) DISCUSS (present approach + trade-offs → identify risks) → (2) RESEARCH (Context7 validation → alternative approaches) → (3) APPROVE (explicit approval → confirm acceptance criteria) → (4) IMPLEMENT (follow approved approach → no deviations without approval) → (5) REVIEW (validate results → document learnings)
+**ENFORCEMENT**: Memory registers approval as "decision"
 
 ---
 
-## 📊 REGOLE PRESCRITTIVE - Success Metrics
+## 📊 PRESCRIPTIVE RULES - Success Metrics
 
 ### Development Metrics (MANDATORY Targets)
 ✅ Task Completion: 100% | Test Coverage: 95%+ NEW code | Test Pass Rate: 100% | Code Quality: Zero mypy errors | Cyclomatic Complexity: Max 10 | Documentation Coverage: 100% docstrings | Performance: Meet/exceed targets
 
 ### Process Metrics (MANDATORY Tracking)
-✅ Research Quality: Context7 usage OGNI major decision | Collaboration: 100% approval workflow adherence | Learning: Documented lessons learned per phase | Innovation: Research-backed technology choices | Delivery: On-time (planned vs actual) | Memory Usage: Automatic storage tracking | Context Injection: Automatic injection rate
+✅ Research Quality: Context7 usage for EVERY major decision | Collaboration: 100% approval workflow adherence | Learning: Documented lessons learned per phase | Innovation: Research-backed technology choices | Delivery: On-time (planned vs actual) | Memory Usage: Automatic storage tracking | Context Injection: Automatic injection rate
 
-**STORAGE**: Automatico via DevStream memory system
+**STORAGE**: Automatic via DevStream memory system
 
 ---
 
-## 🔧 REGOLE PRESCRITTIVE - File Organization
+## 🔧 PRESCRIPTIVE RULES - File Organization
 
 ### 📁 Project Structure (MANDATORY)
-**CRITICAL**: SEMPRE seguire PROJECT_STRUCTURE.md
+**CRITICAL**: ALWAYS follow PROJECT_STRUCTURE.md
 
 **Documentation**: ✅ `docs/{architecture,api,deployment,guides,development,tutorials}/` | ❌ .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
 **Tests**: ✅ `tests/{unit,integration,fixtures}/` | ❌ Test files in root, tests mixed with source
@@ -519,11 +519,11 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 
 ---
 
-## 🚨 REGOLA FONDAMENTALE - Problem Solving
+## 🚨 FUNDAMENTAL RULE - Problem Solving
 
 ### ⚡⚡⚡ USE CONTEXT7 TO SOLVE - NEVER SIMPLIFY ⚡⚡⚡
 
-**MANDATORY**: ✅ Use Context7 per research solution, ricerca best practices, implement research-backed solution, maintain ALL features functional, test thoroughly
+**MANDATORY**: ✅ Use Context7 to research solution, research best practices, implement research-backed solution, maintain ALL features functional, test thoroughly
 **FORBIDDEN**: ❌ Disable features to "fix" problem, remove functionality as workaround, create temporary workarounds, simplify to avoid complexity, skip research step
 
 **ENFORCEMENT**: Code review rejects workarounds and feature disabling
@@ -578,9 +578,9 @@ DEVSTREAM_LOG_PATH=~/.claude/logs/devstream/
 **Document Version**: 2.1.0 (Prescriptive Rules + Auto-Delegation)
 **Last Updated**: 2025-10-01
 **Status**: ✅ Production Ready - Phase 3 Complete (Agent Auto-Delegation System)
-**Methodology**: Research-Driven Development con Context7
+**Methodology**: Research-Driven Development with Context7
 **Enforcement**: Automatic via Hook System + MCP Integration + Auto-Delegation
 
 ---
 
-*Queste regole sono parte integrante e fondamento del sistema DevStream. La loro violazione può causare malfunzionamenti del sistema automatico.*
+*These rules are an integral part and foundation of the DevStream system. Violating them may cause automatic system malfunctions.*
