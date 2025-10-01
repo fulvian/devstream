@@ -90,13 +90,15 @@ Level 4: QUALITY ASSURANCE - @code-reviewer (OWASP Top 10, performance, architec
 **Fix**: `node --max-old-space-size=8192 --expose-gc start-production.js` (8GB heap, explicit GC, memory cleanup)
 **Status**: Production stable ✅
 
-### Agent Auto-Delegation System (Phase 3 ✅)
+### Agent Auto-Delegation System (Phase 3 ✅ - ALWAYS-ON)
 
 **Purpose**: Intelligent, automatic agent selection based on file patterns and task context.
 
+**STATUS**: ALWAYS-ON - Delegation analysis runs for EVERY user request automatically.
+
 #### Default Ownership Model
 
-**@tech-lead** owns ALL user requests by default and decides delegation strategy:
+**@tech-lead** owns ALL user requests by default and decides delegation strategy via automatic pattern analysis:
 
 ```
 User Request
@@ -242,25 +244,30 @@ DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer for com
 - `AUTO_APPROVE`: Confidence threshold for automatic delegation (no approval needed)
 - `QUALITY_GATE`: Enforce mandatory @code-reviewer before commits (RECOMMENDED: true)
 
-#### Advisory vs Automatic Delegation
+#### Advisory vs Automatic Delegation (ALWAYS-ON)
+
+**CRITICAL**: Delegation analysis runs for EVERY user request via UserPromptSubmit + PreToolUse hooks.
 
 **AUTOMATIC** (Confidence ≥ 0.95):
 - ✅ Single file, clear language pattern
 - ✅ Direct specialist match
 - ✅ No architectural decisions required
 - ✅ Execution: Immediate delegation, no approval
+- 🤖 **Always checked**: UserPromptSubmit hook analyzes BEFORE user works
 
 **ADVISORY** (0.85 ≤ Confidence < 0.95):
 - 🔔 Multiple related files, same language
 - 🔔 Clear primary specialist, minor coordination
 - 🔔 Execution: Suggest agent, request approval
 - 🔔 User confirms: "Use @python-specialist" → Proceed
+- 🤖 **Always checked**: Advisory shown in context injection
 
 **AUTHORIZATION REQUIRED** (Confidence < 0.85):
 - ⚠️ Multi-stack coordination
 - ⚠️ Architectural decisions
 - ⚠️ Strategic planning
 - ⚠️ Execution: @tech-lead full analysis + orchestration
+- 🤖 **Always checked**: Coordination advisory provided
 
 ### Future Phases
 

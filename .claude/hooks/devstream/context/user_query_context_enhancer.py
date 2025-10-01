@@ -27,6 +27,16 @@ from devstream_base import DevStreamHookBase
 from context7_client import Context7Client
 from mcp_client import get_mcp_client
 
+# Agent Auto-Delegation imports (with graceful degradation)
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'agents'))
+    from pattern_matcher import PatternMatcher
+    from agent_router import AgentRouter
+    AGENT_DELEGATION_AVAILABLE = True
+except ImportError as e:
+    AGENT_DELEGATION_AVAILABLE = False
+    _DELEGATION_IMPORT_ERROR = str(e)
+
 
 class UserPromptSubmitHook:
     """
@@ -38,6 +48,20 @@ class UserPromptSubmitHook:
         self.base = DevStreamHookBase("user_prompt_submit")
         self.mcp_client = get_mcp_client()
         self.context7 = Context7Client(self.mcp_client)
+
+        # Agent Auto-Delegation components (graceful degradation)
+        self.pattern_matcher = None
+        self.agent_router = None
+
+        if AGENT_DELEGATION_AVAILABLE:
+            try:
+                self.pattern_matcher = PatternMatcher()
+                self.agent_router = AgentRouter()
+                self.base.debug_log("Agent Auto-Delegation enabled in UserPromptSubmit")
+            except Exception as e:
+                self.base.debug_log(f"Agent Auto-Delegation init failed: {e}")
+        else:
+            self.base.debug_log(f"Agent Auto-Delegation unavailable: {_DELEGATION_IMPORT_ERROR}")
 
     async def detect_context7_trigger(self, user_input: str) -> bool:
         """
@@ -226,6 +250,78 @@ Cancel"""
 
         return prompt
 
+    async def check_agent_delegation(self, user_input: str) -> Optional[str]:
+        """
+        Check if task should be delegated to specialized agent (ALWAYS-ON).
+
+        Args:
+            user_input: User input text
+
+        Returns:
+            Agent delegation advisory message if match found, None otherwise
+
+        Note:
+            This is ALWAYS checked for every user request (always-on mode).
+            Confidence-based routing:
+            - ≥ 0.95: AUTOMATIC delegation (immediate)
+            - 0.85-0.94: ADVISORY delegation (suggest + request approval)
+            - < 0.85: @tech-lead COORDINATION (multi-agent orchestration)
+        """
+        # Check if components available
+        if not self.pattern_matcher or not self.agent_router:
+            self.base.debug_log("Agent delegation unavailable (components not loaded)")
+            return None
+
+        try:
+            # Match patterns from user query
+            pattern_match = self.pattern_matcher.match_patterns(
+                file_path=None,
+                content=None,
+                user_query=user_input,
+                tool_name=None
+            )
+
+            if not pattern_match:
+                self.base.debug_log("No agent pattern match found for user query")
+                return None
+
+            # Assess task complexity and delegation
+            assessment = self.agent_router.assess_task(
+                pattern_match=pattern_match,
+                user_query=user_input
+            )
+
+            if not assessment:
+                return None
+
+            # Format delegation advisory based on confidence
+            advisory_message = self.agent_router.format_advisory_message(assessment)
+
+            # Log delegation event
+            try:
+                await self.base.safe_mcp_call(
+                    self.mcp_client,
+                    "devstream_store_memory",
+                    {
+                        "content": f"Agent delegation: {assessment.suggested_agent} (confidence: {assessment.confidence:.2f}). User query: {user_input[:200]}",
+                        "content_type": "decision",
+                        "keywords": ["agent-delegation", "auto-routing", "confidence-based"]
+                    }
+                )
+            except Exception as e:
+                self.base.debug_log(f"Failed to log delegation event: {e}")
+
+            self.base.success_feedback(
+                f"Agent delegation: {assessment.recommendation} "
+                f"({assessment.suggested_agent}, confidence: {assessment.confidence:.2f})"
+            )
+
+            return advisory_message
+
+        except Exception as e:
+            self.base.debug_log(f"Agent delegation error: {e}")
+            return None
+
     async def check_protocol_enforcement(self, user_input: str) -> Optional[str]:
         """
         Check if protocol enforcement is required and return prompt if needed.
@@ -332,6 +428,12 @@ Cancel"""
             Assembled enhanced context or None
         """
         context_parts = []
+
+        # PRIORITY 0: Agent Auto-Delegation (ALWAYS-ON, checked FIRST)
+        delegation_advisory = await self.check_agent_delegation(user_input)
+        if delegation_advisory:
+            context_parts.append(f"# Agent Auto-Delegation Advisory\n\n{delegation_advisory}")
+            self.base.success_feedback("Agent delegation advisory provided")
 
         # PRIORITY 1: Check protocol enforcement (MANDATORY)
         enforcement_prompt = await self.check_protocol_enforcement(user_input)
