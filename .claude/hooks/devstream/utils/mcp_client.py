@@ -365,6 +365,72 @@ class DevStreamMCPClient:
             )
             return None
 
+    def _parse_mcp_response(self, response_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Multi-strategy JSON parser for MCP server responses.
+        Handles single-line, multiline, and embedded JSON formats.
+
+        Strategy 1: Full JSON parse (handles pretty-printed multiline)
+        Strategy 2: Bracket-counting extraction (finds complete JSON object)
+        Strategy 3: Reverse line iteration (fallback for line-delimited JSON)
+
+        Args:
+            response_text: Raw output from MCP server subprocess
+
+        Returns:
+            Parsed JSON dict or None if all strategies fail
+        """
+        if not response_text or not response_text.strip():
+            return None
+
+        response_text = response_text.strip()
+
+        # STRATEGY 1: Parse entire output as JSON (handles multiline)
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            pass
+
+        # STRATEGY 2: Bracket-counting extraction (find complete JSON object)
+        json_start = response_text.rfind('{')
+        if json_start != -1:
+            bracket_count = 0
+            for i, char in enumerate(response_text[json_start:], start=json_start):
+                if char == '{':
+                    bracket_count += 1
+                elif char == '}':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        # Found matching closing brace
+                        json_candidate = response_text[json_start:i+1]
+                        try:
+                            return json.loads(json_candidate)
+                        except json.JSONDecodeError:
+                            pass
+                        break
+
+        # STRATEGY 3: Reverse line iteration (fallback for line-delimited JSON)
+        lines = response_text.split('\n')
+        for line in reversed(lines):
+            line = line.strip()
+            if line and line.startswith('{'):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+        # All strategies failed - enhanced error logging
+        self.logger.logger.error(
+            "MCP JSON parsing failed after all strategies",
+            extra={
+                "output_preview": response_text[:200],
+                "output_length": len(response_text),
+                "starts_with": response_text[:50] if len(response_text) > 50 else response_text,
+                "ends_with": response_text[-50:] if len(response_text) > 50 else response_text
+            }
+        )
+        return None
+
     async def _call_mcp_server(self, mcp_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Make actual MCP server call via subprocess.
@@ -392,34 +458,36 @@ class DevStreamMCPClient:
                 env={**os.environ, 'NODE_ENV': 'production'}
             )
 
-            # Send MCP request
+            # Send MCP request with 30 second timeout
             request_json = json.dumps(mcp_request) + '\n'
-            stdout, stderr = await process.communicate(request_json.encode('utf-8'))
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(request_json.encode('utf-8')),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                # Kill hung process
+                process.kill()
+                await process.wait()
+                self.logger.logger.error(
+                    "MCP server timeout (30s)",
+                    extra={
+                        "method": mcp_request.get("method"),
+                        "server_path": str(self.mcp_server_path)
+                    }
+                )
+                return None
 
             if process.returncode != 0:
                 error_msg = stderr.decode('utf-8') if stderr else 'Unknown MCP server error'
                 self.logger.logger.error(f"MCP server error: {error_msg}")
                 return None
 
-            # Parse response - extract JSON from last line (server logs to stdout before JSON)
+            # Parse response using multi-strategy parser
             if stdout:
                 response_text = stdout.decode('utf-8').strip()
                 if response_text:
-                    # Split by lines and find the last valid JSON line
-                    # MCP server outputs logs first, then JSON response on last line
-                    lines = response_text.split('\n')
-                    for line in reversed(lines):
-                        line = line.strip()
-                        if line and (line.startswith('{') or line.startswith('[')):
-                            try:
-                                return json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-
-                    # If no valid JSON found in any line, log the error
-                    self.logger.logger.error(f"Failed to parse MCP response: No valid JSON found in output")
-                    self.logger.logger.debug(f"Raw output (first 500 chars): {response_text[:500]}")
-                    return None
+                    return self._parse_mcp_response(response_text)
 
             return None
 

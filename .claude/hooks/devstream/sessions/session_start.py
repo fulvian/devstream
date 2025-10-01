@@ -178,4 +178,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        # Check if already in event loop context (Claude Code hooks provide event loop)
+        loop = asyncio.get_running_loop()
+        # Schedule task in existing loop
+        task = loop.create_task(main())
+        # Ensure task completes before hook exits
+        loop.run_until_complete(task)
+    except RuntimeError:
+        # No event loop exists - standalone execution
+        asyncio.run(main())
