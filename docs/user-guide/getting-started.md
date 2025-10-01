@@ -62,6 +62,16 @@ Before starting, ensure DevStream is properly installed:
 
 If verification fails, see [INSTALLATION.md](../../INSTALLATION.md#troubleshooting).
 
+### Important New Features (v0.1.0-beta Fixes)
+
+DevStream now includes three critical improvements:
+
+1. **Session Checkpoints** - Save/restore progress with `/save-progress` command
+2. **Protocol Enforcement** - Mandatory 7-step workflow for complex tasks
+3. **Auto-Delegation** - Automatic agent selection (ALWAYS-ON)
+
+See [Release Notes](../releases/v0.1.0-beta-fixes.md) for details.
+
 ### Start MCP Server
 
 DevStream requires the MCP server for task management:
@@ -550,6 +560,36 @@ combined_score = (
 ❌ Manually store code (automatic via PostToolUse)
 ❌ Store sensitive data (passwords, keys)
 ❌ Store temporary notes or obvious information
+
+### Session Checkpoints (NEW)
+
+**Save Progress Before**:
+✅ Long breaks (lunch, end of day)
+✅ Risky operations (major refactoring)
+✅ Context window near exhaustion
+✅ Branch switching
+
+**Usage**:
+```bash
+# Save current state
+/save-progress
+# Output: ✅ checkpoint_20251002_143022_a1b2c3d4
+
+# After crash/restart, restore
+/restore checkpoint_20251002_143022_a1b2c3d4
+
+# List available checkpoints
+/list-checkpoints
+```
+
+**What Gets Saved**:
+- Active task and TodoWrite state
+- Recent memory snapshot
+- Modified files list
+- Agent delegation history
+- Session metadata
+
+See [Checkpoint System](../architecture/checkpoint-system.md) for full documentation.
 
 ---
 
