@@ -125,17 +125,40 @@ System prompt defining agent expertise...
 - ✅ Agents have isolated context (no interference)
 - ✅ Tool inheritance (omit `tools:`) gives full flexibility
 
+## Phase 4 Agents (Production Ready ✅)
+
+### security-auditor (QA)
+- **Purpose**: Comprehensive security audits, threat modeling, compliance validation
+- **Tools**: Read, Grep, Glob, Bash (analysis focus)
+- **Use**: STRIDE threat modeling, OWASP checks, GDPR/SOC2 compliance
+
+### debugger (QA)
+- **Purpose**: Production debugging, root cause analysis, systematic investigation
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Scientific debugging methodology, pdb/debugpy, production incidents
+
+### refactoring-specialist (Task)
+- **Purpose**: Code refactoring, technical debt reduction, legacy code modernization
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Martin Fowler patterns, code smell elimination, SOLID principles
+
+### integration-specialist (Task)
+- **Purpose**: Third-party API integrations, OAuth flows, webhook systems
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Stripe, Twilio, AWS integrations, resilience patterns
+
+### migration-specialist (Task)
+- **Purpose**: Database migrations, framework upgrades, zero-downtime deployments
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Alembic migrations, Python upgrades, blue-green deployments
+
 ## Agent Statistics
 
-**Total Agents**: 12/17 (71% complete)
-- Phase 1: 4 agents ✅
-- Phase 2: 4 agents ✅
-- Phase 3: 4 agents ✅
-- Phase 4: 5 agents (planned)
-
-## Future Phase
-
-**Phase 4**: security-auditor, debugger, refactoring-specialist, integration-specialist, migration-specialist
+**Total Agents**: 17/17 (100% complete) ✅
+- Phase 1: 4 agents ✅ (Orchestrator + Core Specialists)
+- Phase 2: 4 agents ✅ (Extended Domain Specialists)
+- Phase 3: 4 agents ✅ (Task Specialists)
+- Phase 4: 5 agents ✅ (Advanced QA + Task Specialists)
 
 ---
 
