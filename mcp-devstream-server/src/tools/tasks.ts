@@ -175,8 +175,8 @@ export class TaskTools {
         await this.database.execute(`
           INSERT INTO intervention_plans (
             id, title, description, objectives, expected_outcome, status, priority,
-            estimated_hours, actual_hours, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            estimated_hours, actual_hours
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           planId,
           input.project,
@@ -221,8 +221,8 @@ export class TaskTools {
           await this.database.execute(`
             INSERT INTO phases (
               id, plan_id, name, description, sequence_order, status,
-              estimated_minutes, actual_minutes, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+              estimated_minutes, actual_minutes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           `, [
             phaseId,
             plan!.id,
@@ -275,12 +275,12 @@ export class TaskTools {
 
       // Check if auto-creation occurred for user feedback
       const wasProjectAutoCreated = !await this.database.queryOne<InterventionPlan>(
-        'SELECT * FROM intervention_plans WHERE title LIKE ? AND created_at < datetime("now", "-1 minute")',
+        "SELECT * FROM intervention_plans WHERE title LIKE ? AND created_at < datetime('now', '-1 minute')",
         [`%${input.project}%`]
       );
 
       const wasPhaseAutoCreated = !await this.database.queryOne<Phase>(
-        'SELECT * FROM phases WHERE plan_id = ? AND name LIKE ? AND created_at < datetime("now", "-1 minute")',
+        "SELECT * FROM phases WHERE plan_id = ? AND name LIKE ? AND created_at < datetime('now', '-1 minute')",
         [plan!.id, `%${input.phase_name}%`]
       );
 
@@ -344,14 +344,14 @@ export class TaskTools {
       }
 
       // Update task status
-      const updateFields: string[] = ['status = ?', 'updated_at = datetime("now")'];
+      const updateFields: string[] = ['status = ?'];
       const updateParams: any[] = [input.status];
 
       // Set timestamps based on status
       if (input.status === 'active' && !task.started_at) {
-        updateFields.push('started_at = datetime("now")');
+        updateFields.push("started_at = datetime('now')");
       } else if (['completed', 'failed', 'skipped'].includes(input.status) && !task.completed_at) {
-        updateFields.push('completed_at = datetime("now")');
+        updateFields.push("completed_at = datetime('now')");
       }
 
       await this.database.execute(

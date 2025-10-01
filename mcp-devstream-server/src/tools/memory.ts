@@ -128,6 +128,7 @@ export class MemoryTools {
         }
       }
 
+      // Context7 pattern: Return structured output for modern MCP clients + text for backwards compatibility
       return {
         content: [
           {
@@ -142,7 +143,21 @@ export class MemoryTools {
                   `💾 **Content Preview**: ${input.content.substring(0, 100)}${input.content.length > 100 ? '...' : ''}\n\n` +
                   `The information has been stored in DevStream semantic memory${embedding ? ' with vector search capability' : ' (text-only, vector search unavailable)'} and can be retrieved using search queries.`
           }
-        ]
+        ],
+        // MCP 2025-06-18 Structured Output (Context7-compliant)
+        structuredContent: {
+          success: true,
+          memory_id: memoryId,
+          content_type: input.content_type,
+          importance_score: importanceScore,
+          embedding_generated: !!embedding,
+          embedding_model: embeddingModel,
+          embedding_dimensions: embeddingDimension,
+          keywords: input.keywords,
+          content_length: input.content.length,
+          source: 'mcp_user_input',
+          timestamp: new Date().toISOString()
+        }
       };
 
     } catch (error) {
