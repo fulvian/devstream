@@ -34,12 +34,43 @@ class DevStreamHookBase:
     """
 
     def __init__(self, hook_type: str):
+        """
+        Initialize hook base.
+        
+        Args:
+            hook_type: Type of hook (e.g., "PreToolUse", "PostToolUse")
+            
+        Raises:
+            PathValidationError: If database path validation fails
+        """
         self.hook_type = hook_type
-        self.devstream_db_path = os.getenv(
+        
+        # Import path validator
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).parent))
+        from path_validator import validate_db_path, PathValidationError
+        
+        # Get path from environment or default
+        raw_path = os.getenv(
             'DEVSTREAM_DB_PATH',
-            '/Users/fulvioventura/devstream/data/devstream.db'
+            'data/devstream.db'  # Relative path (project-root relative)
         )
+        
+        # SECURITY: Validate database path
+        try:
+            self.devstream_db_path = validate_db_path(raw_path)
+        except PathValidationError as e:
+            # Setup basic logging for error reporting
+            self.setup_logging()
+            self.logger.error(
+                f"Database path validation failed: {e}",
+                extra={"raw_path": raw_path, "hook_type": hook_type}
+            )
+            raise
+        
         self.setup_logging()
+
 
     def setup_logging(self) -> None:
         """Setup structured logging per DevStream hooks."""

@@ -38,15 +38,40 @@ class DevStreamMCPClient:
         Initialize MCP client.
 
         Args:
-            db_path: Path to DevStream database
+            db_path: Path to DevStream database (validated for security)
+            
+        Raises:
+            PathValidationError: If db_path validation fails (security violation)
+            
+        Security:
+            Database paths are validated to prevent path traversal attacks.
+            Paths must be within project directory and have .db extension.
         """
-        self.db_path = db_path or os.getenv(
+        # Import path validator
+        from path_validator import validate_db_path, PathValidationError
+        
+        # Get path from parameter, environment, or default
+        raw_path = db_path or os.getenv(
             'DEVSTREAM_DB_PATH',
-            '/Users/fulvioventura/devstream/data/devstream.db'
+            'data/devstream.db'  # Changed to relative path (project-root relative)
         )
+        
+        # SECURITY: Validate database path
+        try:
+            self.db_path = validate_db_path(raw_path)
+        except PathValidationError as e:
+            # Log security violation and re-raise
+            logger = get_devstream_logger('mcp_client')
+            logger.logger.error(
+                f"Database path validation failed: {e}",
+                extra={"raw_path": raw_path}
+            )
+            raise
+        
         # Calculate correct path to MCP server: from hooks/devstream/utils/mcp_client.py -> ../../mcp-devstream-server
         self.mcp_server_path = Path(__file__).parent.parent.parent.parent.parent / 'mcp-devstream-server' / 'dist' / 'index.js'
         self.logger = get_devstream_logger('mcp_client')
+
 
     async def store_memory(
         self,

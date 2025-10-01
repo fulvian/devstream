@@ -292,24 +292,50 @@ class PreToolUseHook:
         """
         Assemble hybrid context from Context7 + DevStream memory.
 
+        Uses parallel execution via asyncio.gather() to reduce latency.
+        Both retrievals execute concurrently, with independent error handling.
+
         Args:
             file_path: File being edited
             content: File content
 
         Returns:
             Assembled context string or None
+
+        Performance:
+            Target: <800ms (55% improvement from sequential 1772ms)
+            Context7: 5000 token budget max
+            Memory: 2000 token budget max
         """
+        import time
+        start_time = time.time()
+
         context_parts = []
 
-        # Get Context7 docs (if relevant)
-        context7_docs = await self.get_context7_docs(file_path, content)
+        # Execute both retrievals in parallel (independent error handling)
+        # Each method has try/except returning None on failure
+        context7_task = self.get_context7_docs(file_path, content)
+        memory_task = self.get_devstream_memory(file_path, content)
+
+        context7_docs, memory_context = await asyncio.gather(
+            context7_task,
+            memory_task,
+            return_exceptions=False  # Let individual methods handle errors
+        )
+
+        # Collect successful retrievals
         if context7_docs:
             context_parts.append(context7_docs)
-
-        # Get DevStream memory
-        memory_context = await self.get_devstream_memory(file_path, content)
         if memory_context:
             context_parts.append(memory_context)
+
+        # Log performance metrics
+        elapsed_ms = (time.time() - start_time) * 1000
+        self.base.debug_log(
+            f"Parallel context retrieval completed in {elapsed_ms:.0f}ms "
+            f"(Context7: {'✓' if context7_docs else '✗'}, "
+            f"Memory: {'✓' if memory_context else '✗'})"
+        )
 
         if not context_parts:
             return None
