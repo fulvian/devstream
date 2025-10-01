@@ -151,7 +151,7 @@ class Context7Client:
         self,
         library_id: str,
         topic: Optional[str] = None,
-        tokens: int = 2000
+        tokens: int = 5000  # CRITICAL: Match CLAUDE.md spec (5000 tokens for Context7)
     ) -> Optional[str]:
         """
         Get documentation for library from Context7.
