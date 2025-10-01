@@ -1,10 +1,6 @@
 # CLAUDE.md - DevStream Project Rules
 
-**Version**: 2.0.0 (Prescriptive Rules)
-**Date**: 2025-09-30
-**Status**: Production Ready
-
-Questo file definisce le **regole prescrittive obbligatorie** per lo sviluppo del progetto DevStream - Sistema Integrato Task Management & Memoria Cross-Session per Claude Code.
+**Version**: 2.0.0 | **Date**: 2025-09-30 | **Status**: Production Ready
 
 ⚠️ **CRITICAL**: Queste regole sono **OBBLIGATORIE** e integrate nel sistema DevStream tramite hook automatici. La loro violazione può causare malfunzionamenti del sistema.
 
@@ -12,14 +8,9 @@ Questo file definisce le **regole prescrittive obbligatorie** per lo sviluppo de
 
 ## 🎯 DevStream System Architecture
 
-DevStream è un sistema integrato che combina:
+DevStream combina: (1) Task Lifecycle Management, (2) Semantic Memory System, (3) Context Injection (Context7 + DevStream Memory), (4) Hook Automation (PreToolUse, PostToolUse, UserPromptSubmit via cchooks).
 
-1. **Task Lifecycle Management** - Orchestrazione automatica del ciclo di vita dei task
-2. **Semantic Memory System** - Storage e retrieval automatico di conoscenza progettuale
-3. **Context Injection** - Iniezione automatica di contesto rilevante (Context7 + DevStream Memory)
-4. **Hook Automation** - PreToolUse, PostToolUse, UserPromptSubmit hooks via cchooks
-
-**🔄 Sistema Automatico**: I hook eseguono automaticamente le operazioni di memory storage e context injection senza intervento manuale.
+**🔄 Sistema Automatico**: I hook eseguono automaticamente memory storage e context injection senza intervento manuale.
 
 ---
 
@@ -27,567 +18,178 @@ DevStream è un sistema integrato che combina:
 
 **Status**: Phase 2 Complete ✅ | 8 Agents Production Ready
 
-DevStream implementa un sistema gerarchico di agenti specializzati per coordinare sviluppo multi-stack complesso.
-
 ### Agent Architecture (4-Level Hierarchy)
 
 ```
-Level 1: ORCHESTRATOR (@tech-lead)
-   ├─ Task decomposition & delegation
-   ├─ Multi-agent coordination
-   └─ Architectural decisions
-
+Level 1: ORCHESTRATOR (@tech-lead) - Task decomposition, multi-agent coordination, architectural decisions
 Level 2: DOMAIN SPECIALISTS (6 agents ✅)
-   ├─ @python-specialist (FastAPI, Django, async)
-   ├─ @typescript-specialist (React, Next.js, Node.js)
-   ├─ @rust-specialist (Memory-safe systems programming)
-   ├─ @go-specialist (Cloud-native services)
-   ├─ @database-specialist (PostgreSQL, MySQL, SQLite)
-   └─ @devops-specialist (Docker, K8s, CI/CD)
-
-Level 3: TASK SPECIALISTS (Phase 3+)
-   ├─ @api-architect
-   ├─ @performance-optimizer
-   └─ @testing-specialist
-
-Level 4: QUALITY ASSURANCE
-   └─ @code-reviewer (MANDATORY before commits)
+  @python-specialist     - Python 3.11+, FastAPI, Django, async, pytest, type-safe
+  @typescript-specialist - TypeScript, React, Next.js, Server Components, hooks, optimization
+  @rust-specialist       - Ownership, async/await, zero-cost abstractions, cargo, memory safety
+  @go-specialist         - Goroutines, channels, cloud-native, idiomatic Go, table-driven tests
+  @database-specialist   - PostgreSQL/MySQL/SQLite, schema design, indexing, query tuning
+  @devops-specialist     - Docker, Kubernetes, CI/CD, IaC, GitOps, production deployment
+Level 3: TASK SPECIALISTS (Phase 3+) - @api-architect, @performance-optimizer, @testing-specialist
+Level 4: QUALITY ASSURANCE - @code-reviewer (OWASP Top 10, performance, architecture - MANDATORY before commits)
 ```
 
 ### Agent Usage Patterns
 
-#### Direct Invocation (Single-Language Tasks)
-```bash
-@python-specialist Create FastAPI endpoint for user authentication
-@typescript-specialist Build React dashboard with real-time charts
-```
-
-#### Orchestrated Workflow (Multi-Stack Features)
-```bash
-@tech-lead Build full-stack user management system
-
-# tech-lead will:
-# 1. Analyze requirements across Python backend + TypeScript frontend
-# 2. Delegate @python-specialist for FastAPI implementation
-# 3. Delegate @typescript-specialist for React UI
-# 4. Coordinate integration and testing
-# 5. Invoke @code-reviewer for final validation
-```
-
-#### Quality Gate (MANDATORY)
-```bash
-# ALWAYS before marking tasks completed
-@code-reviewer Review implementation in src/api/users.py:45-120
-
-# Checks: OWASP Top 10, performance, architecture
-```
+**Direct Invocation** (single-language): `@python-specialist Create FastAPI endpoint for user auth`
+**Orchestrated Workflow** (multi-stack): `@tech-lead Build full-stack user management system` → tech-lead delegates @python-specialist (backend) → @typescript-specialist (frontend) → @code-reviewer (validation)
+**Quality Gate** (MANDATORY): `@code-reviewer Review implementation in src/api/users.py:45-120`
 
 ### Agent Capabilities
 
-**@tech-lead** (Orchestrator)
-- **Use**: Complex features spanning multiple languages/stacks
-- **Capability**: Task decomposition, agent delegation, architecture decisions
-- **Tools**: Task, Read, Glob, Grep (focused coordination)
-- **Context**: Full conversation history + multi-agent coordination
-- **Memory**: Isolated context window per invocation
-
-**@python-specialist** (Domain)
-- **Use**: Python 3.11+, FastAPI, Django, async development
-- **Capability**: Type-safe Python, async patterns, pytest testing
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Research-driven (Context7), test-first, type-safe
-
-**@typescript-specialist** (Domain)
-- **Use**: TypeScript, React, Next.js, Node.js APIs
-- **Capability**: Server Components, hooks, performance optimization
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Component-driven, TypeScript strict mode, testing
-
-**@rust-specialist** (Domain)
-- **Use**: Rust systems programming, memory-safe code
-- **Capability**: Ownership system, async/await, zero-cost abstractions
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Memory safety, testing with cargo, idiomatic Rust
-
-**@go-specialist** (Domain)
-- **Use**: Go cloud-native services, concurrent systems
-- **Capability**: Goroutines, channels, simplicity-first design
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Idiomatic Go, table-driven tests, fast compilation
-
-**@database-specialist** (Domain)
-- **Use**: Database design, optimization, migrations
-- **Capability**: PostgreSQL, MySQL, SQLite expertise, query tuning
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Schema design, indexing, performance optimization
-
-**@devops-specialist** (Domain)
-- **Use**: Containerization, orchestration, CI/CD
-- **Capability**: Docker, Kubernetes, infrastructure automation
-- **Tools**: Full tool access (inherits all Claude Code tools)
-- **Patterns**: Infrastructure as Code, GitOps, production deployment
-
-**@code-reviewer** (QA)
-- **Use**: Quality, security, performance validation
-- **Capability**: OWASP Top 10 analysis, performance bottlenecks, architecture review
-- **Tools**: Read, Grep, Glob, Bash (analysis focus)
-- **Mandatory**: ALWAYS invoke before git commits
-
-### Agent Principles (MANDATORY)
-
-1. **Isolated Context**: Each agent has independent context window
-2. **Tool Inheritance**: Domain specialists have full tool access
-3. **Tool Restriction**: Orchestrators/QA agents restrict tools for focus
-4. **Delegation Pattern**: Use `Task` tool for orchestrator → specialist
-5. **Quality First**: ALWAYS invoke @code-reviewer before task completion
+| Agent | Use Case | Capability | Tools |
+|-------|----------|------------|-------|
+| **@tech-lead** | Multi-stack features, architectural decisions | Task decomposition, agent delegation, coordination | Task, Read, Glob, Grep (restricted) |
+| **@python-specialist** | Python 3.11+, FastAPI, async development | Type-safe Python, async patterns, pytest testing | Full tool access |
+| **@typescript-specialist** | TypeScript, React, Next.js APIs | Server Components, hooks, performance optimization | Full tool access |
+| **@rust-specialist** | Rust systems programming | Ownership, async/await, zero-cost abstractions | Full tool access |
+| **@go-specialist** | Go cloud-native services | Goroutines, channels, simplicity-first design | Full tool access |
+| **@database-specialist** | Database design, optimization | PostgreSQL/MySQL/SQLite, schema, query tuning | Full tool access |
+| **@devops-specialist** | Containerization, CI/CD | Docker, Kubernetes, IaC, GitOps | Full tool access |
+| **@code-reviewer** | Quality, security validation | OWASP Top 10, performance, architecture review | Read, Grep, Glob, Bash (restricted) |
 
 ### When to Use Which Agent
 
-**Use @tech-lead when:**
-- Feature spans Python + TypeScript (e.g., full-stack CRUD)
-- Requires architectural decisions across stack
-- Need coordination between multiple specialists
-- Complex integration between backend/frontend
+- **@tech-lead**: Feature spans Python + TypeScript, architectural decisions, multi-specialist coordination
+- **@python-specialist**: Pure Python (FastAPI, async, testing), backend API, database models
+- **@typescript-specialist**: Pure TypeScript/React, frontend components, Next.js Server Components
+- **@code-reviewer**: BEFORE every git commit (MANDATORY), security-sensitive code, performance-critical paths
 
-**Use @python-specialist when:**
-- Pure Python implementation (FastAPI, async, testing)
-- Backend API development
-- Database models and migrations
-- Python testing and type safety
-
-**Use @typescript-specialist when:**
-- Pure TypeScript/React implementation
-- Frontend components and state management
-- Next.js Server Components
-- Frontend testing and optimization
-
-**Use @code-reviewer when:**
-- BEFORE every git commit (MANDATORY)
-- After significant code changes
-- Security-sensitive implementations
-- Performance-critical code paths
-
-### Example Workflow
+### Example Workflow: JWT Authentication
 
 ```bash
-User: "Create user authentication system with JWT"
-
 # Step 1: Orchestration
 @tech-lead Analyze requirements and delegate implementation
+# Output: Python backend (JWT auth, password hashing) + TypeScript frontend (login form, auth context)
 
-# tech-lead response:
-# - Python backend: FastAPI JWT auth, password hashing, user model
-# - TypeScript frontend: Login form, auth context, protected routes
-# - Integration: API client, error handling, token refresh
-
-# Step 2: Backend Implementation
-Task(@python-specialist):
-  "Implement FastAPI JWT authentication:
-   - POST /auth/login endpoint
-   - POST /auth/register endpoint
-   - JWT token generation with refresh
-   - Password hashing with bcrypt
-   - User model with SQLAlchemy"
-
-# Step 3: Frontend Implementation
-Task(@typescript-specialist):
-  "Implement React authentication UI:
-   - LoginForm component with validation
-   - AuthContext for global state
-   - ProtectedRoute wrapper
-   - API client with token interceptor
-   - Error handling and loading states"
-
-# Step 4: Quality Review (MANDATORY)
-@code-reviewer Review complete auth implementation:
-  - Backend: src/api/auth.py, src/models/user.py
-  - Frontend: src/components/LoginForm.tsx, src/contexts/AuthContext.tsx
-  - Security: JWT secret management, password policies, XSS prevention
+# Step 2: Backend → Task(@python-specialist): Implement FastAPI JWT auth (endpoints, token generation, user model)
+# Step 3: Frontend → Task(@typescript-specialist): Implement React auth UI (LoginForm, AuthContext, ProtectedRoute)
+# Step 4: Quality Review → @code-reviewer Review auth implementation (OWASP checks, JWT secret management)
 ```
 
 ### Agent Configuration
 
-**Location**: `.claude/agents/`
-```
-.claude/agents/
-├── orchestrator/
-│   └── tech-lead.md              # Multi-stack coordination
-├── domain/
-│   ├── python-specialist.md      # Python + FastAPI ✅
-│   ├── typescript-specialist.md  # TypeScript + React ✅
-│   ├── rust-specialist.md        # Rust systems ✅ Phase 2
-│   ├── go-specialist.md          # Go cloud-native ✅ Phase 2
-│   ├── database-specialist.md    # DB optimization ✅ Phase 2
-│   └── devops-specialist.md      # Docker/K8s ✅ Phase 2
-├── qa/
-│   └── code-reviewer.md          # Security + Quality ✅
-└── README.md                      # Agent system docs
-```
+**Location**: `.claude/agents/` → `orchestrator/tech-lead.md`, `domain/{python,typescript,rust,go,database,devops}-specialist.md`, `qa/code-reviewer.md`
 
-### Memory Optimization (Post Phase 1 Fix)
+### Agent Principles (MANDATORY)
+
+1. **Isolated Context**: Each agent has independent context window
+2. **Tool Inheritance**: Domain specialists have full tool access (omit `tools:` field)
+3. **Tool Restriction**: Orchestrators/QA restrict tools for focus (specify `tools:` field)
+4. **Delegation Pattern**: Use `Task` tool for orchestrator → specialist invocation
+5. **Quality First**: ALWAYS invoke @code-reviewer before task completion
+
+### Memory Optimization
 
 **Problem Solved**: JavaScript heap exhaustion during agent execution
-- **Root Cause**: Float32Array/Buffer accumulation in hybrid search
-- **Fix**: Increased heap (8GB), explicit GC, memory cleanup patterns
-- **Status**: Production stable ✅
-
-**Configuration**:
-```bash
-# Node.js Memory Flags (start-devstream.sh)
-node --max-old-space-size=8192 --expose-gc start-production.js
-
-# Benefits:
-# - 8GB heap for large agent operations
-# - Explicit GC after vector search
-# - Prevents memory accumulation
-# - Stable for long-running sessions
-```
+**Fix**: `node --max-old-space-size=8192 --expose-gc start-production.js` (8GB heap, explicit GC, memory cleanup)
+**Status**: Production stable ✅
 
 ### Future Phases
 
-**Phase 2** ✅ COMPLETED:
-- ✅ @rust-specialist: Memory-safe systems programming
-- ✅ @go-specialist: Cloud-native services
-- ✅ @database-specialist: Schema design, optimization
-- ✅ @devops-specialist: Docker, Kubernetes, CI/CD
-
-**Phase 3** (Next - Task Specialists):
-- @api-architect: API design and contracts
-- @performance-optimizer: Profiling and optimization
-- @testing-specialist: Test strategy and coverage
-- @documentation-specialist: Technical writing
-
-**Phase 4** (Planned):
-- @security-auditor: Deep security analysis
-- @debugger: Complex debugging workflows
-- @refactoring-specialist: Code modernization
-- @integration-specialist: Third-party integrations
+**Phase 3** (Task Specialists): @api-architect, @performance-optimizer, @testing-specialist, @documentation-specialist
+**Phase 4** (Advanced): @security-auditor, @debugger, @refactoring-specialist, @integration-specialist
 
 ---
 
 ## 📋 REGOLE PRESCRITTIVE - Metodologia DevStream
 
-### 🚨 Workflow Obbligatorio
+### 🚨 Workflow Obbligatorio: 7 Step Sequenziali
 
-**OGNI task DEVE seguire questo workflow in ordine sequenziale:**
-
-```
-1. DISCUSSIONE → 2. ANALISI → 3. RICERCA → 4. PIANIFICAZIONE →
-5. APPROVAZIONE → 6. IMPLEMENTAZIONE → 7. VERIFICA/TEST
-```
-
-Saltare step o eseguire fuori ordine viola il protocollo DevStream.
-
-### 🔄 Workflow di Sviluppo: 7 Step Obbligatori
+**OGNI task DEVE seguire**: DISCUSSIONE → ANALISI → RICERCA → PIANIFICAZIONE → APPROVAZIONE → IMPLEMENTAZIONE → VERIFICA/TEST
 
 #### Step 1: DISCUSSIONE (MANDATORY)
-```
-🎯 OBIETTIVO: Allineamento su obiettivi e aspettative
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Presentare il problema/obiettivo chiaramente
-  ✅ MUST: Discutere trade-offs architetturali
-  ✅ MUST: Identificare vincoli e dipendenze
-  ✅ MUST: Ottenere consensus su approccio generale
-  ❌ FORBIDDEN: Iniziare implementazione senza discussione
-
-🔒 ENFORCEMENT: Hook system registra discussioni in memory (content_type: "decision")
-📊 VALIDATION: Ogni task deve avere almeno 1 discussion record in memory
-```
+- ✅ Presentare problema/obiettivo, discutere trade-offs, identificare vincoli, ottenere consensus
+- 🔒 Hook registra discussioni in memory (content_type: "decision")
+- 📊 Validation: Ogni task deve avere ≥1 discussion record
 
 #### Step 2: ANALISI (MANDATORY)
-```
-🎯 OBIETTIVO: Analisi tecnica dettagliata
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Analizzare codebase esistente per pattern simili
-  ✅ MUST: Identificare moduli/file da modificare
-  ✅ MUST: Stimare complessità e rischi
-  ✅ MUST: Definire acceptance criteria chiari
-  ❌ FORBIDDEN: Procedere senza analisi tecnica completa
-
-🔒 ENFORCEMENT: Hook system richiede context injection da memory
-📊 VALIDATION: Verificare che codebase patterns siano stati analizzati
-```
+- ✅ Analizzare codebase per pattern simili, identificare file da modificare, stimare complessità, definire acceptance criteria
+- 🔒 Hook richiede context injection da memory
+- 📊 Validation: Verificare analisi codebase patterns
 
 #### Step 3: RICERCA (MANDATORY - Context7)
-```
-🎯 OBIETTIVO: Best practice research-backed
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Usare Context7 per ogni decisione tecnica maggiore
-  ✅ MUST: Ricercare pattern e best practice validate
-  ✅ MUST: Documentare findings e rationale
-  ✅ MUST: Validare approccio con research esterna
-  ❌ FORBIDDEN: Implementare senza Context7 research per nuove tecnologie
-
-🔒 ENFORCEMENT: Context7 integration automatica via PreToolUse hook
-📊 VALIDATION: Verificare presence di Context7 docs in context injection log
-```
+- ✅ Usare Context7 per decisioni tecniche, ricercare best practices, documentare findings, validare approccio
+- 🔒 Context7 integration automatica via PreToolUse hook
+- 📊 Validation: Verificare Context7 docs in context injection log
 
 #### Step 4: PIANIFICAZIONE (MANDATORY - TodoWrite)
-```
-🎯 OBIETTIVO: Breakdown granulare e tracciabile
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Creare TodoWrite list per OGNI task non-triviale
-  ✅ MUST: Micro-task da MAX 10-15 minuti ciascuno
-  ✅ MUST: Definire dipendenze tra task
-  ✅ MUST: Stabilire clear completion criteria per ogni task
-  ❌ FORBIDDEN: Iniziare implementazione complessa senza TodoWrite list
-
-🔒 ENFORCEMENT: TodoWrite tool integrato in Claude Code
-📊 VALIDATION: Task list deve esistere prima di implementazione
-```
+- ✅ Creare TodoWrite list per task non-triviali, micro-task MAX 10-15 min, definire dipendenze, stabilire completion criteria
+- 🔒 TodoWrite tool integrato in Claude Code
+- 📊 Validation: Task list deve esistere prima di implementazione
 
 #### Step 5: APPROVAZIONE (MANDATORY)
-```
-🎯 OBIETTIVO: Consenso esplicito prima di procedere
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Presentare piano di implementazione completo
-  ✅ MUST: Mostrare Context7 research findings
-  ✅ MUST: Ottenere approvazione esplicita dall'utente
-  ✅ MUST: Confermare comprensione di acceptance criteria
-  ❌ FORBIDDEN: Procedere senza "OK", "procedi", "approvato" esplicito
-
-🔒 ENFORCEMENT: Memory system registra approval come "decision"
-📊 VALIDATION: Verificare approval record prima di commit
-```
+- ✅ Presentare piano completo, mostrare Context7 findings, ottenere approvazione esplicita ("OK", "procedi", "approvato")
+- 🔒 Memory registra approval come "decision"
+- 📊 Validation: Verificare approval record prima di commit
 
 #### Step 6: IMPLEMENTAZIONE (MANDATORY - Guided)
-```
-🎯 OBIETTIVO: Sviluppo incrementale con verifica continua
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Implementare un micro-task alla volta
-  ✅ MUST: Mark TodoWrite task "in_progress" prima di iniziare
-  ✅ MUST: Mark TodoWrite task "completed" immediatamente dopo finish
-  ✅ MUST: Documentare codice con docstrings e type hints
-  ✅ MUST: Seguire DevStream code quality standards
-  ❌ FORBIDDEN: Implementare multiple task in parallelo senza approval
-
-🔒 ENFORCEMENT: PostToolUse hook registra automaticamente codice in memory
-📊 VALIDATION: Verificare che ogni file scritto sia registrato in memory
-```
+- ✅ Un micro-task alla volta, mark "in_progress" → work → mark "completed", documentare con docstrings + type hints
+- 🔒 PostToolUse hook registra codice in memory automaticamente
+- 📊 Validation: Verificare ogni file scritto registrato in memory
 
 #### Step 7: VERIFICA/TEST (MANDATORY)
-```
-🎯 OBIETTIVO: Validazione severa e completa
-📋 REGOLE OBBLIGATORIE:
-  ✅ MUST: Scrivere test per OGNI nuova feature
-  ✅ MUST: Raggiungere 95%+ test coverage per nuovo codice
-  ✅ MUST: Validare performance e scalability
-  ✅ MUST: Eseguire integration tests end-to-end
-  ✅ MUST: Verificare error handling e edge cases
-  ❌ FORBIDDEN: Commit senza test o con test failing
-
-🔒 ENFORCEMENT: Hook system richiede test validation prima di completion
-📊 VALIDATION: Test results devono essere documentati in memory
-```
+- ✅ Test per OGNI feature, 95%+ coverage, validare performance, integration tests E2E, error handling
+- 🔒 Hook richiede test validation prima di completion
+- 📊 Validation: Test results documentati in memory
 
 ---
 
 ## 🔄 REGOLE PRESCRITTIVE - Task Lifecycle Management
 
-### Task Creation (MANDATORY Rules)
+### Task Creation
+**WHEN**: Lavoro > 30 minuti
+**RULES**: ✅ Use `mcp__devstream__devstream_create_task`, definire title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name, registrare in MCP | ❌ Task manuali senza MCP
+**ENFORCEMENT**: Task non MCP non tracciati
 
-**WHEN**: Quando si identifica lavoro che richiede > 30 minuti
+### Task Execution
+**WHEN**: Durante implementazione
+**RULES**: ✅ Mark "active" via `mcp__devstream__devstream_update_task`, seguire 7-step workflow, update progress, registrare decisions/learnings, TodoWrite real-time | ❌ Multiple task simultaneously senza approval
+**ENFORCEMENT**: Hook monitora task status e tool usage
 
-**RULES**:
-```bash
-✅ MUST: Use mcp__devstream__devstream_create_task
-✅ MUST: Definire title chiaro e description dettagliata
-✅ MUST: Specificare task_type corretto (analysis/coding/documentation/testing/review/research)
-✅ MUST: Assegnare priority realistica (1-10 scale)
-✅ MUST: Associare a phase_name appropriata
-✅ MUST: Registrare in DevStream MCP server
-❌ FORBIDDEN: Creare task manualmente senza MCP tool
-```
-
-**ENFORCEMENT**: Task non registrati in MCP non sono tracciati dal sistema
-
-### Task Execution (MANDATORY Rules)
-
-**WHEN**: Durante implementazione di task esistente
-
-**RULES**:
-```bash
-✅ MUST: Mark task "active" via mcp__devstream__devstream_update_task
-✅ MUST: Seguire 7-step workflow (Discussione → Verifica/Test)
-✅ MUST: Update progress con notes dettagliate
-✅ MUST: Registrare decisions e learnings in memory
-✅ MUST: Mantenere TodoWrite list aggiornata in real-time
-❌ FORBIDDEN: Lavorare su multiple task simultaneously senza explicit approval
-```
-
-**ENFORCEMENT**: Hook system monitora task status e tool usage
-
-### Task Completion (MANDATORY Rules)
-
-**WHEN**: Al completamento di tutti acceptance criteria
-
-**RULES**:
-```bash
-✅ MUST: Verificare che tutti TodoWrite task siano "completed"
-✅ MUST: Verificare che tutti test passino (100% pass rate)
-✅ MUST: Mark task "completed" via mcp__devstream__devstream_update_task
-✅ MUST: Registrare lessons learned in memory
-✅ MUST: Commit codice con messaggio descrittivo
-✅ MUST: Push su GitHub se richiesto
-❌ FORBIDDEN: Mark "completed" con test failing o TodoWrite pending
-```
-
-**ENFORCEMENT**: Hook system valida completion criteria automaticamente
+### Task Completion
+**WHEN**: Tutti acceptance criteria completati
+**RULES**: ✅ Verificare TodoWrite "completed", test 100% pass, mark "completed", registrare lessons learned, commit, push se richiesto | ❌ Mark "completed" con test failing o TodoWrite pending
+**ENFORCEMENT**: Hook valida completion criteria automaticamente
 
 ---
 
 ## 💾 REGOLE PRESCRITTIVE - Memory System
 
-### Automatic Memory Storage (ENFORCED by PostToolUse Hook)
-
+### Automatic Memory Storage (PostToolUse Hook)
 **WHEN**: Automatico dopo OGNI tool execution (Write, Edit, Bash, etc.)
-
-**WHAT Gets Stored**:
-```python
-Content Types (MANDATORY):
-- "code"          → Source code scritto/modificato
-- "documentation" → Markdown, docs, comments
-- "context"       → Project context, decisions
-- "output"        → Tool execution results
-- "error"         → Error messages e resolutions
-- "decision"      → Architectural/technical decisions
-- "learning"      → Lessons learned, insights
-```
-
-**RULES**:
-```bash
-✅ AUTOMATIC: PostToolUse hook registra automaticamente
-✅ AUTOMATIC: Content preview estratto (primi 300 chars)
-✅ AUTOMATIC: Keywords estratti da content
-✅ AUTOMATIC: Vector embeddings generati via Ollama
-✅ AUTOMATIC: Storage in SQLite + sqlite-vec
-❌ NO ACTION REQUIRED: Sistema completamente automatico
-```
-
+**CONTENT TYPES**: code, documentation, context, output, error, decision, learning
+**PROCESS**: ✅ AUTOMATIC - PostToolUse hook → content preview (300 chars) → keywords extraction → vector embeddings (Ollama) → SQLite + sqlite-vec storage
 **USER ACTION**: Nessuna - completamente automatico
 
-### Memory Search & Retrieval (ENFORCED by PreToolUse Hook)
-
+### Memory Search & Retrieval (PreToolUse Hook)
 **WHEN**: Automatico prima di OGNI tool execution
-
-**HOW It Works**:
-```python
-PreToolUse Hook:
-1. Detect relevant libraries (Context7 detection)
-2. Search DevStream memory for related content
-3. Assemble hybrid context (Context7 + Memory)
-4. Inject into Claude context window
-5. Respect token budget limits
-```
-
-**RULES**:
-```bash
-✅ AUTOMATIC: PreToolUse hook cerca automaticamente
-✅ AUTOMATIC: Hybrid search (semantic + keyword) via RRF algorithm
-✅ AUTOMATIC: Token budget management (max 5000 tokens Context7, 2000 tokens Memory)
-✅ AUTOMATIC: Context priority ordering (Context7 > Memory > Project)
-✅ AUTOMATIC: Relevance filtering (threshold 0.5)
-❌ NO ACTION REQUIRED: Sistema completamente automatico
-```
-
+**FLOW**: (1) Detect libraries (Context7) → (2) Search DevStream memory → (3) Assemble hybrid context → (4) Inject in Claude context → (5) Token budget management
+**ALGORITHM**: Hybrid search (semantic + keyword) via RRF (Reciprocal Rank Fusion), threshold 0.5, token budget: Context7 5000 + Memory 2000
 **USER ACTION**: Nessuna - completamente automatico
 
 ### Manual Memory Operations (OPTIONAL)
-
-**WHEN**: Per operazioni avanzate o query specifiche
-
-**TOOLS**:
-```bash
-# Store custom memory
-mcp__devstream__devstream_store_memory:
-  content: "Important decision or context"
-  content_type: "decision" | "learning" | ...
-  keywords: ["keyword1", "keyword2"]
-
-# Search memory
-mcp__devstream__devstream_search_memory:
-  query: "search query"
-  content_type: "code" | "documentation" | ...  # optional filter
-  limit: 10  # default
-```
-
-**RULES**:
-```bash
-✅ OPTIONAL: Manual operations per query avanzate
-✅ USE CASE: Ricerca specifica di decisions/learnings passati
-✅ USE CASE: Store di context critico prima di session end
-❌ NOT REQUIRED: Sistema automatico gestisce 99% dei casi
-```
+**TOOLS**: `mcp__devstream__devstream_store_memory` (content, content_type, keywords), `mcp__devstream__devstream_search_memory` (query, content_type, limit)
+**USE CASE**: Query avanzate, store context critico pre-session end
+**NOTE**: Sistema automatico gestisce 99% dei casi
 
 ---
 
 ## 🔍 REGOLE PRESCRITTIVE - Context Injection
 
-### Context7 Integration (ENFORCED by PreToolUse Hook)
+### Context7 Integration (PreToolUse Hook)
+**TRIGGERS**: Import statements, library mentions, code patterns (async/await, decorators), documentation requests
+**PROCESS**: ✅ AUTOMATIC - Context7 detect → retrieve docs via `mcp__context7__get-library-docs` → inject (max 5000 tokens) → priority ordering (official docs > examples > best practices)
+**CONFIG**: `.env.devstream` → `DEVSTREAM_CONTEXT7_ENABLED=true`, `DEVSTREAM_CONTEXT7_AUTO_DETECT=true`, `DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000`
 
-**WHEN**: Automatico quando si lavora con librerie/framework
-
-**TRIGGERS** (Automatic Detection):
-```python
-✅ Import statements: import pytest, from fastapi import ...
-✅ Library mentions: "how to use FastAPI", "pytest async testing"
-✅ Code patterns: async/await, decorators, @pytest.mark.asyncio
-✅ Documentation requests: "show me pytest docs"
-```
-
-**RULES**:
-```bash
-✅ AUTOMATIC: Context7 detect libraries automaticamente
-✅ AUTOMATIC: Retrieve docs via mcp__context7__get-library-docs
-✅ AUTOMATIC: Inject in context window (max 5000 tokens)
-✅ AUTOMATIC: Priority ordering (official docs > examples > best practices)
-❌ NO ACTION REQUIRED: Completamente automatico
-```
-
-**USER ACTION**: Nessuna - sistema automatico
-
-**CONFIGURATION**:
-```bash
-# .env.devstream (Optional tuning)
-DEVSTREAM_CONTEXT7_ENABLED=true                 # Enable/disable
-DEVSTREAM_CONTEXT7_AUTO_DETECT=true             # Auto-detection
-DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000            # Max tokens
-```
-
-### DevStream Memory Context (ENFORCED by PreToolUse Hook)
-
-**WHEN**: Automatico per OGNI tool execution
-
-**WHAT Gets Injected**:
-```python
-Priority Order (MANDATORY):
-1. Context7 Documentation (highest priority, 5000 tokens max)
-2. DevStream Memory (medium priority, 2000 tokens max)
-   - Related code from previous sessions
-   - Relevant decisions and learnings
-   - Project-specific context
-3. Current File Context (lowest priority, remaining budget)
-```
-
-**RULES**:
-```bash
-✅ AUTOMATIC: Hybrid search in DevStream memory
-✅ AUTOMATIC: Semantic + keyword search via RRF
-✅ AUTOMATIC: Relevance filtering (threshold 0.5)
-✅ AUTOMATIC: Token budget enforcement
-✅ AUTOMATIC: Context assembly and injection
-❌ NO ACTION REQUIRED: Completamente automatico
-```
-
-**USER ACTION**: Nessuna - sistema automatico
-
-**CONFIGURATION**:
-```bash
-# .env.devstream (Optional tuning)
-DEVSTREAM_CONTEXT_INJECTION_ENABLED=true        # Enable/disable
-DEVSTREAM_CONTEXT_MAX_TOKENS=2000               # Max tokens
-DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5       # Min relevance
-```
+### DevStream Memory Context (PreToolUse Hook)
+**PRIORITY ORDER**: (1) Context7 Documentation (5000 tokens), (2) DevStream Memory (2000 tokens - related code, decisions, learnings), (3) Current File Context (remaining budget)
+**PROCESS**: ✅ AUTOMATIC - Hybrid search (RRF) → relevance filtering (threshold 0.5) → token budget enforcement → context assembly → injection
+**CONFIG**: `.env.devstream` → `DEVSTREAM_CONTEXT_INJECTION_ENABLED=true`, `DEVSTREAM_CONTEXT_MAX_TOKENS=2000`, `DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5`
 
 ---
 
@@ -597,96 +199,38 @@ DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5       # Min relevance
 
 **CRITICAL RULE**: SEMPRE utilizzare `.devstream` venv per TUTTI i comandi Python.
 
-**ENFORCEMENT**: Hook system richiede `.devstream/bin/python` in settings.json
+**Configuration**: Venv: `.devstream` | Python: 3.11.x | Interpreter: `.devstream/bin/python`
 
-#### Configuration Standard (MANDATORY)
-```bash
-Venv Name:      .devstream
-Python Version: 3.11.x
-Location:       /Users/fulvioventura/devstream/.devstream/
-Interpreter:    .devstream/bin/python
-```
-
-#### Session Start Checklist (MANDATORY)
-
-**MUST Execute at Start of EVERY Session**:
+#### Session Start Checklist (MANDATORY at Start of EVERY Session)
 ```bash
 # 1. Verify venv exists
-if [ ! -d ".devstream" ]; then
-  echo "❌ CRITICAL: Venv missing - creating..."
-  python3.11 -m venv .devstream
-fi
-
+if [ ! -d ".devstream" ]; then python3.11 -m venv .devstream; fi
 # 2. Verify Python version (MUST be 3.11.x)
 .devstream/bin/python --version
-
 # 3. Verify critical dependencies
 .devstream/bin/python -m pip list | grep -E "(cchooks|aiohttp|structlog)"
 ```
 
-**FORBIDDEN**:
+**FORBIDDEN**: ❌ `python script.py`, `python3 script.py`, `uv run script.py` (non-persistent)
+**REQUIRED**: ✅ `.devstream/bin/python script.py`, `.devstream/bin/python -m pytest`, `.devstream/bin/python -m pip install package`
+
+#### First-Time Setup (when venv missing)
 ```bash
-❌ python script.py           # Global Python
-❌ python3 script.py          # Global Python
-❌ uv run script.py           # Isolated environment (non-persistent)
+# 1. Create venv → 2. Upgrade pip → 3. Install requirements.txt
+# 4. Install hook dependencies: cchooks>=0.1.4, aiohttp>=3.8.0, structlog>=23.0.0, python-dotenv>=1.0.0
+# 5. Verify: .devstream/bin/python -m pip list | head -20
 ```
 
-**REQUIRED**:
-```bash
-✅ .devstream/bin/python script.py
-✅ .devstream/bin/python -m pytest
-✅ .devstream/bin/python -m pip install package
-```
-
-#### First-Time Setup (MANDATORY when venv missing)
-
-**EXECUTE in order**:
-```bash
-# 1. Create venv with Python 3.11
-python3.11 -m venv .devstream
-
-# 2. Upgrade pip (MANDATORY)
-.devstream/bin/python -m pip install --upgrade pip
-
-# 3. Install base dependencies
-.devstream/bin/python -m pip install -r requirements.txt
-
-# 4. Install hook system dependencies (CRITICAL)
-.devstream/bin/python -m pip install \
-  "cchooks>=0.1.4" \
-  "aiohttp>=3.8.0" \
-  "structlog>=23.0.0" \
-  "python-dotenv>=1.0.0"
-
-# 5. Verify installation
-.devstream/bin/python -m pip list | head -20
-```
-
-#### Hook System Configuration (MANDATORY)
-
-**settings.json MUST use venv interpreter**:
+#### Hook System Configuration (settings.json)
 ```json
 {
   "hooks": {
-    "PreToolUse": [{
-      "hooks": [{
-        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py"
-      }]
-    }],
-    "PostToolUse": [{
-      "hooks": [{
-        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py"
-      }]
-    }],
-    "UserPromptSubmit": [{
-      "hooks": [{
-        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py"
-      }]
-    }]
+    "PreToolUse": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py"}]}],
+    "PostToolUse": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py"}]}],
+    "UserPromptSubmit": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py"}]}]
   }
 }
 ```
-
 **CRITICAL**: Hooks MUST use `.devstream/bin/python`, NOT system Python
 
 ---
@@ -694,121 +238,35 @@ python3.11 -m venv .devstream
 ## 🛠 REGOLE PRESCRITTIVE - Tools & Configuration
 
 ### Context7 Usage (MANDATORY for Research)
-
-**WHEN**: Per ogni decisione tecnica maggiore o nuova tecnologia
-
-**WORKFLOW (MANDATORY)**:
-```bash
-1. ✅ MUST: Use mcp__context7__resolve-library-id
-   → Input: Nome libreria/framework
-   → Output: Context7-compatible library ID
-
-2. ✅ MUST: Use mcp__context7__get-library-docs
-   → Input: Library ID da step 1
-   → Output: Documentation (max 5000 tokens)
-
-3. ✅ MUST: Analyze findings and document rationale
-
-4. ✅ MUST: Apply research-backed patterns
-
-5. ❌ FORBIDDEN: Skip Context7 per nuove tecnologie
-```
-
-**ENFORCEMENT**: PreToolUse hook abilita Context7 automaticamente
+**WORKFLOW**: (1) `mcp__context7__resolve-library-id` (library name → Context7 ID) → (2) `mcp__context7__get-library-docs` (ID → docs max 5000 tokens) → (3) Analyze findings → (4) Apply research-backed patterns | ❌ Skip Context7 per nuove tecnologie
 
 ### TodoWrite Usage (MANDATORY for Planning)
-
-**WHEN**: Per OGNI task non-triviale (> 15 minuti stimati)
-
-**RULES (MANDATORY)**:
-```bash
-✅ MUST: Create TodoWrite list BEFORE implementation
-✅ MUST: Micro-task breakdown (10-15 min each)
-✅ MUST: Mark "in_progress" when starting task
-✅ MUST: Mark "completed" IMMEDIATELY after finishing
-✅ MUST: Keep ONE task "in_progress" at a time
-❌ FORBIDDEN: Start implementation without TodoWrite list
-❌ FORBIDDEN: Mark "completed" con pending sub-tasks
-```
-
-**FORMAT (MANDATORY)**:
-```json
-{
-  "content": "Imperative form (e.g., Run tests)",
-  "activeForm": "Present continuous (e.g., Running tests)",
-  "status": "pending" | "in_progress" | "completed"
-}
-```
-
-**ENFORCEMENT**: System tracks TodoWrite compliance
+**WHEN**: Task non-triviali (>15 min)
+**RULES**: ✅ Create TodoWrite BEFORE implementation, micro-task 10-15 min, mark "in_progress" → work → "completed", ONE task "in_progress" at a time | ❌ Start without TodoWrite, mark "completed" con pending sub-tasks
+**FORMAT**: `{"content": "Imperative form", "activeForm": "Present continuous", "status": "pending|in_progress|completed"}`
 
 ### Testing Requirements (MANDATORY)
-
-**COVERAGE (MANDATORY)**:
-```bash
-✅ MUST: 95%+ coverage for NEW code
-✅ MUST: 100% test pass rate before commit
-✅ MUST: Integration tests for E2E workflows
-✅ MUST: Performance validation con metrics
-✅ MUST: Error handling validation
-❌ FORBIDDEN: Commit con failing tests
-❌ FORBIDDEN: Commit senza test per new features
-```
-
-**TEST STRUCTURE (MANDATORY)**:
-```bash
-tests/
-├── unit/              ← Fast, isolated tests
-│   ├── hooks/
-│   ├── memory/
-│   └── tasks/
-├── integration/       ← Integration tests
-│   ├── hooks/
-│   ├── memory/
-│   └── context/
-└── fixtures/          ← Test data and fixtures
-```
-
-**EXECUTION (MANDATORY)**:
-```bash
-# Use venv interpreter
-.devstream/bin/python -m pytest tests/ -v
-
-# With coverage
-.devstream/bin/python -m pytest tests/ --cov=.claude/hooks/devstream --cov-report=html
-```
+**COVERAGE**: ✅ 95%+ for NEW code, 100% pass rate before commit, integration tests E2E, performance validation, error handling | ❌ Commit con failing tests, commit senza test
+**STRUCTURE**: `tests/unit/` (fast <1s), `tests/integration/` (E2E <10s), `tests/fixtures/` (test data)
+**EXECUTION**: `.devstream/bin/python -m pytest tests/ -v --cov=.claude/hooks/devstream --cov-report=html`
 
 ---
 
 ## 📖 REGOLE PRESCRITTIVE - Documentation
 
 ### Code Documentation (MANDATORY)
+**EVERY function/class MUST have**: Docstring (description, Args, Returns, Raises, Note), full type hints, inline comments for complex logic (>5 lines) | ❌ Missing docstrings, missing type hints
 
-**EVERY function/class MUST have**:
+**Example**:
 ```python
-✅ MUST: Docstring con description, params, returns, raises
-✅ MUST: Type hints per ALL parameters e return values
-✅ MUST: Inline comments per logica complessa (> 5 righe)
-✅ MUST: Architecture decisions documentate in-code
-❌ FORBIDDEN: Codice senza docstring
-❌ FORBIDDEN: Missing type hints
-
-# Example (MANDATORY format):
-def hybrid_search(
-    self,
-    query: str,
-    limit: int = 10,
-    content_type: Optional[str] = None
-) -> List[Dict[str, Any]]:
+def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Perform hybrid search combining semantic and keyword search.
-
-    Uses Reciprocal Rank Fusion (RRF) algorithm to combine results
-    from both semantic (vector) and keyword (FTS5) searches.
+    Uses Reciprocal Rank Fusion (RRF) algorithm.
 
     Args:
         query: Search query string
-        limit: Maximum results to return (default: 10)
+        limit: Maximum results (default: 10)
         content_type: Optional filter by content type
 
     Returns:
@@ -820,47 +278,14 @@ def hybrid_search(
     Note:
         RRF weights: semantic 60%, keyword 40%
     """
-    # Implementation...
 ```
-
-**ENFORCEMENT**: Code review richiede docstrings complete
 
 ### Project Documentation (MANDATORY)
-
-**docs/ Structure (MANDATORY)**:
-```bash
-docs/
-├── architecture/     ← System design, technical decisions (MANDATORY for new systems)
-├── api/             ← API reference, schemas (MANDATORY for APIs)
-├── deployment/      ← Deployment guides, validation (MANDATORY for production)
-├── guides/          ← User guides, how-tos (MANDATORY for user-facing features)
-├── development/     ← Developer guides, roadmap (MANDATORY for complex features)
-└── tutorials/       ← Hands-on tutorials (OPTIONAL)
-```
-
-**RULES (MANDATORY)**:
-```bash
-✅ MUST: Create docs for EVERY major feature
-✅ MUST: Update docs BEFORE marking task complete
-✅ MUST: Include code examples in guides
-✅ MUST: Keep docs in sync with code
-❌ FORBIDDEN: .md files in project root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
-❌ FORBIDDEN: Outdated documentation
-```
-
-**ENFORCEMENT**: Task completion richiede documentation update
+**Structure**: `docs/architecture/` (system design - MANDATORY new systems), `docs/api/` (API reference - MANDATORY APIs), `docs/deployment/` (MANDATORY production), `docs/guides/` (MANDATORY user-facing features), `docs/development/` (MANDATORY complex features), `docs/tutorials/` (OPTIONAL)
+**RULES**: ✅ Create docs for EVERY major feature, update BEFORE task complete, include code examples, keep in sync | ❌ .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md), outdated docs
 
 ### Progress Documentation (MANDATORY)
-
-**MUST Document**:
-```bash
-✅ TodoWrite tracking per OGNI task
-✅ Implementation notes per OGNI phase
-✅ Lessons learned per OGNI completed task
-✅ Decision rationale per OGNI architectural choice
-✅ Test results e validation reports
-```
-
+**MUST Document**: TodoWrite tracking, implementation notes per phase, lessons learned per completed task, decision rationale, test results
 **STORAGE**: Automatico via PostToolUse hook in memory (content_type: "learning", "decision")
 
 ---
@@ -868,226 +293,41 @@ docs/
 ## 🎯 REGOLE PRESCRITTIVE - Quality Standards
 
 ### Code Quality (MANDATORY)
-
-**Type Safety (MANDATORY)**:
-```bash
-✅ MUST: Full type hints per ALL functions/methods
-✅ MUST: mypy compliance (zero errors)
-✅ MUST: Use strict mode: mypy --strict
-❌ FORBIDDEN: Any type hints (use specific types)
-❌ FORBIDDEN: mypy errors in production code
-```
-
-**Error Handling (MANDATORY)**:
-```bash
-✅ MUST: Structured exception hierarchy
-✅ MUST: Logging per OGNI exception
-✅ MUST: Graceful degradation per external dependencies
-✅ MUST: User-friendly error messages
-✅ MUST: Error context in exceptions
-❌ FORBIDDEN: Bare except: clauses
-❌ FORBIDDEN: Silent failures (always log)
-```
-
-**Performance (MANDATORY)**:
-```bash
-✅ MUST: async/await per I/O operations
-✅ MUST: Connection pooling per database
-✅ MUST: Token budget enforcement per Context7
-✅ MUST: Performance testing con metrics
-❌ FORBIDDEN: Blocking I/O in async context
-❌ FORBIDDEN: No performance validation
-```
-
-**Maintainability (MANDATORY)**:
-```bash
-✅ MUST: Follow SOLID principles
-✅ MUST: Single responsibility per function/class
-✅ MUST: Max function length: 50 lines
-✅ MUST: Max cyclomatic complexity: 10
-✅ MUST: Descriptive variable/function names
-❌ FORBIDDEN: God objects/functions
-❌ FORBIDDEN: Cryptic abbreviations
-```
+**Type Safety**: ✅ Full type hints ALL functions/methods, mypy --strict (zero errors) | ❌ Any type hints, mypy errors in production
+**Error Handling**: ✅ Structured exception hierarchy, logging per OGNI exception, graceful degradation, user-friendly messages | ❌ Bare except:, silent failures
+**Performance**: ✅ async/await per I/O, connection pooling, token budget enforcement, performance testing | ❌ Blocking I/O in async, no performance validation
+**Maintainability**: ✅ SOLID principles, single responsibility, max function length 50 lines, max cyclomatic complexity 10 | ❌ God objects, cryptic abbreviations
 
 ### Architecture Quality (MANDATORY)
-
-**Separation of Concerns (MANDATORY)**:
-```bash
-✅ MUST: Clear module boundaries
-✅ MUST: Layered architecture (hooks → utils → core)
-✅ MUST: Interface segregation
-❌ FORBIDDEN: Circular dependencies
-❌ FORBIDDEN: Tight coupling
-```
-
-**Configuration Management (MANDATORY)**:
-```bash
-✅ MUST: Environment-based config (.env.devstream)
-✅ MUST: Validation per ALL config values
-✅ MUST: Defaults per ALL optional configs
-✅ MUST: Documentation per OGNI config option
-❌ FORBIDDEN: Hardcoded values
-❌ FORBIDDEN: Config in code
-```
-
-**Logging (MANDATORY)**:
-```bash
-✅ MUST: Structured logging con structlog
-✅ MUST: Context in ALL log messages
-✅ MUST: Appropriate log levels (DEBUG, INFO, WARNING, ERROR)
-✅ MUST: Log rotation configuration
-❌ FORBIDDEN: print() statements (use logger)
-❌ FORBIDDEN: Logging sensitive data
-```
+**Separation**: ✅ Clear module boundaries, layered architecture (hooks → utils → core), interface segregation | ❌ Circular dependencies, tight coupling
+**Configuration**: ✅ Environment-based (.env.devstream), validation ALL config, defaults, documentation | ❌ Hardcoded values, config in code
+**Logging**: ✅ Structured logging (structlog), context ALL log messages, appropriate levels (DEBUG/INFO/WARNING/ERROR), log rotation | ❌ print() statements, logging sensitive data
 
 ---
 
 ## 🚀 REGOLE PRESCRITTIVE - Implementation Patterns
 
-### Research-Driven Development Pattern (MANDATORY)
+### Research-Driven Development (MANDATORY)
+**SEQUENCE**: (1) RESEARCH (Context7 → best practices → document findings) → (2) DESIGN (architecture basata su research → clear interfaces) → (3) IMPLEMENT (validated patterns → one micro-task at a time) → (4) TEST (95%+ coverage → validate assumptions) → (5) DOCUMENT (lessons learned → update docs)
+**ENFORCEMENT**: Hook registra research findings in memory
 
-**WHEN**: Per OGNI nuova feature o tecnologia
-
-**PATTERN (MANDATORY sequence)**:
-```python
-Step 1: RESEARCH (Context7)
-  ✅ MUST: Use Context7 per best practices
-  ✅ MUST: Document findings e rationale
-  → Output: Research-backed approach
-
-Step 2: DESIGN
-  ✅ MUST: Create architecture basata su research
-  ✅ MUST: Define clear interfaces
-  → Output: Design document/diagram
-
-Step 3: IMPLEMENT
-  ✅ MUST: Follow validated patterns da research
-  ✅ MUST: One micro-task at a time
-  → Output: Production-ready code
-
-Step 4: TEST
-  ✅ MUST: Comprehensive testing (95%+ coverage)
-  ✅ MUST: Validate assumptions da research
-  → Output: Test suite passing
-
-Step 5: DOCUMENT
-  ✅ MUST: Capture lessons learned
-  ✅ MUST: Update project documentation
-  → Output: Complete documentation
-
-❌ FORBIDDEN: Skip research step
-❌ FORBIDDEN: Implement before design
-❌ FORBIDDEN: Deploy without testing
-```
-
-**ENFORCEMENT**: Hook system registra research findings in memory
-
-### Micro-Task Execution Pattern (MANDATORY)
-
-**WHEN**: Per implementazione di ANY complex feature
-
-**PATTERN (MANDATORY sequence)**:
-```python
-Step 1: ANALYZE
-  ✅ MUST: Break down feature in micro-tasks (10-15 min each)
-  ✅ MUST: Identify dependencies
-  → Output: Task breakdown
-
-Step 2: PLAN (TodoWrite)
-  ✅ MUST: Create TodoWrite list
-  ✅ MUST: Define completion criteria per task
-  → Output: Tracked task list
-
-Step 3: EXECUTE
-  ✅ MUST: One task at a time
-  ✅ MUST: Mark "in_progress" → work → mark "completed"
-  → Output: Completed micro-task
-
-Step 4: VERIFY
-  ✅ MUST: Test dopo OGNI task completion
-  ✅ MUST: Verify integration con existing code
-  → Output: Validated integration
-
-Step 5: INTEGRATE
-  ✅ MUST: Merge con existing codebase
-  ✅ MUST: Update documentation
-  → Output: Integrated feature
-
-❌ FORBIDDEN: Multiple tasks in parallelo senza approval
-❌ FORBIDDEN: Skip testing after task
-```
-
+### Micro-Task Execution (MANDATORY)
+**SEQUENCE**: (1) ANALYZE (break down feature → 10-15 min micro-tasks → dependencies) → (2) PLAN (TodoWrite list → completion criteria) → (3) EXECUTE (one task at a time → mark "in_progress" → work → "completed") → (4) VERIFY (test after OGNI task → verify integration) → (5) INTEGRATE (merge codebase → update docs)
 **ENFORCEMENT**: TodoWrite tool tracks compliance
 
-### Approval Workflow Pattern (MANDATORY)
-
-**WHEN**: BEFORE implementazione di ANY significant change
-
-**PATTERN (MANDATORY sequence)**:
-```python
-Step 1: DISCUSS
-  ✅ MUST: Present approach e trade-offs
-  ✅ MUST: Identify risks e assumptions
-  → Output: Documented discussion
-
-Step 2: RESEARCH
-  ✅ MUST: Use Context7 per validation
-  ✅ MUST: Research alternative approaches
-  → Output: Research-backed recommendation
-
-Step 3: APPROVE
-  ✅ MUST: Get explicit approval dall'utente
-  ✅ MUST: Confirm acceptance criteria
-  → Output: Documented approval
-
-Step 4: IMPLEMENT
-  ✅ MUST: Follow approved approach exactly
-  ✅ MUST: No deviations senza approval
-  → Output: Implementation matching approval
-
-Step 5: REVIEW
-  ✅ MUST: Validate results insieme
-  ✅ MUST: Document learnings
-  → Output: Validated completion
-
-❌ FORBIDDEN: Implement without approval
-❌ FORBIDDEN: Deviate from approved approach senza discussion
-```
-
-**ENFORCEMENT**: Memory system registra approval as "decision"
+### Approval Workflow (MANDATORY)
+**SEQUENCE**: (1) DISCUSS (present approach + trade-offs → identify risks) → (2) RESEARCH (Context7 validation → alternative approaches) → (3) APPROVE (explicit approval → confirm acceptance criteria) → (4) IMPLEMENT (follow approved approach → no deviations senza approval) → (5) REVIEW (validate results → document learnings)
+**ENFORCEMENT**: Memory registra approval as "decision"
 
 ---
 
 ## 📊 REGOLE PRESCRITTIVE - Success Metrics
 
 ### Development Metrics (MANDATORY Targets)
-
-**MUST Achieve**:
-```bash
-✅ Task Completion Rate:    100% (all tasks marked completed)
-✅ Test Coverage:            95%+ per NUOVO codice
-✅ Test Pass Rate:           100% (zero failing tests)
-✅ Code Quality:             Zero mypy errors
-✅ Cyclomatic Complexity:    Max 10 per function
-✅ Documentation Coverage:   100% docstrings
-✅ Performance:              Meet/exceed targets
-```
-
-**VALIDATION**: Verificare prima di OGNI commit
+✅ Task Completion: 100% | Test Coverage: 95%+ NEW code | Test Pass Rate: 100% | Code Quality: Zero mypy errors | Cyclomatic Complexity: Max 10 | Documentation Coverage: 100% docstrings | Performance: Meet/exceed targets
 
 ### Process Metrics (MANDATORY Tracking)
-
-**MUST Track**:
-```bash
-✅ Research Quality:         Context7 usage per OGNI major decision
-✅ Collaboration:            Approval workflow adherence (100%)
-✅ Learning:                 Documented lessons learned per phase
-✅ Innovation:               Research-backed technology choices
-✅ Delivery:                 On-time delivery (planned vs actual)
-✅ Memory Usage:             Automatic storage tracking
-✅ Context Injection:        Automatic injection rate
-```
+✅ Research Quality: Context7 usage OGNI major decision | Collaboration: 100% approval workflow adherence | Learning: Documented lessons learned per phase | Innovation: Research-backed technology choices | Delivery: On-time (planned vs actual) | Memory Usage: Automatic storage tracking | Context Injection: Automatic injection rate
 
 **STORAGE**: Automatico via DevStream memory system
 
@@ -1096,105 +336,13 @@ Step 5: REVIEW
 ## 🔧 REGOLE PRESCRITTIVE - File Organization
 
 ### 📁 Project Structure (MANDATORY)
+**CRITICAL**: SEMPRE seguire PROJECT_STRUCTURE.md
 
-**CRITICAL**: SEMPRE seguire la struttura definita in PROJECT_STRUCTURE.md
+**Documentation**: ✅ `docs/{architecture,api,deployment,guides,development,tutorials}/` | ❌ .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
+**Tests**: ✅ `tests/{unit,integration,fixtures}/` | ❌ Test files in root, tests mixed with source
+**Naming**: Documentation → kebab-case (devstream-guide.md) | Code → snake_case (pre_tool_use.py)
 
-#### Documentation Files (MANDATORY Rules)
-
-**FORBIDDEN**:
-```bash
-❌ .md files in project root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
-❌ Random documentation locations
-❌ Temporary doc files
-```
-
-**REQUIRED**:
-```bash
-✅ USE docs/ directory con struttura categorizzata:
-
-docs/
-├── architecture/     ← System design, decisions (MANDATORY per new systems)
-├── api/             ← API reference, schemas (MANDATORY per APIs)
-├── development/     ← Developer guides, roadmap
-├── deployment/      ← Production deployment, validation
-├── guides/          ← User guides, how-tos (MANDATORY per features)
-└── tutorials/       ← Hands-on tutorials
-
-Examples CORRECT:
-✅ docs/deployment/production-deployment-guide.md
-✅ docs/architecture/hook-system-design.md
-✅ docs/guides/devstream-automatic-features-guide.md
-
-Examples WRONG:
-❌ production_deployment.md (root)
-❌ hook_design.md (root)
-❌ feature_guide.md (root)
-```
-
-**ENFORCEMENT**: File creation validata da PROJECT_STRUCTURE.md
-
-#### Test Files (MANDATORY Rules)
-
-**FORBIDDEN**:
-```bash
-❌ Test files in project root
-❌ Tests mixed with source code
-❌ Unorganized test structure
-```
-
-**REQUIRED**:
-```bash
-✅ USE tests/ directory con struttura per tipo:
-
-tests/
-├── unit/           ← Fast, isolated (< 1s per test)
-│   ├── hooks/
-│   ├── memory/
-│   └── tasks/
-├── integration/    ← Integration tests (< 10s per test)
-│   ├── hooks/
-│   ├── memory/
-│   └── context/
-└── fixtures/       ← Test data and fixtures
-
-Examples CORRECT:
-✅ tests/unit/hooks/test_pre_tool_use.py
-✅ tests/integration/memory/test_hybrid_search.py
-✅ tests/fixtures/sample_memory_data.json
-
-Examples WRONG:
-❌ test_hooks.py (root)
-❌ validation_test.py (root)
-❌ .claude/hooks/test_hook.py (mixed with source)
-```
-
-**ENFORCEMENT**: pytest.ini configuration enforces structure
-
-#### File Creation Checklist (MANDATORY)
-
-**BEFORE creating ANY file**:
-```bash
-1. ✅ Check PROJECT_STRUCTURE.md per correct location
-2. ✅ Identify correct directory based on file type
-3. ✅ Use naming convention (kebab-case=docs, snake_case=code)
-4. ✅ Verify directory exists (create if needed)
-5. ✅ Create file in correct location
-```
-
-**NAMING CONVENTIONS (MANDATORY)**:
-```bash
-Documentation: kebab-case
-  ✅ devstream-automatic-features-guide.md
-  ✅ hook-system-validation-report.md
-  ❌ devstream_guide.md (snake_case)
-  ❌ HookSystemReport.md (PascalCase)
-
-Code: snake_case
-  ✅ pre_tool_use.py
-  ✅ hybrid_search_manager.py
-  ❌ PreToolUse.py (PascalCase for classes inside only)
-  ❌ pre-tool-use.py (kebab-case)
-```
+**File Creation Checklist**: (1) Check PROJECT_STRUCTURE.md → (2) Identify correct directory → (3) Use naming convention → (4) Verify directory exists → (5) Create file
 
 ---
 
@@ -1202,139 +350,38 @@ Code: snake_case
 
 ### ⚡⚡⚡ USE CONTEXT7 TO SOLVE - NEVER SIMPLIFY ⚡⚡⚡
 
-**CRITICAL PRINCIPLE**: When encountering complex technical problems:
-
-**MANDATORY Approach**:
-```bash
-✅ MUST: Use Context7 per research solution
-✅ MUST: Ricerca best practices e patterns
-✅ MUST: Implement research-backed solution
-✅ MUST: Maintain ALL features functional
-✅ MUST: Test solution thoroughly
-```
-
-**FORBIDDEN Approaches**:
-```bash
-❌ FORBIDDEN: Disable features to "fix" problem
-❌ FORBIDDEN: Remove functionality as workaround
-❌ FORBIDDEN: Create temporary workarounds
-❌ FORBIDDEN: Simplify to avoid complexity
-❌ FORBIDDEN: Skip research step
-```
+**MANDATORY**: ✅ Use Context7 per research solution, ricerca best practices, implement research-backed solution, maintain ALL features functional, test thoroughly
+**FORBIDDEN**: ❌ Disable features to "fix" problem, remove functionality as workaround, create temporary workarounds, simplify to avoid complexity, skip research step
 
 **ENFORCEMENT**: Code review rejects workarounds and feature disabling
 
 ---
 
-## 🎉 REGOLE PRESCRITTIVE - Success Tracking
-
-### Production-Ready Deliverables (EXAMPLES)
-
-**Phase 2: Testing Implementation** (2025-09-30)
-```bash
-✅ RISULTATO: 100% test pass rate (23/23 tests)
-📊 METRICS: 30% coverage, < 2s execution time
-🎯 METODOLOGIA: Research → Test-First → Validation
-⏱️ TIMELINE: Completato in anticipo (-11 min vs plan)
-🔧 TOOLS: pytest, pytest-asyncio, Context7, TodoWrite
-
-LESSONS LEARNED (stored in memory):
-- Integration tests validate user workflows effectively
-- Non-blocking design critical for production reliability
-- Context7 research patterns accelerate implementation
-- Micro-task breakdown maintains focus and momentum
-```
-
-**Phase 3: Documentation & Validation** (2025-09-30)
-```bash
-✅ RISULTATO: Production-ready documentation suite
-📊 METRICS: 3 major docs (600+ lines user guide, 700+ lines validation)
-🎯 METODOLOGIA: User-first documentation approach
-⏱️ TIMELINE: On schedule
-🔧 TOOLS: Markdown, validation checklists, Context7 research
-
-PRODUCTION STATUS: ✅ APPROVED FOR DEPLOYMENT
-- All functional requirements validated
-- All quality metrics exceeded
-- Zero critical issues identified
-- Complete documentation provided
-```
-
-**STORAGE**: ALL learnings automatically stored in memory (content_type: "learning")
-
----
-
 ## 📚 APPENDIX - System Integration Reference
 
-### Hook System Integration Points
-
-**PreToolUse Hook** (Automatic Context Injection):
-```python
-Location: .claude/hooks/devstream/memory/pre_tool_use.py
-Trigger: Before EVERY tool execution
-Purpose: Inject Context7 + DevStream memory context
-Config: .env.devstream (DEVSTREAM_CONTEXT_INJECTION_ENABLED)
-```
-
-**PostToolUse Hook** (Automatic Memory Storage):
-```python
-Location: .claude/hooks/devstream/memory/post_tool_use.py
-Trigger: After EVERY tool execution
-Purpose: Store code/docs/context in memory
-Config: .env.devstream (DEVSTREAM_MEMORY_ENABLED)
-```
-
-**UserPromptSubmit Hook** (Query Enhancement):
-```python
-Location: .claude/hooks/devstream/context/user_query_context_enhancer.py
-Trigger: On EVERY user prompt submit
-Purpose: Enhance query with project context
-Config: .env.devstream (DEVSTREAM_QUERY_ENHANCEMENT_ENABLED)
-```
+### Hook Integration Points
+| Hook | Location | Trigger | Purpose | Config |
+|------|----------|---------|---------|--------|
+| PreToolUse | `.claude/hooks/devstream/memory/pre_tool_use.py` | Before EVERY tool execution | Inject Context7 + DevStream memory | `DEVSTREAM_CONTEXT_INJECTION_ENABLED` |
+| PostToolUse | `.claude/hooks/devstream/memory/post_tool_use.py` | After EVERY tool execution | Store code/docs/context | `DEVSTREAM_MEMORY_ENABLED` |
+| UserPromptSubmit | `.claude/hooks/devstream/context/user_query_context_enhancer.py` | On EVERY user prompt | Enhance query with context | `DEVSTREAM_QUERY_ENHANCEMENT_ENABLED` |
 
 ### MCP Server Integration
+**Location**: `mcp-devstream-server/` | **Port**: 3000 | **Tools**: devstream_create_task, devstream_update_task, devstream_list_tasks, devstream_store_memory, devstream_search_memory, devstream_list_plans
+**Config**: `.claude/mcp_servers.json` → `{"devstream": {"command": "node", "args": ["mcp-devstream-server/dist/index.js"], "env": {"DEVSTREAM_DB_PATH": "data/devstream.db"}}}`
 
-**DevStream MCP Server**:
+### Environment Configuration (.env.devstream)
 ```bash
-Location: mcp-devstream-server/
-Port: 3000
-Tools:
-  - devstream_create_task
-  - devstream_update_task
-  - devstream_list_tasks
-  - devstream_store_memory
-  - devstream_search_memory
-  - devstream_list_plans
-```
-
-**Configuration**:
-```json
-// .claude/mcp_servers.json
-{
-  "devstream": {
-    "command": "node",
-    "args": ["mcp-devstream-server/dist/index.js"],
-    "env": {
-      "DEVSTREAM_DB_PATH": "data/devstream.db"
-    }
-  }
-}
-```
-
-### Environment Configuration Reference
-
-**Critical Variables (.env.devstream)**:
-```bash
-# Memory System (MANDATORY for automatic features)
+# Memory System (MANDATORY)
 DEVSTREAM_MEMORY_ENABLED=true
 DEVSTREAM_MEMORY_FEEDBACK_LEVEL=minimal
 
-# Context7 Integration (MANDATORY for library detection)
+# Context7 (MANDATORY)
 DEVSTREAM_CONTEXT7_ENABLED=true
 DEVSTREAM_CONTEXT7_AUTO_DETECT=true
 DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000
 
-# Context Injection (MANDATORY for automatic context)
+# Context Injection (MANDATORY)
 DEVSTREAM_CONTEXT_INJECTION_ENABLED=true
 DEVSTREAM_CONTEXT_MAX_TOKENS=2000
 DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5
