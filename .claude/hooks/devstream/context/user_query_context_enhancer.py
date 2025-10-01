@@ -123,6 +123,147 @@ class UserPromptSubmitHook:
             self.base.debug_log(f"Memory search error: {e}")
             return None
 
+    def estimate_task_complexity(self, user_input: str) -> Dict[str, Any]:
+        """
+        Estimate task complexity to determine if protocol enforcement is needed.
+
+        Args:
+            user_input: User input text
+
+        Returns:
+            Dict with complexity analysis and enforcement decision
+        """
+        input_lower = user_input.lower()
+        triggers = []
+
+        # Trigger 1: Duration estimation (keywords indicating complexity)
+        duration_keywords = [
+            "implement", "build", "create", "refactor", "migrate",
+            "integrate", "optimize", "design", "architect"
+        ]
+        if any(kw in input_lower for kw in duration_keywords):
+            triggers.append("estimated_duration_>15min")
+
+        # Trigger 2: Code implementation (explicit tool mentions)
+        implementation_keywords = [
+            "write code", "edit file", "modify", "update code",
+            "add function", "create class", "implement feature"
+        ]
+        if any(kw in input_lower for kw in implementation_keywords):
+            triggers.append("code_implementation_required")
+
+        # Trigger 3: Architectural decisions
+        architecture_keywords = [
+            "architecture", "design pattern", "system design",
+            "api design", "database schema", "integration"
+        ]
+        if any(kw in input_lower for kw in architecture_keywords):
+            triggers.append("architectural_decisions_required")
+
+        # Trigger 4: Multiple files/components
+        multi_file_keywords = [
+            "files", "components", "modules", "services",
+            "multi-", "across", "integrate"
+        ]
+        if any(kw in input_lower for kw in multi_file_keywords):
+            triggers.append("multiple_files_or_components")
+
+        # Trigger 5: Research requirement
+        research_keywords = [
+            "research", "best practices", "how to", "documentation",
+            "library", "framework", "pattern"
+        ]
+        if any(kw in input_lower for kw in research_keywords):
+            triggers.append("context7_research_required")
+
+        # Decision: Enforce if ANY trigger detected
+        enforce = len(triggers) > 0
+
+        return {
+            "enforce_protocol": enforce,
+            "triggers": triggers,
+            "complexity_score": len(triggers),
+            "user_input_preview": user_input[:100]
+        }
+
+    def generate_enforcement_prompt(self, complexity: Dict[str, Any]) -> str:
+        """
+        Generate enforcement gate prompt for user.
+
+        Args:
+            complexity: Complexity analysis from estimate_task_complexity
+
+        Returns:
+            Formatted enforcement prompt
+        """
+        triggers_formatted = "\n".join([f"  - {t.replace('_', ' ').title()}" for t in complexity["triggers"]])
+
+        prompt = f"""⚠️ DevStream Protocol Required
+
+**Detected Complexity Triggers**:
+{triggers_formatted}
+
+This task requires following the DevStream 7-step workflow:
+DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION
+
+**OPTIONS**:
+✅ [RECOMMENDED] Follow DevStream protocol (research-driven, quality-assured)
+   - Context7 research for best practices
+   - @code-reviewer validation (OWASP Top 10 security)
+   - 95%+ test coverage requirement
+   - Approval workflow (decisions documented)
+
+⚠️  [OVERRIDE] Skip protocol (quick fix, NO quality assurance)
+   - ❌ No Context7 research (potential outdated/incorrect patterns)
+   - ❌ No @code-reviewer validation (security gaps)
+   - ❌ No testing requirements (95%+ coverage waived)
+   - ❌ No approval workflow (decisions undocumented)
+
+**Choose**:
+1. Follow Protocol (RECOMMENDED)
+2. Override (explicit risk acknowledgment required)
+Cancel"""
+
+        return prompt
+
+    async def check_protocol_enforcement(self, user_input: str) -> Optional[str]:
+        """
+        Check if protocol enforcement is required and return prompt if needed.
+
+        Args:
+            user_input: User input text
+
+        Returns:
+            Enforcement prompt if required, None otherwise
+        """
+        # Estimate complexity
+        complexity = self.estimate_task_complexity(user_input)
+
+        if not complexity["enforce_protocol"]:
+            self.base.debug_log("Protocol enforcement not required (simple task)")
+            return None
+
+        self.base.debug_log(f"Protocol enforcement triggered: {complexity['triggers']}")
+
+        # Generate enforcement prompt
+        enforcement_prompt = self.generate_enforcement_prompt(complexity)
+
+        # Store enforcement event in memory
+        try:
+            await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_store_memory",
+                {
+                    "content": f"Protocol enforcement triggered: {complexity['triggers']}. User input: {user_input[:200]}",
+                    "content_type": "decision",
+                    "keywords": ["protocol-enforcement", "complexity-analysis", "workflow-gate"]
+                }
+            )
+        except Exception as e:
+            self.base.debug_log(f"Failed to log enforcement event: {e}")
+
+        return enforcement_prompt
+
     async def detect_task_lifecycle_event(self, user_input: str) -> Optional[Dict[str, str]]:
         """
         Detect task lifecycle events from user input.
@@ -192,18 +333,24 @@ class UserPromptSubmitHook:
         """
         context_parts = []
 
-        # Check if Context7 should trigger
+        # PRIORITY 1: Check protocol enforcement (MANDATORY)
+        enforcement_prompt = await self.check_protocol_enforcement(user_input)
+        if enforcement_prompt:
+            context_parts.append(f"# Protocol Enforcement Gate\n\n{enforcement_prompt}")
+            self.base.success_feedback("Protocol enforcement gate activated")
+
+        # PRIORITY 2: Check if Context7 should trigger
         if await self.detect_context7_trigger(user_input):
             context7_docs = await self.get_context7_research(user_input)
             if context7_docs:
                 context_parts.append(context7_docs)
 
-        # Search DevStream memory
+        # PRIORITY 3: Search DevStream memory
         memory_context = await self.search_devstream_memory(user_input)
         if memory_context:
             context_parts.append(memory_context)
 
-        # Detect task lifecycle events
+        # PRIORITY 4: Detect task lifecycle events
         task_event = await self.detect_task_lifecycle_event(user_input)
         if task_event:
             event_context = f"""# Task Lifecycle Event Detected

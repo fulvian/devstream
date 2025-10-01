@@ -271,6 +271,80 @@ DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer for com
 
 ## 📋 PRESCRIPTIVE RULES - DevStream Methodology
 
+### 🚨 ENFORCEMENT GATE - Protocol Compliance (MANDATORY)
+
+**CRITICAL**: DevStream protocol is MANDATORY for all non-trivial tasks. Claude Code will STOP and request confirmation before proceeding.
+
+#### Enforcement Trigger Criteria
+
+Protocol enforcement triggers when **ANY** of these conditions are met:
+1. Estimated task duration > 15 minutes
+2. Task requires code implementation (Write, Edit tools)
+3. Task requires architectural decisions
+4. Task involves multiple files or components
+5. Task requires Context7 research
+
+#### Enforcement Flow
+
+```
+User Request
+    ↓
+Claude Code Complexity Analysis
+    ↓
+┌────────────────────────────────────────────┐
+│ IF task meets enforcement criteria         │
+└────────────────────────────────────────────┘
+    ↓
+🔒 MANDATORY PROTOCOL GATE (STOP EXECUTION)
+    ↓
+"⚠️ DevStream Protocol Required
+
+This task requires following the DevStream 7-step workflow:
+DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION
+
+OPTIONS:
+✅ [RECOMMENDED] Follow DevStream protocol (research-driven, quality-assured)
+⚠️  [OVERRIDE] Skip protocol (quick fix, NO quality assurance, NO Context7, NO testing)
+
+Risks of override:
+- ❌ No Context7 research (potential outdated/incorrect patterns)
+- ❌ No @code-reviewer validation (OWASP Top 10 security gaps)
+- ❌ No testing requirements (95%+ coverage waived)
+- ❌ No approval workflow (decisions undocumented)
+
+Choose: [1] Protocol  [2] Override  [Cancel]"
+    ↓
+┌──────────────────┬─────────────────────────┐
+│ User: Protocol   │ User: Override          │
+├──────────────────┼─────────────────────────┤
+│ → Execute 7-step │ → Log override decision │
+│ → Create task    │ → Warn about risks      │
+│ → TodoWrite plan │ → Disable quality gates │
+│ → Quality gates  │ → Execute directly      │
+└──────────────────┴─────────────────────────┘
+```
+
+#### Override Tracking
+
+**EVERY override is logged** in DevStream memory with:
+- Timestamp
+- User justification
+- Disabled quality gates
+- Risk acknowledgment
+- Outcome tracking (for learning)
+
+**Override Audit Trail**: Query with `mcp__devstream__devstream_search_memory` using keyword "protocol-override"
+
+#### Violation Consequences
+
+**Protocol violations** (proceeding without gate approval):
+1. ⚠️ Automatic detection via hook monitoring
+2. 🔄 Rollback to last checkpoint
+3. 📝 Log violation in memory
+4. 🚨 Restart with protocol enforcement
+
+**BYPASS FORBIDDEN**: Cannot disable enforcement via configuration. Only user explicit override allowed.
+
 ### 🚨 Mandatory Workflow: 7 Sequential Steps
 
 **EVERY task MUST follow**: DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION/TEST
