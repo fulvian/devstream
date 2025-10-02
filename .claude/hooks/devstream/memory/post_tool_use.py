@@ -26,6 +26,7 @@ import sys
 import asyncio
 import sqlite3
 import json
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -428,6 +429,105 @@ class PostToolUseHook:
             return False
 
         return True
+
+    def extract_topics(self, content: str, file_path: str = "") -> List[str]:
+        """
+        Extract topics from content and file path.
+
+        Redis Agent Pattern: Multi-dimensional metadata for filtered search.
+
+        Args:
+            content: Content to extract topics from
+            file_path: Optional file path for extension-based topics
+
+        Returns:
+            List of up to 5 unique topics
+        """
+        topics = []
+
+        # From file extension
+        ext_topic_map = {
+            ".py": "python",
+            ".ts": "typescript", ".tsx": "react",
+            ".js": "javascript", ".jsx": "react",
+            ".md": "documentation",
+            ".yaml": "config", ".yml": "config",
+            ".sql": "database",
+            ".sh": "scripts"
+        }
+
+        for ext, topic in ext_topic_map.items():
+            if file_path.endswith(ext):
+                topics.append(topic)
+
+        # From content keywords
+        keyword_topic_map = {
+            "test": "testing", "pytest": "testing", "unittest": "testing",
+            "async": "async", "await": "async", "asyncio": "async",
+            "api": "api", "endpoint": "api", "rest": "api",
+            "auth": "authentication", "login": "authentication", "oauth": "authentication",
+            "db": "database", "query": "database", "schema": "database",
+            "hook": "hooks", "context": "context", "memory": "memory"
+        }
+
+        content_lower = content.lower()
+        for keyword, topic in keyword_topic_map.items():
+            if keyword in content_lower:
+                topics.append(topic)
+
+        # Deduplicate and limit to 5
+        unique_topics = list(set(topics))[:5]
+
+        self.base.debug_log(f"Extracted topics: {unique_topics}")
+        return unique_topics
+
+    def extract_entities(self, content: str) -> List[str]:
+        """
+        Extract technology/library entities from content.
+
+        Redis Agent Pattern: Entity-based filtering for precise retrieval.
+
+        Args:
+            content: Content to extract entities from
+
+        Returns:
+            List of up to 5 unique technology entities
+        """
+        entities = []
+
+        # Common tech stack entities (case-insensitive detection)
+        tech_patterns = [
+            # Python
+            "FastAPI", "pytest", "SQLAlchemy", "Pydantic", "aiohttp", "asyncio",
+            # TypeScript/React
+            "React", "Next.js", "TypeScript", "Node.js", "Express", "Vue",
+            # Infrastructure
+            "Docker", "Kubernetes", "PostgreSQL", "Redis", "SQLite", "MongoDB",
+            # Tools
+            "Git", "GitHub", "VSCode", "JWT", "OAuth"
+        ]
+
+        content_lower = content.lower()
+        for pattern in tech_patterns:
+            if pattern.lower() in content_lower:
+                entities.append(pattern)
+
+        # Python imports detection
+        import_pattern = r'from\s+(\w+)|import\s+(\w+)'
+        matches = re.findall(import_pattern, content)
+
+        for match in matches:
+            entity = match[0] or match[1]
+            # Skip standard library
+            stdlib = ["os", "sys", "re", "json", "time", "datetime", "pathlib"]
+            if entity and entity not in stdlib:
+                entities.append(entity)
+
+        # Deduplicate and limit to 5
+        unique_entities = list(set(entities))[:5]
+
+        self.base.debug_log(f"Extracted entities: {unique_entities}")
+        return unique_entities
 
     async def process(self, context: PostToolUseContext) -> None:
         """
