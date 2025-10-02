@@ -21,7 +21,8 @@ const StoreMemoryInputSchema = z.object({
 const SearchMemoryInputSchema = z.object({
   query: z.string().min(1),
   content_type: z.enum(['code', 'documentation', 'context', 'output', 'error', 'decision', 'learning']).optional(),
-  limit: z.number().min(1).max(50).optional().default(10)
+  limit: z.number().min(1).max(50).optional().default(10),
+  min_relevance: z.number().min(0.0).max(1.0).optional().default(0.03)
 });
 
 export class MemoryTools {
@@ -190,10 +191,18 @@ export class MemoryTools {
         weight_vec: 1.0
       });
 
-      // Filter by content_type if specified
+      // Filter by minimum relevance threshold (≥ configured threshold, default 0.03)
+      const MIN_RELEVANCE_THRESHOLD = input.min_relevance;
+      console.log(`📊 Filtering results with minimum relevance threshold: ${MIN_RELEVANCE_THRESHOLD}`);
+
+      const relevanceFiltered = results.filter(r =>
+        r.combined_rank >= MIN_RELEVANCE_THRESHOLD
+      );
+
+      // Apply content_type filter AFTER relevance filtering
       const filteredResults = input.content_type
-        ? results.filter(r => r.content_type === input.content_type)
-        : results;
+        ? relevanceFiltered.filter(r => r.content_type === input.content_type)
+        : relevanceFiltered;
 
       if (filteredResults.length === 0) {
         return {
@@ -238,9 +247,10 @@ export class MemoryTools {
           learning: '🧠'
         }[result.content_type] || '📄';
 
-        // Context7 pattern: Show RRF combined rank
+        // Context7 pattern: Show RRF combined rank with updated classification
         const rankScore = (result.combined_rank * 100).toFixed(1);
-        const rankText = result.combined_rank > 0.05 ? 'HIGH' : result.combined_rank > 0.02 ? 'MEDIUM' : 'LOW';
+        const rankText = result.combined_rank >= 0.05 ? 'HIGH' :
+                         result.combined_rank >= 0.03 ? 'MEDIUM' : 'LOW';
 
         output += `${index + 1}. ${typeEmoji} **${result.content_type.toUpperCase()}** Memory\n`;
         output += `   📊 Relevance: ${rankText} (RRF Score: ${rankScore})\n`;

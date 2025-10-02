@@ -448,6 +448,88 @@ class DevStreamMCPClient:
             )
             return None
 
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generic MCP tool invocation method.
+
+        Provides a unified interface for calling any MCP tool dynamically.
+        Follows the same JSON-RPC pattern as specialized methods.
+
+        Args:
+            tool_name: MCP tool name (e.g., "mcp__context7__get-library-docs")
+            arguments: Tool-specific arguments as dictionary
+
+        Returns:
+            Tool result dictionary from MCP server
+
+        Raises:
+            ValueError: If tool_name is empty or arguments is None
+            RuntimeError: If MCP server communication fails
+
+        Example:
+            >>> result = await client.call_tool(
+            ...     "mcp__context7__get-library-docs",
+            ...     {"context7CompatibleLibraryID": "/fastapi/fastapi", "tokens": 5000}
+            ... )
+        """
+        # Validate inputs
+        if not tool_name or not tool_name.strip():
+            raise ValueError("tool_name cannot be empty")
+        if arguments is None:
+            raise ValueError("arguments cannot be None (use {} for no arguments)")
+
+        # Build MCP request following JSON-RPC 2.0 specification
+        mcp_request = {
+            "jsonrpc": "2.0",
+            "id": f"{tool_name}-{hash(str(arguments))}-{datetime.now().timestamp()}",
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments
+            }
+        }
+
+        try:
+            # Execute MCP server call
+            response = await self._call_mcp_server(mcp_request)
+
+            if response and response.get("result"):
+                # Success - log and return result
+                self.logger.log_mcp_call(
+                    tool=tool_name,
+                    parameters=arguments,
+                    success=True,
+                    response={"status": "success"}  # Avoid logging large responses
+                )
+                return response.get("result")
+            else:
+                # No result in response
+                error_msg = "No result in MCP response"
+                self.logger.log_mcp_call(
+                    tool=tool_name,
+                    parameters=arguments,
+                    success=False,
+                    error=error_msg
+                )
+                raise RuntimeError(f"MCP tool '{tool_name}' returned no result")
+
+        except ValueError as e:
+            # Re-raise validation errors
+            raise
+        except Exception as e:
+            # Log and raise communication errors
+            self.logger.log_mcp_call(
+                tool=tool_name,
+                parameters=arguments,
+                success=False,
+                error=str(e)
+            )
+            raise RuntimeError(f"MCP tool '{tool_name}' failed: {str(e)}") from e
+
     def _parse_mcp_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Multi-strategy JSON parser for MCP server responses.

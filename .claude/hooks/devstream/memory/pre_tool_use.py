@@ -18,8 +18,9 @@ Agent Auto-Delegation System integration for intelligent agent routing.
 import sys
 import asyncio
 import os
+import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
@@ -27,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # Add devstream hooks dir
 
 from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
-from context7_client import Context7Client
 from mcp_client import get_mcp_client
 
 # Agent Auto-Delegation imports (with graceful degradation)
@@ -51,7 +51,6 @@ class PreToolUseHook:
     def __init__(self):
         self.base = DevStreamHookBase("pre_tool_use")
         self.mcp_client = get_mcp_client()
-        self.context7 = Context7Client(self.mcp_client)
 
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher: Optional[PatternMatcher] = None
@@ -67,41 +66,305 @@ class PreToolUseHook:
         else:
             self.base.debug_log(f"Agent Auto-Delegation unavailable: {_IMPORT_ERROR}")
 
-    async def get_context7_docs(self, file_path: str, content: str) -> Optional[str]:
+        # Token budget configuration
+        self.memory_token_budget = int(
+            os.getenv("DEVSTREAM_CONTEXT_MAX_TOKENS", "2000")
+        )
+
+    def _estimate_tokens(self, text: str) -> int:
         """
-        Get Context7 documentation if relevant library detected.
+        Estimate token count using chars/4 approximation.
+
+        Claude tokenization: ~4 chars per token average.
+        Conservative estimate ensures budget compliance.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Estimated token count
+        """
+        return len(text) // 4
+
+    def _detect_libraries(self, content: str, file_path: str) -> List[str]:
+        """
+        Extract library names from imports and usage patterns.
+
+        Args:
+            content: File content to analyze
+            file_path: File path for extension-based detection
+
+        Returns:
+            List of lowercase library names (Context7-compatible)
+
+        Note:
+            All names normalized to lowercase for Context7 compatibility.
+            Example: "FastAPI" → "fastapi", "SQLAlchemy" → "sqlalchemy"
+        """
+        libraries = []
+        file_ext = Path(file_path).suffix.lower()
+
+        # Python imports
+        if file_ext == '.py':
+            import_pattern = r'^(?:from|import)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+            for match in re.finditer(import_pattern, content, re.MULTILINE):
+                lib = match.group(1)
+                # Skip stdlib
+                if lib not in ['os', 'sys', 're', 'json', 'typing', 'pathlib',
+                              'datetime', 'asyncio', 'subprocess', 'logging']:
+                    libraries.append(lib)
+
+        # JavaScript/TypeScript imports
+        elif file_ext in ['.js', '.ts', '.jsx', '.tsx']:
+            import_pattern = r'(?:import|require)\s*\(?[\'"]([^\'"\)]+)[\'"]'
+            for match in re.finditer(import_pattern, content):
+                lib = match.group(1).split('/')[0]  # Get package name
+                if not lib.startswith('.'):  # Skip relative imports
+                    libraries.append(lib)
+
+        # Framework detection patterns (cross-language)
+        # Note: Patterns are file-extension aware to reduce false positives
+        framework_patterns = {
+            'fastapi': (r'(?:from\s+fastapi|FastAPI\()', ['.py']),
+            'django': (r'(?:from\s+django|django\.)', ['.py']),
+            'flask': (r'(?:from\s+flask|@app\.route)', ['.py']),
+            'react': (r'(?:import.*React|useState|useEffect|createContext)', ['.js', '.jsx', '.ts', '.tsx']),
+            'vue': (r'(?:import.*Vue|createApp|defineComponent)', ['.js', '.ts', '.vue']),
+            'next': (r'(?:import.*next|getServerSideProps|getStaticProps)', ['.js', '.jsx', '.ts', '.tsx']),
+            'express': (r'(?:express\(\)|app\.get\(|app\.post\()', ['.js', '.ts']),
+            'pytest': (r'(?:import\s+pytest|@pytest\.)', ['.py']),
+            'jest': (r'(?:describe\(|test\(|expect\()', ['.js', '.ts', '.jsx', '.tsx']),
+            'sqlalchemy': (r'(?:from\s+sqlalchemy|declarative_base|relationship)', ['.py']),
+        }
+
+        for lib, (pattern, extensions) in framework_patterns.items():
+            # Only check if file extension matches
+            if file_ext in extensions and re.search(pattern, content, re.IGNORECASE):
+                libraries.append(lib)
+
+        # Normalize to lowercase and remove duplicates for Context7 compatibility
+        return list(set(lib.lower() for lib in libraries))
+
+    def _build_code_aware_query(self, file_path: str, content: str) -> str:
+        """
+        Build intelligent query from code structure.
+
+        Extracts:
+        - Imports (libraries/modules being used)
+        - Class names (key abstractions)
+        - Function names (main operations)
+        - Decorators (framework patterns like @app.get, @pytest.fixture)
 
         Args:
             file_path: Path to file being edited
             content: File content
 
         Returns:
-            Formatted Context7 docs or None
+            Structured query string with code elements
+
+        Performance:
+            Target: <50ms for typical files (99th percentile)
+        """
+        import time
+        start_time = time.time()
+
+        filename = Path(file_path).name
+        ext = Path(file_path).suffix.lower()
+
+        elements = [filename]
+
+        # Python code analysis
+        if ext == '.py':
+            # Extract imports
+            import_pattern = r'^(?:from\s+(\S+)|import\s+(\S+))'
+            imports = re.findall(import_pattern, content, re.MULTILINE)
+            imports = [i[0] or i[1] for i in imports if i[0] or i[1]]
+            # Filter out stdlib and builtins, split dotted imports
+            filtered_imports = []
+            stdlib = {'os', 'sys', 're', 'json', 'typing', 'pathlib', 'datetime',
+                     'asyncio', 'subprocess', 'logging', 'time', 'collections'}
+            for imp in imports:
+                base = imp.split('.')[0]  # Get root module
+                if base not in stdlib:
+                    filtered_imports.append(base)
+            elements.extend(filtered_imports[:5])  # Max 5 imports
+
+            # Extract class names
+            class_pattern = r'^class\s+(\w+)'
+            classes = re.findall(class_pattern, content, re.MULTILINE)
+            elements.extend(classes[:3])  # Max 3 classes
+
+            # Extract function/method names
+            func_pattern = r'^(?:async\s+)?def\s+(\w+)'
+            funcs = re.findall(func_pattern, content, re.MULTILINE)
+            elements.extend(funcs[:5])  # Max 5 functions
+
+            # Extract decorators (framework indicators)
+            decorator_pattern = r'^@(\w+(?:\.\w+)?)'
+            decorators = re.findall(decorator_pattern, content, re.MULTILINE)
+            elements.extend(decorators[:3])  # Max 3 decorators
+
+        # TypeScript/JavaScript analysis
+        elif ext in ['.ts', '.tsx', '.js', '.jsx']:
+            # Extract imports
+            import_pattern = r'(?:import|from)\s+[\'"]([^\'"]+)[\'"]'
+            imports = re.findall(import_pattern, content)
+            # Filter relative imports and get package names
+            filtered_imports = []
+            for imp in imports:
+                if not imp.startswith('.'):
+                    # Get package name (before first /)
+                    pkg = imp.split('/')[0]
+                    filtered_imports.append(pkg)
+            elements.extend(filtered_imports[:5])
+
+            # Extract class/component names
+            class_pattern = r'(?:class|function|const)\s+(\w+)'
+            names = re.findall(class_pattern, content)
+            elements.extend(names[:5])
+
+        # Rust analysis
+        elif ext == '.rs':
+            # Extract use statements
+            use_pattern = r'^use\s+([a-zA-Z_][a-zA-Z0-9_:]*)'
+            uses = re.findall(use_pattern, content, re.MULTILINE)
+            elements.extend([u.split('::')[0] for u in uses[:5]])
+
+            # Extract struct/enum/trait names
+            type_pattern = r'^(?:struct|enum|trait|impl)\s+(\w+)'
+            types = re.findall(type_pattern, content, re.MULTILINE)
+            elements.extend(types[:5])
+
+        # Go analysis
+        elif ext == '.go':
+            # Extract imports
+            import_pattern = r'import\s+(?:"([^"]+)"|`([^`]+)`)'
+            imports = re.findall(import_pattern, content)
+            imports = [i[0] or i[1] for i in imports]
+            elements.extend([imp.split('/')[-1] for imp in imports[:5]])
+
+            # Extract type/struct/interface names
+            type_pattern = r'^type\s+(\w+)'
+            types = re.findall(type_pattern, content, re.MULTILINE)
+            elements.extend(types[:5])
+
+        # Build query with code structure
+        query = " ".join(elements)
+
+        # Fallback to content prefix if no elements extracted
+        if len(query) < 50:
+            query = f"{filename} {content[:300]}"
+
+        # Log performance metrics
+        elapsed_ms = (time.time() - start_time) * 1000
+        self.base.debug_log(
+            f"Code-aware query built in {elapsed_ms:.1f}ms: {query[:80]}..."
+        )
+
+        return query
+
+    async def get_context7_docs(self, file_path: str, content: str) -> Optional[str]:
+        """
+        Detect libraries and emit Context7 advisory for Claude.
+
+        Instead of directly calling Context7 MCP tools (which doesn't work with
+        stdio MCP servers), this method detects libraries and emits an advisory
+        message that Claude can act upon using its native MCP access.
+
+        Args:
+            file_path: Path to file being edited
+            content: File content
+
+        Returns:
+            Context7 advisory message or None
         """
         try:
-            # Build query from file path and content preview
-            query = f"{file_path} {content[:500]}"
+            # Detect libraries from imports/usage
+            libraries = self._detect_libraries(content, file_path)
 
-            # Check if Context7 should trigger
-            if not await self.context7.should_trigger_context7(query):
-                self.base.debug_log("Context7 not triggered for this file")
+            if not libraries:
+                self.base.debug_log("No external libraries detected for Context7")
                 return None
 
-            self.base.debug_log("Context7 triggered - searching for docs")
+            self.base.debug_log(f"Context7 advisory - detected libraries: {', '.join(libraries)}")
 
-            # Search and retrieve documentation
-            result = await self.context7.search_and_retrieve(query)
+            # Emit advisory message for Claude
+            advisory = "# Context7 Advisory\n\n"
+            advisory += f"**File**: {Path(file_path).name}\n\n"
+            advisory += f"**Detected Libraries**: {', '.join(libraries)}\n\n"
+            advisory += "**Recommendation**: Retrieve up-to-date documentation using Context7:\n\n"
 
-            if result.success and result.docs:
-                self.base.success_feedback(f"Context7 docs retrieved: {result.library_id}")
-                return self.context7.format_docs_for_context(result)
-            else:
-                self.base.debug_log(f"Context7 search failed: {result.error}")
-                return None
+            for lib in libraries[:3]:  # Limit to top 3 to avoid context bloat
+                advisory += f"### {lib}\n\n"
+                advisory += "1. Resolve library ID:\n"
+                advisory += f"```\nmcp__context7__resolve-library-id\n"
+                advisory += f"libraryName: {lib}\n```\n\n"
+                advisory += "2. Retrieve documentation:\n"
+                advisory += f"```\nmcp__context7__get-library-docs\n"
+                advisory += f"context7CompatibleLibraryID: <resolved_id_from_step_1>\n"
+                advisory += f"tokens: 5000\n```\n\n"
+
+            if len(libraries) > 3:
+                advisory += f"*Additional libraries detected: {', '.join(libraries[3:])}*\n\n"
+
+            advisory += "---\n"
+            advisory += "*Context7 advisory generated by DevStream PreToolUse hook*\n"
+
+            self.base.success_feedback(f"Context7 advisory generated for {len(libraries)} libraries")
+            return advisory
 
         except Exception as e:
-            self.base.debug_log(f"Context7 error: {e}")
+            self.base.debug_log(f"Context7 advisory generation error: {e}")
             return None
+
+    def _format_memory_with_budget(
+        self,
+        memory_items: List[Dict],
+        max_tokens: int = 2000
+    ) -> str:
+        """
+        Format memory results within token budget.
+
+        Args:
+            memory_items: Search results
+            max_tokens: Maximum tokens to use (default: 2000)
+
+        Returns:
+            Formatted memory context within budget
+        """
+        formatted = "# DevStream Memory Context\n\n"
+        used_tokens = self._estimate_tokens(formatted)
+
+        for i, item in enumerate(memory_items, 1):
+            content = item.get("content", "")
+            score = item.get("relevance_score", 0.0)
+
+            # Create result header
+            header = f"## Result {i} (relevance: {score:.2f})\n"
+
+            # Calculate available tokens for this result
+            header_tokens = self._estimate_tokens(header)
+            available = max_tokens - used_tokens - header_tokens - 20  # Buffer
+
+            if available < 50:  # Minimum useful content
+                break
+
+            # Truncate content to fit budget
+            max_chars = available * 4
+            truncated_content = content[:max_chars]
+
+            # Add result
+            result_block = f"{header}{truncated_content}\n\n"
+            result_tokens = self._estimate_tokens(result_block)
+
+            if used_tokens + result_tokens > max_tokens:
+                break
+
+            formatted += result_block
+            used_tokens += result_tokens
+
+        formatted += f"\n*Total tokens used: ~{used_tokens}/{max_tokens}*\n"
+        return formatted
 
     async def get_devstream_memory(self, file_path: str, content: str) -> Optional[str]:
         """
@@ -115,35 +378,30 @@ class PreToolUseHook:
             Formatted memory context or None
         """
         try:
-            # Build search query
-            query = f"{Path(file_path).name} {content[:300]}"
+            # Build code-aware search query
+            query = self._build_code_aware_query(file_path, content)
 
             self.base.debug_log(f"Searching DevStream memory: {query[:50]}...")
 
             # Search memory via MCP
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_search_memory",
-                {
-                    "query": query,
-                    "limit": 3
-                }
+            result = await self.mcp_client.search_memory(
+                query=query,
+                limit=3
             )
 
             if not result or not result.get("results"):
                 self.base.debug_log("No relevant memory found")
                 return None
 
-            # Format memory results
+            # Format memory results with token budget enforcement
             memory_items = result.get("results", [])
             if not memory_items:
                 return None
 
-            formatted = "# DevStream Memory Context\n\n"
-            for i, item in enumerate(memory_items[:3], 1):
-                content = item.get("content", "")[:300]
-                score = item.get("relevance_score", 0.0)
-                formatted += f"## Result {i} (relevance: {score:.2f})\n{content}\n\n"
+            formatted = self._format_memory_with_budget(
+                memory_items,
+                max_tokens=self.memory_token_budget
+            )
 
             self.base.success_feedback(f"Found {len(memory_items)} relevant memories")
             return formatted
@@ -268,14 +526,10 @@ class PreToolUseHook:
             ]
 
             # Store in memory via MCP
-            await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_store_memory",
-                {
-                    "content": content,
-                    "content_type": "decision",
-                    "keywords": keywords
-                }
+            await self.mcp_client.store_memory(
+                content=content,
+                content_type="decision",
+                keywords=keywords
             )
 
             self.base.debug_log(f"Delegation decision logged to memory: @{agent}")

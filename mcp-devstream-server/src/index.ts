@@ -226,6 +226,13 @@ class DevStreamMcpServer {
                 maximum: 50,
                 default: 10,
                 description: 'Maximum number of results to return'
+              },
+              min_relevance: {
+                type: 'number',
+                minimum: 0.0,
+                maximum: 1.0,
+                default: 0.03,
+                description: 'Minimum RRF score threshold (default: 0.03 = 3%). Filters out LOW relevance results. Higher values return fewer but more relevant results.'
               }
             },
             required: ['query'],
