@@ -60,6 +60,17 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/sessions/pre_compact.py",
+            "timeout": 45
+          }
+        ]
+      }
+    ],
     "Notification": []
   }
 }
