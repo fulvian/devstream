@@ -325,9 +325,113 @@ class PostToolUseHook:
             self.base.debug_log(f"Memory storage error: {e}")
             return None
 
+    def classify_content_type(
+        self,
+        tool_name: str,
+        tool_response: Dict[str, Any],
+        content: str
+    ) -> str:
+        """
+        Classify content type based on tool and response.
+
+        Event Sourcing Pattern: Validate response success before classification.
+
+        Args:
+            tool_name: Name of the tool executed
+            tool_response: Tool execution response with success flag
+            content: Content to classify
+
+        Returns:
+            Content type: code|output|error|context|decision
+        """
+        # Event Sourcing pattern: Validate response
+        if tool_response.get("success") == False:
+            return "error"
+
+        if tool_name in ["Write", "Edit", "MultiEdit"]:
+            return "code"
+        elif tool_name == "Bash":
+            return "output" if tool_response.get("success") else "error"
+        elif tool_name == "Read":
+            return "context"
+        elif tool_name == "TodoWrite":
+            return "decision"
+
+        return "context"
+
+    def should_capture_bash_output(
+        self,
+        tool_input: Dict[str, Any],
+        tool_response: Dict[str, Any]
+    ) -> bool:
+        """
+        Determine if Bash output is significant for capture.
+
+        Redis Agent Pattern: Multi-dimensional filtering to reduce noise.
+
+        Args:
+            tool_input: Bash command input
+            tool_response: Bash execution response
+
+        Returns:
+            True if output is significant and should be captured
+        """
+        command = tool_input.get("command", "")
+
+        # Skip trivial commands
+        trivial_commands = ["ls", "pwd", "cd", "echo", "cat", "head", "tail", "grep", "find"]
+        if any(command.strip().startswith(cmd) for cmd in trivial_commands):
+            self.base.debug_log(f"Skipping trivial command: {command[:50]}")
+            return False
+
+        # Require significant output (>50 chars)
+        output = tool_response.get("output", "")
+        if len(output.strip()) < 50:
+            self.base.debug_log(f"Skipping short output: {len(output)} chars")
+            return False
+
+        return True
+
+    def should_capture_read_content(self, file_path: str) -> bool:
+        """
+        Determine if Read file is significant source/doc file.
+
+        Memory Bank Pattern: Classify content by file type for active context.
+
+        Args:
+            file_path: Path to file being read
+
+        Returns:
+            True if file is significant source/documentation file
+        """
+        # Source and documentation extensions only
+        source_extensions = [
+            ".py", ".ts", ".tsx", ".js", ".jsx",
+            ".md", ".rst", ".txt",
+            ".json", ".yaml", ".yml",
+            ".sh", ".sql"
+        ]
+
+        if not any(file_path.endswith(ext) for ext in source_extensions):
+            self.base.debug_log(f"Skipping non-source file: {file_path}")
+            return False
+
+        # Excluded paths
+        excluded_paths = [
+            ".git/", "node_modules/", ".venv/", ".devstream/",
+            "__pycache__/", "dist/", "build/", ".next/",
+            "coverage/", ".pytest_cache/", ".mypy_cache/"
+        ]
+
+        if any(excluded in file_path for excluded in excluded_paths):
+            self.base.debug_log(f"Skipping excluded path: {file_path}")
+            return False
+
+        return True
+
     async def process(self, context: PostToolUseContext) -> None:
         """
-        Main hook processing logic.
+        Main hook processing logic - Enhanced multi-tool capture.
 
         Args:
             context: PostToolUse context from cchooks
@@ -347,21 +451,23 @@ class PostToolUseHook:
         # Extract tool information
         tool_name = context.tool_name
         tool_input = context.tool_input
+        tool_response = context.tool_response
 
-        self.base.debug_log(f"Processing {tool_name} for {tool_input.get('file_path', 'unknown')}")
+        self.base.debug_log(f"Processing {tool_name}")
 
         # Define critical tools that trigger checkpoints
         critical_tools = ["Write", "Edit", "MultiEdit", "Bash", "TodoWrite"]
         is_critical_tool = tool_name in critical_tools
 
-        # Only process Write/Edit operations for memory storage
-        if tool_name not in ["Write", "Edit", "MultiEdit"]:
-            # Check if it's another critical tool (Bash, TodoWrite)
-            if is_critical_tool:
-                # Trigger checkpoint for critical non-file tools
-                await self.trigger_checkpoint_for_critical_tool(tool_name)
-            context.output.exit_success()
-            return
+        # Multi-tool capture strategy
+        should_store = False
+        content_to_store = None
+        content_type = "context"
+
+        if tool_name in ["Write", "Edit", "MultiEdit"]:
+            # File modification - ALWAYS capture (existing logic)
+            should_store = True
+            content_type = "code"
 
         # Extract file information
         file_path = tool_input.get("file_path", "")
