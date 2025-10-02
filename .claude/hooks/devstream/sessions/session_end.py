@@ -40,6 +40,7 @@ Context7 Patterns:
 
 import sys
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -57,6 +58,7 @@ from ollama_client import OllamaEmbeddingClient
 from session_data_extractor import SessionDataExtractor
 from session_summary_generator import SessionSummaryGenerator, format_session_for_storage
 from work_session_manager import WorkSessionManager
+from atomic_file_writer import write_atomic
 
 
 class SessionEndHook:
@@ -85,6 +87,60 @@ class SessionEndHook:
         # Database path
         project_root = Path(__file__).parent.parent.parent.parent.parent
         self.db_path = str(project_root / 'data' / 'devstream.db')
+
+    def cleanup_ollama_models(self) -> bool:
+        """
+        Force unload Ollama models on session end.
+
+        Executes `ollama stop embeddinggemma:300m` to immediately release
+        model from memory (~1.21GB).
+
+        Returns:
+            True if cleanup successful, False otherwise
+
+        Note:
+            Non-blocking. Logs errors but doesn't raise exceptions to
+            prevent session end failure.
+        """
+        try:
+            result = subprocess.run(
+                ['ollama', 'stop', 'embeddinggemma:300m'],
+                capture_output=True,
+                timeout=5,  # 5-second timeout
+                text=True,
+                check=False  # Don't raise on non-zero exit
+            )
+
+            if result.returncode == 0:
+                self.base.debug_log(
+                    "Ollama models unloaded successfully "
+                    "(model=embeddinggemma:300m, memory_freed_mb=1210)"
+                )
+                return True
+            else:
+                self.base.debug_log(
+                    f"Ollama cleanup non-zero exit: returncode={result.returncode}, "
+                    f"stderr={result.stderr.strip()}"
+                )
+                return False
+
+        except subprocess.TimeoutExpired:
+            self.base.debug_log(
+                "Ollama cleanup timeout after 5s (command='ollama stop embeddinggemma:300m')"
+            )
+            return False
+
+        except FileNotFoundError:
+            self.base.debug_log(
+                "Ollama CLI not found - skip cleanup (note: Ollama may not be installed or not in PATH)"
+            )
+            return False
+
+        except Exception as e:
+            self.base.debug_log(
+                f"Ollama cleanup unexpected error: {str(e)} (error_type={type(e).__name__})"
+            )
+            return False
 
     async def get_active_session_id(self) -> Optional[str]:
         """
@@ -296,16 +352,34 @@ class SessionEndHook:
             else:
                 self.base.warning_feedback("Summary storage failed (non-blocking)")
 
-            # Step 5.5: Write summary to file for SessionStart hook
-            self.base.debug_log("Step 5.5: Writing summary to file...")
+            # Step 5.5: Write summary to file for SessionStart hook (ATOMIC)
+            self.base.debug_log("Step 5.5: Writing summary to marker file (atomic)...")
 
-            try:
-                summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
-                summary_file.parent.mkdir(parents=True, exist_ok=True)
-                summary_file.write_text(summary_markdown)
-                self.base.debug_log(f"Summary written to {summary_file}")
-            except Exception as e:
-                self.base.debug_log(f"Failed to write summary file: {e}")
+            summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+            # Ensure parent directory exists
+            summary_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Atomic write with logging
+            write_success = await write_atomic(summary_file, summary_markdown)
+
+            if write_success:
+                self.base.debug_log(
+                    f"✅ Marker file written atomically: {summary_file} "
+                    f"(source=session_end, size={len(summary_markdown)} chars)"
+                )
+
+                # Log marker file creation for telemetry
+                self.base.debug_log(
+                    f"📊 Marker file telemetry: "
+                    f"exists={summary_file.exists()}, "
+                    f"size={summary_file.stat().st_size if summary_file.exists() else 0}, "
+                    f"source=session_end"
+                )
+            else:
+                self.base.debug_log(
+                    f"❌ Marker file write failed: {summary_file} (source=session_end)"
+                )
 
             # Step 6: Update session status to "completed"
             self.base.debug_log("Step 6: Updating session status...")
@@ -320,6 +394,15 @@ class SessionEndHook:
                 self.base.debug_log("Session status updated to completed")
             else:
                 self.base.warning_feedback("Session status update failed")
+
+            # Step 7: Cleanup Ollama models (non-blocking, best-effort)
+            self.base.debug_log("Step 7: Cleaning up Ollama models...")
+
+            cleanup_success = self.cleanup_ollama_models()
+            if cleanup_success:
+                self.base.debug_log("Ollama cleanup complete - models unloaded")
+            else:
+                self.base.debug_log("Ollama cleanup failed (non-critical, session end continues)")
 
             # Success feedback
             self.base.success_feedback(

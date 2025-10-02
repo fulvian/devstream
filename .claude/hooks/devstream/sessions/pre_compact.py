@@ -50,6 +50,7 @@ from mcp_client import get_mcp_client
 # Import session components
 from session_data_extractor import SessionDataExtractor
 from session_summary_generator import SessionSummaryGenerator
+from atomic_file_writer import write_atomic
 
 
 class PreCompactHook:
@@ -226,7 +227,7 @@ class PreCompactHook:
 
     async def write_marker_file(self, summary: str) -> bool:
         """
-        Write summary to marker file for SessionStart hook.
+        Write summary to marker file atomically for SessionStart hook.
 
         Creates ~/.claude/state/devstream_last_session.txt with summary text.
 
@@ -237,24 +238,38 @@ class PreCompactHook:
             True if successful, False otherwise
 
         Note:
-            Non-blocking - logs errors but doesn't raise exceptions
+            Uses atomic write pattern to prevent partial writes.
+            Source tagged as "pre_compact" for debugging.
+            Non-blocking - logs errors but doesn't raise exceptions.
         """
-        try:
-            # Path: ~/.claude/state/devstream_last_session.txt
-            marker_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+        # Path: ~/.claude/state/devstream_last_session.txt
+        marker_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
 
-            # Create parent directories if missing
-            marker_file.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure parent directory exists
+        marker_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Write summary text
-            marker_file.write_text(summary)
+        # Atomic write
+        write_success = await write_atomic(marker_file, summary)
 
-            self.base.debug_log(f"Marker file written: {marker_file}")
-            return True
+        if write_success:
+            self.base.debug_log(
+                f"✅ Marker file written atomically: {marker_file} "
+                f"(source=pre_compact, size={len(summary)} chars)"
+            )
 
-        except Exception as e:
-            self.base.debug_log(f"Failed to write marker file: {e}")
-            return False
+            # Log marker file creation for telemetry
+            self.base.debug_log(
+                f"📊 Marker file telemetry: "
+                f"exists={marker_file.exists()}, "
+                f"size={marker_file.stat().st_size if marker_file.exists() else 0}, "
+                f"source=pre_compact"
+            )
+        else:
+            self.base.debug_log(
+                f"❌ Marker file write failed: {marker_file} (source=pre_compact)"
+            )
+
+        return write_success
 
     async def process_pre_compact(self, context: PreCompactContext) -> None:
         """
