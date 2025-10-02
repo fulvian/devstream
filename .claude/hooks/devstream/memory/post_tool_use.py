@@ -234,17 +234,24 @@ class PostToolUseHook:
         self,
         file_path: str,
         content: str,
-        operation: str
+        operation: str,
+        topics: List[str],
+        entities: List[str],
+        content_type: str = "code"
     ) -> Optional[str]:
         """
         Store file modification in DevStream memory with embedding.
 
         Phase 2 Enhancement: Now generates embedding and stores it inline.
+        FASE 3 Enhancement: Includes topics, entities, and content_type.
 
         Args:
             file_path: Path to modified file
             content: File content
-            operation: Operation type (Write, Edit, MultiEdit)
+            operation: Operation type (Write, Edit, MultiEdit, Bash, Read, TodoWrite)
+            topics: List of extracted topics
+            entities: List of extracted technology entities
+            content_type: Content type classification (code, output, context, decision, error)
 
         Returns:
             Memory ID if storage successful, None otherwise
@@ -264,10 +271,23 @@ class PostToolUseHook:
 {preview}
 """
 
-            # Extract keywords
+            # Extract base keywords
             keywords = self.extract_keywords(file_path, content)
 
-            self.base.debug_log(f"Storing memory: {len(preview)} chars, {len(keywords)} keywords")
+            # Add topics and entities to keywords
+            keywords.extend(topics)
+            keywords.extend(entities)
+
+            # Add tool source tracking
+            keywords.append(f"tool:{operation.lower()}")
+
+            # Deduplicate keywords
+            keywords = list(set(keywords))
+
+            self.base.debug_log(
+                f"Storing memory: {len(preview)} chars, {len(keywords)} keywords "
+                f"({len(topics)} topics, {len(entities)} entities)"
+            )
 
             # Store via MCP (without embedding initially)
             result = await self.base.safe_mcp_call(
@@ -275,7 +295,7 @@ class PostToolUseHook:
                 "devstream_store_memory",
                 {
                     "content": memory_content,
-                    "content_type": "code",
+                    "content_type": content_type,
                     "keywords": keywords
                 }
             )
@@ -533,6 +553,8 @@ class PostToolUseHook:
         """
         Main hook processing logic - Enhanced multi-tool capture.
 
+        FASE 3 Enhancement: Multi-tool routing with filtering and metadata extraction.
+
         Args:
             context: PostToolUse context from cchooks
         """
@@ -559,22 +581,68 @@ class PostToolUseHook:
         critical_tools = ["Write", "Edit", "MultiEdit", "Bash", "TodoWrite"]
         is_critical_tool = tool_name in critical_tools
 
-        # Multi-tool capture strategy
+        # Multi-tool routing logic
         should_store = False
-        content_to_store = None
+        file_path = ""
+        content = ""
         content_type = "context"
 
+        # Route 1: Write/Edit/MultiEdit - File modifications (ALWAYS capture)
         if tool_name in ["Write", "Edit", "MultiEdit"]:
-            # File modification - ALWAYS capture (existing logic)
-            should_store = True
-            content_type = "code"
+            file_path = tool_input.get("file_path", "")
+            content = tool_input.get("content", "") or tool_input.get("new_string", "")
 
-        # Extract file information
-        file_path = tool_input.get("file_path", "")
-        content = tool_input.get("content", "") or tool_input.get("new_string", "")
+            if file_path and content:
+                should_store = True
+                content_type = self.classify_content_type(tool_name, tool_response, content)
+                self.base.debug_log(f"Write/Edit/MultiEdit: {file_path} ({len(content)} chars)")
 
-        if not file_path or not content:
-            self.base.debug_log("Missing file path or content")
+        # Route 2: Bash - Command output (FILTERED)
+        elif tool_name == "Bash":
+            if self.should_capture_bash_output(tool_input, tool_response):
+                command = tool_input.get("command", "")
+                output = tool_response.get("output", "")
+
+                # Create synthetic file path for command output
+                file_path = f"bash_output/{command[:50].replace(' ', '_')}.txt"
+                content = f"# Command: {command}\n\n{output}"
+                should_store = True
+                content_type = self.classify_content_type(tool_name, tool_response, content)
+                self.base.debug_log(f"Bash: {command[:50]}... ({len(output)} chars)")
+            else:
+                self.base.debug_log("Bash: Skipped (trivial/short output)")
+
+        # Route 3: Read - File reads (FILTERED)
+        elif tool_name == "Read":
+            read_file_path = tool_input.get("file_path", "")
+
+            if read_file_path and self.should_capture_read_content(read_file_path):
+                file_path = read_file_path
+                # Extract content from tool_response (cchooks returns file contents)
+                content = tool_response.get("content", "")
+
+                if content:
+                    should_store = True
+                    content_type = self.classify_content_type(tool_name, tool_response, content)
+                    self.base.debug_log(f"Read: {file_path} ({len(content)} chars)")
+            else:
+                self.base.debug_log(f"Read: Skipped ({read_file_path})")
+
+        # Route 4: TodoWrite - Task list updates (ALWAYS capture)
+        elif tool_name == "TodoWrite":
+            todos = tool_input.get("todos", [])
+
+            if todos:
+                # Create synthetic file path for todo list
+                file_path = "todo_updates/task_list.json"
+                content = json.dumps(todos, indent=2)
+                should_store = True
+                content_type = self.classify_content_type(tool_name, tool_response, content)
+                self.base.debug_log(f"TodoWrite: {len(todos)} tasks")
+
+        # Exit early if no content to store
+        if not should_store or not file_path or not content:
+            self.base.debug_log(f"No content to store for {tool_name}")
             context.output.exit_success()
             return
 
@@ -594,8 +662,19 @@ class PostToolUseHook:
             return
 
         try:
-            # Store in memory with embedding (Phase 2 enhanced)
-            memory_id = await self.store_in_memory(file_path, content, tool_name)
+            # Extract metadata (topics and entities)
+            topics = self.extract_topics(content, file_path)
+            entities = self.extract_entities(content)
+
+            # Store in memory with embedding (Phase 2 + FASE 3 enhanced)
+            memory_id = await self.store_in_memory(
+                file_path=file_path,
+                content=content,
+                operation=tool_name,
+                topics=topics,
+                entities=entities,
+                content_type=content_type
+            )
 
             if not memory_id:
                 # Non-blocking warning
