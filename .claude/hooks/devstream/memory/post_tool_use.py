@@ -28,6 +28,7 @@ import sqlite3
 import json
 import re
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 # Add parent directories to path
@@ -549,6 +550,49 @@ class PostToolUseHook:
         self.base.debug_log(f"Extracted entities: {unique_entities}")
         return unique_entities
 
+    def log_capture_audit(
+        self,
+        tool_name: str,
+        tool_response: Dict[str, Any],
+        content_type: str,
+        topics: List[str],
+        entities: List[str],
+        memory_id: Optional[str],
+        capture_decision: str
+    ) -> None:
+        """
+        Log structured audit trail for capture decisions.
+
+        cchooks Pattern: Structured JSON logging for production audit trails.
+
+        Args:
+            tool_name: Name of the tool executed
+            tool_response: Tool execution response
+            content_type: Classified content type
+            topics: Extracted topics
+            entities: Extracted entities
+            memory_id: Memory record ID (if stored)
+            capture_decision: "stored" or "skipped"
+        """
+        audit_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "tool": tool_name,
+            "success": tool_response.get("success", True),
+            "content_type": content_type,
+            "topics": topics[:3],  # Top 3 topics
+            "entities": entities[:3],  # Top 3 entities
+            "memory_id": memory_id[:8] if memory_id else None,
+            "capture_decision": capture_decision  # "stored" | "skipped"
+        }
+
+        # Structured logging for audit trail
+        self.base.debug_log(f"📊 Audit: {json.dumps(audit_entry)}")
+
+        # TODO: Optional - Write to dedicated audit log file
+        # audit_file = Path.home() / ".claude" / "logs" / "devstream" / "capture_audit.jsonl"
+        # with open(audit_file, "a") as f:
+        #     f.write(json.dumps(audit_entry) + "\n")
+
     async def process(self, context: PostToolUseContext) -> None:
         """
         Main hook processing logic - Enhanced multi-tool capture.
@@ -679,6 +723,20 @@ class PostToolUseHook:
             if not memory_id:
                 # Non-blocking warning
                 self.base.warning_feedback("Memory storage unavailable")
+
+            # Determine capture decision
+            capture_decision = "stored" if memory_id else "skipped"
+
+            # Log audit trail
+            self.log_capture_audit(
+                tool_name=tool_name,
+                tool_response=tool_response,
+                content_type=content_type,
+                topics=topics,
+                entities=entities,
+                memory_id=memory_id,
+                capture_decision=capture_decision
+            )
 
             # B1.3: Trigger checkpoint for critical tool execution
             if is_critical_tool:
