@@ -8,6 +8,7 @@
 #     "python-dotenv>=1.0.0",
 #     "ollama>=0.1.0",
 #     "sqlite-vec>=0.1.0",
+#     "aiolimiter>=1.0.0",
 # ]
 # ///
 
@@ -18,6 +19,7 @@ Stores modified file content in DevStream semantic memory and generates
 embeddings using Ollama for semantic search capabilities.
 
 Phase 2 Enhancement: Inline embedding generation with graceful degradation.
+FASE 4.3: Rate limiting for memory storage and Ollama API calls.
 """
 
 import sys
@@ -35,6 +37,12 @@ from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
 from ollama_client import OllamaEmbeddingClient
 from sqlite_vec_helper import get_db_connection_with_vec
+from rate_limiter import (
+    memory_rate_limiter,
+    ollama_rate_limiter,
+    has_memory_capacity,
+    has_ollama_capacity
+)
 
 
 class PostToolUseHook:

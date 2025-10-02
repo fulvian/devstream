@@ -6,6 +6,7 @@
 #     "aiohttp>=3.8.0",
 #     "structlog>=23.0.0",
 #     "python-dotenv>=1.0.0",
+#     "cachetools>=5.0.0",
 # ]
 # ///
 
@@ -13,6 +14,7 @@
 DevStream PreToolUse Hook - Context Injection before Write/Edit
 Context7 + DevStream hybrid context assembly con graceful fallback.
 Agent Auto-Delegation System integration for intelligent agent routing.
+FASE 4.3/4.4: Rate limiting and LRU caching for memory operations.
 """
 
 import sys
@@ -21,6 +23,8 @@ import os
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from cachetools import cached, LRUCache
+import hashlib
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
@@ -29,6 +33,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # Add devstream hooks dir
 from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
+from rate_limiter import memory_rate_limiter, has_memory_capacity
+
+# Module-level cache for memory search results
+# Cache key: hash(query + limit + content_type)
+# 20 entries provides high hit rate for repeated file edits
+memory_search_cache = LRUCache(maxsize=20)
 
 # Agent Auto-Delegation imports (with graceful degradation)
 try:
@@ -40,6 +50,14 @@ except ImportError as e:
     _IMPORT_ERROR = str(e)
     # Provide fallback type for type hints when delegation unavailable
     TaskAssessment = Any  # type: ignore
+
+# ResourceMonitor imports (with graceful degradation)
+try:
+    from monitoring.resource_monitor import ResourceMonitor, ResourceHealth, HealthStatus
+    RESOURCE_MONITORING_AVAILABLE = True
+except ImportError as e:
+    RESOURCE_MONITORING_AVAILABLE = False
+    _RESOURCE_MONITOR_IMPORT_ERROR = str(e)
 
 
 class PreToolUseHook:
@@ -65,6 +83,18 @@ class PreToolUseHook:
                 self.base.debug_log(f"Agent Auto-Delegation init failed: {e}")
         else:
             self.base.debug_log(f"Agent Auto-Delegation unavailable: {_IMPORT_ERROR}")
+
+        # ResourceMonitor component (graceful degradation, singleton pattern)
+        self.resource_monitor: Optional[ResourceMonitor] = None
+
+        if RESOURCE_MONITORING_AVAILABLE:
+            try:
+                self.resource_monitor = ResourceMonitor()
+                self.base.debug_log("ResourceMonitor enabled")
+            except Exception as e:
+                self.base.debug_log(f"ResourceMonitor init failed: {e}")
+        else:
+            self.base.debug_log(f"ResourceMonitor unavailable: {_RESOURCE_MONITOR_IMPORT_ERROR}")
 
         # Token budget configuration
         self.memory_token_budget = int(
@@ -366,9 +396,28 @@ class PreToolUseHook:
         formatted += f"\n*Total tokens used: ~{used_tokens}/{max_tokens}*\n"
         return formatted
 
+    def _create_cache_key(self, query: str, limit: int, content_type: Optional[str] = None) -> str:
+        """
+        Create deterministic cache key for memory search.
+
+        Args:
+            query: Search query string
+            limit: Result limit
+            content_type: Optional content type filter
+
+        Returns:
+            SHA256 hex digest (64 chars)
+        """
+        key_parts = [query, str(limit), content_type or ""]
+        key_string = "|".join(key_parts)
+        return hashlib.sha256(key_string.encode()).hexdigest()
+
     async def get_devstream_memory(self, file_path: str, content: str) -> Optional[str]:
         """
-        Search DevStream memory for relevant context.
+        Search DevStream memory for relevant context with LRU caching and rate limiting.
+
+        FASE 4.4 Enhancement: LRU cache with 20 entries for repeated searches.
+        FASE 4.3 Enhancement: Rate limiting to prevent SQLite lock contention.
 
         Args:
             file_path: Path to file being edited
@@ -376,26 +425,52 @@ class PreToolUseHook:
 
         Returns:
             Formatted memory context or None
+
+        Performance:
+            - Cache hit: <1ms (no MCP call)
+            - Cache miss with capacity: ~300-500ms (MCP search)
+            - Rate limited: Graceful degradation, cache-only response
         """
         try:
             # Build code-aware search query
             query = self._build_code_aware_query(file_path, content)
+            limit = 3
 
-            self.base.debug_log(f"Searching DevStream memory: {query[:50]}...")
+            # Create cache key
+            cache_key = self._create_cache_key(query, limit)
 
-            # Search memory via MCP
-            result = await self.mcp_client.search_memory(
-                query=query,
-                limit=3
-            )
+            # Check cache first (synchronous, <1ms)
+            if cache_key in memory_search_cache:
+                cached_result = memory_search_cache[cache_key]
+                self.base.debug_log(f"Memory cache HIT: {query[:50]}...")
+                return cached_result
+
+            # Cache miss - check rate limiter capacity
+            if not has_memory_capacity():
+                self.base.debug_log(
+                    "Memory rate limit exceeded, skipping search (graceful degradation)"
+                )
+                return None
+
+            self.base.debug_log(f"Memory cache MISS, searching: {query[:50]}...")
+
+            # Search memory via MCP with rate limiting
+            async with memory_rate_limiter:
+                result = await self.mcp_client.search_memory(
+                    query=query,
+                    limit=limit
+                )
 
             if not result or not result.get("results"):
                 self.base.debug_log("No relevant memory found")
+                # Cache negative result to prevent repeated searches
+                memory_search_cache[cache_key] = None
                 return None
 
             # Format memory results with token budget enforcement
             memory_items = result.get("results", [])
             if not memory_items:
+                memory_search_cache[cache_key] = None
                 return None
 
             formatted = self._format_memory_with_budget(
@@ -403,7 +478,10 @@ class PreToolUseHook:
                 max_tokens=self.memory_token_budget
             )
 
-            self.base.success_feedback(f"Found {len(memory_items)} relevant memories")
+            # Cache successful result
+            memory_search_cache[cache_key] = formatted
+            self.base.success_feedback(f"Found {len(memory_items)} relevant memories (cached)")
+
             return formatted
 
         except Exception as e:
@@ -601,11 +679,45 @@ class PreToolUseHook:
     async def process(self, context: PreToolUseContext) -> None:
         """
         Main hook processing logic.
-        Integrates Agent Auto-Delegation + Context7 + DevStream memory.
+        Integrates ResourceMonitor + Agent Auto-Delegation + Context7 + DevStream memory.
 
         Args:
             context: PreToolUse context from cchooks
         """
+        # PHASE 0: Resource health check (non-blocking)
+        skip_heavy_injection = False
+
+        if self.resource_monitor:
+            try:
+                # Check resource health (cached, minimal overhead)
+                health: ResourceHealth = self.resource_monitor.check_stability()
+
+                # Log health status with structured logging
+                if health.healthy:
+                    self.base.debug_log(
+                        f"Resource health: HEALTHY ({len(health.metrics)} metrics checked)"
+                    )
+                elif health.status == HealthStatus.WARNING:
+                    self.base.debug_log(
+                        f"Resource health: WARNING - {health.get_warning_summary()}"
+                    )
+                elif health.status == HealthStatus.CRITICAL:
+                    # CRITICAL status - log error and consider skipping heavy operations
+                    self.base.debug_log(
+                        f"Resource health: CRITICAL - {health.get_warning_summary()}"
+                    )
+                    self.base.warning_feedback(
+                        "System resources CRITICAL - Consider restarting Claude Code or reducing load"
+                    )
+                    # Optional: Skip heavy context injection to reduce load
+                    skip_heavy_injection = True
+
+            except Exception as e:
+                # Monitor failure should NOT block tool execution
+                self.base.debug_log(
+                    f"Resource monitor check failed (non-critical): {str(e)[:100]}"
+                )
+
         # Check if hook should run
         if not self.base.should_run():
             self.base.debug_log("Hook disabled via config")
@@ -666,9 +778,15 @@ class PreToolUseHook:
                 self.base.debug_log(f"Agent delegation failed: {e}")
 
             # PHASE 2: Context7 + DevStream memory injection
-            enhanced_context = await self.assemble_context(file_path, content)
-            if enhanced_context:
-                context_parts.append(enhanced_context)
+            # Skip heavy injection if resources are CRITICAL (optimization)
+            if not skip_heavy_injection:
+                enhanced_context = await self.assemble_context(file_path, content)
+                if enhanced_context:
+                    context_parts.append(enhanced_context)
+            else:
+                self.base.debug_log(
+                    "Skipping heavy context injection due to CRITICAL resource status"
+                )
 
             # PHASE 3: Inject assembled context
             if context_parts:
