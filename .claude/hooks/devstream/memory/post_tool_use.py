@@ -550,6 +550,214 @@ class PostToolUseHook:
         self.base.debug_log(f"Extracted entities: {unique_entities}")
         return unique_entities
 
+    async def _get_current_session_id(self) -> Optional[str]:
+        """
+        Get current active session ID from work_sessions table.
+
+        Memory Bank Pattern: Active session tracking for context preservation.
+
+        Returns:
+            Current session ID if found, None otherwise
+
+        Note:
+            Queries for most recent active session (status='active')
+        """
+        try:
+            import aiosqlite
+
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    """
+                    SELECT id FROM work_sessions
+                    WHERE status = 'active'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        session_id = row[0]
+                        self.base.debug_log(f"Active session: {session_id[:8]}...")
+                        return session_id
+
+                    self.base.debug_log("No active session found")
+                    return None
+
+        except Exception as e:
+            self.base.debug_log(f"Failed to get session ID: {e}")
+            return None
+
+    async def _add_active_file(self, session_id: str, file_path: str) -> bool:
+        """
+        Add file to session's active_files list (with deduplication).
+
+        Memory Bank Pattern: Track files ACTIVELY modified during session.
+
+        Args:
+            session_id: Session identifier
+            file_path: Path to file being modified
+
+        Returns:
+            True if file added successfully, False otherwise
+
+        Note:
+            Uses atomic JSON update with deduplication.
+            Gracefully handles missing sessions (returns False).
+        """
+        try:
+            import aiosqlite
+
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get current active_files
+                async with db.execute(
+                    "SELECT active_files FROM work_sessions WHERE id = ?",
+                    (session_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+                    if not row:
+                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
+                        return False
+
+                    # Parse JSON (handle NULL case)
+                    active_files = json.loads(row[0]) if row[0] else []
+
+                    # Add if not already present (deduplication)
+                    if file_path not in active_files:
+                        active_files.append(file_path)
+
+                        # Update with atomic transaction
+                        await db.execute(
+                            "UPDATE work_sessions SET active_files = ? WHERE id = ?",
+                            (json.dumps(active_files), session_id)
+                        )
+                        await db.commit()
+
+                        self.base.debug_log(
+                            f"Added to active_files: {file_path} "
+                            f"(total: {len(active_files)})"
+                        )
+                        return True
+                    else:
+                        self.base.debug_log(f"File already tracked: {file_path}")
+                        return True  # Already tracked is success
+
+        except Exception as e:
+            self.base.debug_log(f"Failed to add active file: {e}")
+            return False
+
+    async def _add_active_task(self, session_id: str, task_id: str) -> bool:
+        """
+        Add task to session's active_tasks list (with deduplication).
+
+        Memory Bank Pattern: Track tasks ACTIVELY worked on during session.
+
+        Args:
+            session_id: Session identifier
+            task_id: Task identifier (from TodoWrite or MCP)
+
+        Returns:
+            True if task added successfully, False otherwise
+
+        Note:
+            Uses atomic JSON update with deduplication.
+            active_tasks column already exists in schema ✅
+        """
+        try:
+            import aiosqlite
+
+            async with aiosqlite.connect(self.db_path) as db:
+                # Get current active_tasks
+                async with db.execute(
+                    "SELECT active_tasks FROM work_sessions WHERE id = ?",
+                    (session_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+                    if not row:
+                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
+                        return False
+
+                    # Parse JSON (handle NULL case)
+                    active_tasks = json.loads(row[0]) if row[0] else []
+
+                    # Add if not already present (deduplication)
+                    if task_id not in active_tasks:
+                        active_tasks.append(task_id)
+
+                        # Update with atomic transaction
+                        await db.execute(
+                            "UPDATE work_sessions SET active_tasks = ? WHERE id = ?",
+                            (json.dumps(active_tasks), session_id)
+                        )
+                        await db.commit()
+
+                        self.base.debug_log(
+                            f"Added to active_tasks: {task_id[:8]}... "
+                            f"(total: {len(active_tasks)})"
+                        )
+                        return True
+                    else:
+                        self.base.debug_log(f"Task already tracked: {task_id[:8]}...")
+                        return True  # Already tracked is success
+
+        except Exception as e:
+            self.base.debug_log(f"Failed to add active task: {e}")
+            return False
+
+    async def update_session_tracking(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any]
+    ) -> None:
+        """
+        Update work_sessions with active files and tasks (Memory Bank pattern).
+
+        Called after memory storage to track active work in current session.
+        Non-blocking - failures logged but don't affect hook execution.
+
+        Args:
+            tool_name: Name of tool executed
+            tool_input: Tool input parameters
+
+        Note:
+            Tracks:
+            - Write/Edit/MultiEdit → active_files
+            - TodoWrite → active_tasks (from in_progress todos)
+            - MCP devstream_update_task → active_tasks
+        """
+        try:
+            # Get current session ID
+            session_id = await self._get_current_session_id()
+            if not session_id:
+                self.base.debug_log("No active session - skip tracking")
+                return
+
+            # Track active files (Write/Edit/MultiEdit)
+            if tool_name in ["Write", "Edit", "MultiEdit"]:
+                file_path = tool_input.get("file_path")
+                if file_path:
+                    await self._add_active_file(session_id, file_path)
+
+            # Track active tasks (TodoWrite)
+            elif tool_name == "TodoWrite":
+                todos = tool_input.get("todos", [])
+                for todo in todos:
+                    # Track in_progress todos (actively being worked on)
+                    if todo.get("status") == "in_progress":
+                        task_content = todo.get("content", "")
+                        # Use content as task_id (or extract ID if available)
+                        if task_content:
+                            await self._add_active_task(session_id, task_content)
+
+            # Track MCP task operations (devstream_update_task, devstream_create_task)
+            # Note: These are called via MCP, not directly as tool_name
+            # For now, TodoWrite is primary tracking mechanism
+
+        except Exception as e:
+            # Non-blocking - log and continue
+            self.base.debug_log(f"Session tracking failed (non-blocking): {e}")
+
     def log_capture_audit(
         self,
         tool_name: str,
@@ -737,6 +945,9 @@ class PostToolUseHook:
                 memory_id=memory_id,
                 capture_decision=capture_decision
             )
+
+            # FASE 2: Update session tracking (Memory Bank activeContext pattern)
+            await self.update_session_tracking(tool_name, tool_input)
 
             # B1.3: Trigger checkpoint for critical tool execution
             if is_critical_tool:
