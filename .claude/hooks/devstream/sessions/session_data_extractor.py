@@ -38,6 +38,7 @@ class SessionData:
     tokens_used: int = 0
     active_tasks: List[str] = field(default_factory=list)
     completed_tasks: List[str] = field(default_factory=list)
+    active_files: List[str] = field(default_factory=list)  # FASE 1: Added for tracking
     status: str = "unknown"
 
 
@@ -110,7 +111,7 @@ class SessionDataExtractor:
                 async with db.execute(
                     """
                     SELECT id, session_name, started_at, ended_at, tokens_used,
-                           active_tasks, completed_tasks, status
+                           active_tasks, completed_tasks, active_files, status
                     FROM work_sessions
                     WHERE id = ?
                     """,
@@ -126,6 +127,7 @@ class SessionDataExtractor:
                     import json
                     active_tasks = json.loads(row['active_tasks']) if row['active_tasks'] else []
                     completed_tasks = json.loads(row['completed_tasks']) if row['completed_tasks'] else []
+                    active_files = json.loads(row['active_files']) if row['active_files'] else []
 
                     return SessionData(
                         session_id=row['id'],
@@ -135,6 +137,7 @@ class SessionDataExtractor:
                         tokens_used=row['tokens_used'],
                         active_tasks=active_tasks,
                         completed_tasks=completed_tasks,
+                        active_files=active_files,
                         status=row['status']
                     )
 
