@@ -69,7 +69,7 @@ test_synthetic_api() {
     # Minimal test payload
     local response_code
     response_code=$(curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "${base_url}/messages" \
+        -X POST "${base_url}/v1/messages" \
         -H "Content-Type: application/json" \
         -H "x-api-key: ${api_key}" \
         -d '{
@@ -165,16 +165,60 @@ case "${PROVIDER}" in
         # Test API connectivity
         test_synthetic_api "${SYNTHETIC_BASE_URL}" "${SYNTHETIC_API_KEY}"
 
-        # Export for Claude Code
-        export ANTHROPIC_BASE_URL="${SYNTHETIC_BASE_URL}"
-        export ANTHROPIC_AUTH_TOKEN="${SYNTHETIC_API_KEY}"
+        # Start Synthetic Proxy (model name translator)
+        echo -e "${YELLOW}🚀 Starting Synthetic proxy server...${NC}"
+
+        # Export env vars for proxy
+        export SYNTHETIC_API_KEY
+        export SYNTHETIC_MODEL
+
+        # Kill any existing proxy on port 3100
+        lsof -ti:3100 | xargs kill -9 2>/dev/null || true
+
+        # Start proxy in background
+        PROXY_SCRIPT="${PROJECT_ROOT}/scripts/synthetic-proxy.js"
+        PROXY_LOG="${PROJECT_ROOT}/.logs/synthetic-proxy.log"
+        mkdir -p "${PROJECT_ROOT}/.logs"
+
+        node "$PROXY_SCRIPT" > "$PROXY_LOG" 2>&1 &
+        PROXY_PID=$!
+
+        # Wait for proxy to be ready
+        sleep 2
+
+        # Verify proxy is running
+        if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+            echo -e "${RED}❌ Error: Proxy failed to start${NC}"
+            echo -e "${YELLOW}Check logs: ${PROXY_LOG}${NC}"
+            exit 1
+        fi
+
+        echo -e "${GREEN}✅ Proxy running (PID: ${PROXY_PID}, Port: 3100)${NC}"
+
+        # Setup cleanup trap
+        trap "echo -e '\n${YELLOW}🛑 Stopping Synthetic proxy...${NC}'; kill $PROXY_PID 2>/dev/null; exit" INT TERM EXIT
+
+        # Export for Claude Code (point to local proxy)
+        export ANTHROPIC_BASE_URL="http://localhost:3100"
+        export ANTHROPIC_AUTH_TOKEN="synthetic-proxy"
+
+        # Backup settings.json
+        SETTINGS_FILE="$HOME/.claude/settings.json"
+        BACKUP_FILE="$HOME/.claude/settings.json.backup-synthetic"
+
+        if [ -f "$SETTINGS_FILE" ]; then
+            cp "$SETTINGS_FILE" "$BACKUP_FILE"
+        fi
 
         # Output configuration
         echo ""
-        echo -e "${GREEN}✅ Provider: Synthetic.new${NC}"
-        echo -e "${GREEN}   Base URL: ${SYNTHETIC_BASE_URL}${NC}"
-        echo -e "${GREEN}   Model: claude-sonnet-4-5 (Synthetic)${NC}"
+        echo -e "${GREEN}✅ Provider: Synthetic.new (via Proxy)${NC}"
+        echo -e "${GREEN}   Proxy URL: http://localhost:3100${NC}"
+        echo -e "${GREEN}   Target: ${SYNTHETIC_BASE_URL}${NC}"
+        echo -e "${GREEN}   Model: ${SYNTHETIC_MODEL}${NC}"
         echo -e "${GREEN}   Tier: ${SYNTHETIC_TIER:-free}${NC}"
+        echo -e "${YELLOW}   📋 Proxy logs: ${PROXY_LOG}${NC}"
+        echo -e "${YELLOW}   ℹ️  Settings backup: ${BACKUP_FILE}${NC}"
         echo ""
         ;;
 
