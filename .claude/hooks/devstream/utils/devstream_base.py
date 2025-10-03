@@ -95,24 +95,32 @@ class DevStreamHookBase:
         self,
         mcp_client: Any,
         tool_name: str,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        timeout: float = 5.0
     ) -> Optional[Dict[str, Any]]:
         """
-        Call MCP tool with graceful fallback.
+        Call MCP tool with graceful fallback and timeout.
 
         Args:
             mcp_client: MCP client instance
             tool_name: MCP tool name
             params: Tool parameters
+            timeout: Timeout in seconds (default: 5.0)
 
         Returns:
             Tool result or None if failed
         """
         try:
-            self.debug_log(f"Calling MCP tool: {tool_name}")
-            result = await mcp_client.call_tool(tool_name, params)
+            self.debug_log(f"Calling MCP tool: {tool_name} (timeout: {timeout}s)")
+            result = await asyncio.wait_for(
+                mcp_client.call_tool(tool_name, params),
+                timeout=timeout
+            )
             self.debug_log(f"MCP call succeeded: {tool_name}")
             return result
+        except asyncio.TimeoutError:
+            self.warning_feedback(f"MCP timeout after {timeout}s ({tool_name})")
+            return None
         except ConnectionError:
             self.warning_feedback(f"MCP server unavailable ({tool_name})")
             return None

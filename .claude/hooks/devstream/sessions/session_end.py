@@ -417,17 +417,18 @@ class SessionEndHook:
             self.base.debug_log(f"Session end processing error: {e}")
             return False
 
-    async def process(self, context: SessionEndContext) -> None:
+    async def process(self, context: Optional[SessionEndContext]) -> None:
         """
         Main hook processing logic.
 
         Args:
-            context: SessionEnd context from cchooks
+            context: SessionEnd context from cchooks (or None if stdin empty)
         """
         # Check if hook should run
         if not self.base.should_run():
             self.base.debug_log("Hook disabled via config")
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
             return
 
         try:
@@ -436,7 +437,8 @@ class SessionEndHook:
 
             if not session_id:
                 self.base.debug_log("No active session to end")
-                context.output.exit_success()
+                if context:
+                    context.output.exit_success()
                 return
 
             # Process session end
@@ -447,21 +449,29 @@ class SessionEndHook:
                 self.base.warning_feedback("Session end processing failed")
 
             # Always allow session to end (graceful degradation)
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
 
         except Exception as e:
             # Non-blocking error - log and continue
             self.base.warning_feedback(f"SessionEnd error: {str(e)[:50]}")
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
 
 
 def main():
     """Main entry point for SessionEnd hook."""
-    # Create context using cchooks
-    ctx = safe_create_context()
+    # Try to create context using cchooks
+    ctx = None
+    try:
+        ctx = safe_create_context()
+    except (Exception, SystemExit) as e:
+        # stdin empty or invalid JSON - fallback to manual session lookup
+        print(f"⚠️  DevStream: No hook input, using fallback mode", file=sys.stderr)
+        ctx = None  # Explicitly set to None for fallback mode
 
-    # Verify it's SessionEnd context
-    if not isinstance(ctx, SessionEndContext):
+    # Verify it's SessionEnd context (if available)
+    if ctx and not isinstance(ctx, SessionEndContext):
         print(f"Error: Expected SessionEndContext, got {type(ctx)}", file=sys.stderr)
         sys.exit(1)
 
@@ -469,12 +479,17 @@ def main():
     hook = SessionEndHook()
 
     try:
-        # Run async processing
+        # Run async processing (hook will handle missing context internally)
         asyncio.run(hook.process(ctx))
     except Exception as e:
         # Graceful failure - non-blocking
-        print(f"⚠️  DevStream: SessionEnd error", file=sys.stderr)
-        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        print(f"⚠️  DevStream: SessionEnd error: {str(e)}", file=sys.stderr)
+        if ctx:
+            ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        else:
+            # No ctx - just exit gracefully
+            print("Summary generation attempted despite missing context", file=sys.stderr)
+            sys.exit(0)
 
 
 if __name__ == "__main__":

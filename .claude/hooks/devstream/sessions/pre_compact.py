@@ -271,14 +271,14 @@ class PreCompactHook:
 
         return write_success
 
-    async def process_pre_compact(self, context: PreCompactContext) -> None:
+    async def process_pre_compact(self, context: Optional[PreCompactContext]) -> None:
         """
         Process PreCompact event workflow.
 
         Main orchestration method that coordinates summary generation and storage.
 
         Args:
-            context: PreCompact context from cchooks
+            context: PreCompact context from cchooks (or None if stdin empty)
 
         Note:
             Always calls context.output.exit_success() to allow compaction
@@ -289,7 +289,8 @@ class PreCompactHook:
 
             if not session_id:
                 self.base.debug_log("No active session - skip summary generation")
-                context.output.exit_success()
+                if context:
+                    context.output.exit_success()
                 return
 
             # Generate and store summary
@@ -297,9 +298,10 @@ class PreCompactHook:
 
             if not summary:
                 self.base.debug_log("Summary generation failed (non-blocking)")
-                context.output.exit_non_block("Summary generation failed")
-                # Still allow compaction to proceed
-                context.output.exit_success()
+                if context:
+                    context.output.exit_non_block("Summary generation failed")
+                    # Still allow compaction to proceed
+                    context.output.exit_success()
                 return
 
             # Write marker file
@@ -313,25 +315,28 @@ class PreCompactHook:
                 self.base.debug_log("Marker file write failed (non-blocking)")
 
             # Always allow compaction to proceed
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
 
         except Exception as e:
             # Non-blocking error - log and allow compaction
             self.base.debug_log(f"PreCompact error: {e}")
-            context.output.exit_non_block(f"Hook error: {str(e)[:100]}")
-            context.output.exit_success()
+            if context:
+                context.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+                context.output.exit_success()
 
-    async def process(self, context: PreCompactContext) -> None:
+    async def process(self, context: Optional[PreCompactContext]) -> None:
         """
         Main hook processing logic.
 
         Args:
-            context: PreCompact context from cchooks
+            context: PreCompact context from cchooks (or None if stdin empty)
         """
         # Check if hook should run
         if not self.base.should_run():
             self.base.debug_log("Hook disabled via config")
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
             return
 
         # Process PreCompact workflow
@@ -340,11 +345,17 @@ class PreCompactHook:
 
 def main():
     """Main entry point for PreCompact hook."""
-    # Create context using cchooks
-    ctx = safe_create_context()
+    # Try to create context using cchooks
+    ctx = None
+    try:
+        ctx = safe_create_context()
+    except (Exception, SystemExit) as e:
+        # stdin empty or invalid JSON - fallback to manual session lookup
+        print(f"⚠️  DevStream: No hook input, using fallback mode", file=sys.stderr)
+        ctx = None  # Explicitly set to None for fallback mode
 
-    # Verify it's PreCompact context
-    if not isinstance(ctx, PreCompactContext):
+    # Verify it's PreCompact context (if available)
+    if ctx and not isinstance(ctx, PreCompactContext):
         print(f"Error: Expected PreCompactContext, got {type(ctx)}", file=sys.stderr)
         sys.exit(1)
 
@@ -352,13 +363,18 @@ def main():
     hook = PreCompactHook()
 
     try:
-        # Run async processing
+        # Run async processing (hook will handle missing context internally)
         asyncio.run(hook.process(ctx))
     except Exception as e:
         # Graceful failure - non-blocking
-        print(f"⚠️  DevStream: PreCompact error", file=sys.stderr)
-        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
-        ctx.output.exit_success()
+        print(f"⚠️  DevStream: PreCompact error: {str(e)}", file=sys.stderr)
+        if ctx:
+            ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+            ctx.output.exit_success()
+        else:
+            # No ctx - just exit gracefully
+            print("Summary generation attempted despite missing context", file=sys.stderr)
+            sys.exit(0)
 
 
 if __name__ == "__main__":
