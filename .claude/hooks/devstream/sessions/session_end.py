@@ -309,13 +309,14 @@ class SessionEndHook:
                 from session_data_extractor import MemoryStats
                 memory_stats = MemoryStats()
 
-            # Step 3: Extract task stats (time-range query)
+            # Step 3: Extract task stats (FASE 3: tracking-based with time fallback)
             self.base.debug_log("Step 3: Extracting task stats...")
 
             if session_data.started_at:
                 task_stats = await self.data_extractor.get_task_stats(
                     session_data.started_at,
-                    session_data.ended_at or datetime.now()
+                    session_data.ended_at or datetime.now(),
+                    session_data=session_data  # FASE 3: Pass session_data for tracking
                 )
                 self.base.debug_log(
                     f"Task stats: {task_stats.total_tasks} total, "
@@ -387,7 +388,7 @@ class SessionEndHook:
             # Use WorkSessionManager to end session properly
             session_ended = await self.session_manager.end_session(
                 session_id=session_id,
-                summary=summary_markdown[:500]  # First 500 chars as summary
+                context_summary=summary_markdown[:500]  # First 500 chars as summary
             )
 
             if session_ended:

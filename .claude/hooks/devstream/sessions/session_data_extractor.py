@@ -252,15 +252,100 @@ class SessionDataExtractor:
             self.logger.error(f"Failed to extract memory stats: {e}")
             return stats
 
-    async def get_task_stats(
+    async def _get_task_stats_by_tracking(
+        self,
+        session_data: SessionData
+    ) -> TaskStats:
+        """
+        Extract task statistics based on SESSION TRACKING (active_tasks).
+
+        Memory Bank Pattern: Query tasks that were ACTIVELY WORKED ON during session,
+        not based on time ranges. Fixes timezone bug and empty summary issues.
+
+        Args:
+            session_data: Session metadata including active_tasks list
+
+        Returns:
+            TaskStats with aggregated counts and task titles
+
+        Note:
+            Queries micro_tasks WHERE id IN (session.active_tasks)
+            Falls back to empty stats if no active_tasks tracked
+        """
+        stats = TaskStats()
+
+        # Early return if no active tasks tracked
+        if not session_data.active_tasks:
+            self.logger.debug("No active_tasks tracked - returning empty stats")
+            return stats
+
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+
+                # Build SQL IN clause with placeholders
+                placeholders = ','.join('?' * len(session_data.active_tasks))
+
+                # Get counts by status (for tracked tasks only)
+                query = f"""
+                    SELECT status, COUNT(*) as count
+                    FROM micro_tasks
+                    WHERE id IN ({placeholders})
+                    GROUP BY status
+                """
+                async with db.execute(query, session_data.active_tasks) as cursor:
+                    async for row in cursor:
+                        status = row['status']
+                        count = row['count']
+
+                        stats.total_tasks += count
+
+                        if status == 'completed':
+                            stats.completed = count
+                        elif status == 'active':
+                            stats.active = count
+                        elif status == 'failed':
+                            stats.failed = count
+
+                # Get task titles (top 10, prioritize completed)
+                query = f"""
+                    SELECT title
+                    FROM micro_tasks
+                    WHERE id IN ({placeholders})
+                    ORDER BY
+                        CASE status
+                            WHEN 'completed' THEN 1
+                            WHEN 'active' THEN 2
+                            ELSE 3
+                        END,
+                        completed_at DESC
+                    LIMIT 10
+                """
+                async with db.execute(query, session_data.active_tasks) as cursor:
+                    async for row in cursor:
+                        stats.task_titles.append(row['title'])
+
+            self.logger.debug(
+                f"Task stats (tracking-based): {stats.total_tasks} total, "
+                f"{stats.completed} completed, from {len(session_data.active_tasks)} tracked tasks"
+            )
+
+            return stats
+
+        except Exception as e:
+            self.logger.error(f"Failed to extract task stats (tracking): {e}")
+            return stats
+
+    async def _get_task_stats_by_time(
         self,
         start_time: datetime,
         end_time: Optional[datetime] = None
     ) -> TaskStats:
         """
-        Extract task statistics for time range.
+        Extract task statistics based on TIME RANGE (legacy fallback).
 
-        Context7 Pattern: async with + row_factory + GROUP BY aggregation.
+        Fallback method for sessions without active_tasks tracking.
+        Uses created_at BETWEEN time range query.
 
         Args:
             start_time: Session start timestamp
@@ -268,6 +353,10 @@ class SessionDataExtractor:
 
         Returns:
             TaskStats with aggregated counts and task titles
+
+        Note:
+            This is the OLD behavior - kept for backward compatibility.
+            Subject to timezone bugs and includes tasks not actively worked on.
         """
         if end_time is None:
             end_time = datetime.now()
@@ -317,15 +406,54 @@ class SessionDataExtractor:
                         stats.task_titles.append(row['title'])
 
             self.logger.debug(
-                f"Task stats extracted: {stats.total_tasks} total, "
+                f"Task stats (time-based fallback): {stats.total_tasks} total, "
                 f"{stats.completed} completed"
             )
 
             return stats
 
         except Exception as e:
-            self.logger.error(f"Failed to extract task stats: {e}")
+            self.logger.error(f"Failed to extract task stats (time): {e}")
             return stats
+
+    async def get_task_stats(
+        self,
+        start_time: datetime,
+        end_time: Optional[datetime] = None,
+        session_data: Optional[SessionData] = None
+    ) -> TaskStats:
+        """
+        Extract task statistics using HYBRID approach (tracking + fallback).
+
+        FASE 3 Enhancement: Prioritize session tracking over time-based queries.
+
+        Strategy:
+        1. TRY: Session tracking (if session_data.active_tasks exists)
+        2. FALLBACK: Time-based query (for backward compatibility)
+
+        Args:
+            start_time: Session start timestamp (for fallback)
+            end_time: Session end timestamp (for fallback, default: now)
+            session_data: Session metadata with active_tasks (NEW)
+
+        Returns:
+            TaskStats with aggregated counts and task titles
+
+        Note:
+            Backward compatible - old code can still call without session_data.
+            New code should pass session_data for tracking-based queries.
+        """
+        # STRATEGY 1: Try session tracking (Memory Bank pattern)
+        if session_data and session_data.active_tasks:
+            self.logger.debug("Using tracking-based query (Memory Bank pattern)")
+            return await self._get_task_stats_by_tracking(session_data)
+
+        # STRATEGY 2: Fallback to time-based query (backward compat)
+        self.logger.warning(
+            "No active_tasks tracked - falling back to time-based query "
+            "(subject to timezone bugs)"
+        )
+        return await self._get_task_stats_by_time(start_time, end_time)
 
 
 if __name__ == "__main__":
