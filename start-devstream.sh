@@ -102,6 +102,31 @@ except Exception as e:
   fi
 }
 
+# Function to load LLM provider configuration
+load_llm_provider() {
+  local provider="${1:-anthropic}"
+
+  print_status "Loading LLM Provider: $provider"
+
+  # Load root .env first (single source of truth)
+  if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+    print_info "Root .env loaded"
+  fi
+
+  # Load provider configuration
+  if [ -f "$PROJECT_ROOT/.env.llm-providers" ]; then
+    # Temporarily override DEVSTREAM_LLM_PROVIDER
+    export DEVSTREAM_LLM_PROVIDER="$provider"
+    source "$PROJECT_ROOT/.env.llm-providers"
+    print_info "Provider: $provider configured"
+  else
+    print_warning ".env.llm-providers not found, using default"
+  fi
+}
+
 # Function to load DevStream configuration
 load_devstream_config() {
   print_status "Loading DevStream configuration..."
@@ -412,6 +437,24 @@ start_claude_with_devstream() {
   print_info "═══════════════════════════════════════════════"
   echo ""
 
+  # Show active LLM provider
+  local active_provider="${DEVSTREAM_LLM_PROVIDER:-anthropic}"
+  local base_url="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+
+  print_feature "LLM Provider:"
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "  🤖 z.ai (GLM-4.6) - Zhipu AI flagship model"
+    print_info "  🧠 Reasoning Mode: ENABLED (default)"
+    print_info "  📏 Context Window: 200K tokens"
+    print_info "  🛠️  Tool Calling: Native support"
+  elif [ "$active_provider" = "synthetic" ]; then
+    print_info "  🤖 Synthetic.new - HuggingFace models"
+  else
+    print_info "  🤖 Anthropic - Native Claude API"
+  fi
+  print_info "  📡 Base URL: $base_url"
+  echo ""
+
   print_feature "Core Features:"
   print_info "  ✅ Semantic Memory (Vector + FTS5 hybrid search)"
   print_info "  ✅ Agent Auto-Delegation (17 specialist agents)"
@@ -440,7 +483,14 @@ start_claude_with_devstream() {
 
   # Start Claude Code in the project directory
   cd "$PROJECT_ROOT"
-  claude
+
+  # Force API key mode if z.ai provider
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "💡 Using API Key mode (required for z.ai)"
+    claude --api-key "$ANTHROPIC_API_KEY"
+  else
+    claude
+  fi
 }
 
 # Function to stop server
@@ -466,8 +516,14 @@ main() {
   echo ""
 
   # Parse command line arguments
-  case "${1:-start}" in
+  local command="${1:-start}"
+  local provider="${2:-anthropic}"
+
+  case "$command" in
     start)
+      # Load LLM provider configuration FIRST
+      load_llm_provider "$provider"
+
       # Check Python virtual environment
       check_python_venv
 
@@ -524,12 +580,22 @@ main() {
     restart)
       stop_server
       sleep 2
-      main start
+      main start "$provider"
       ;;
 
     *)
-      print_error "Unknown command: $1"
-      print_info "Usage: $0 {start|stop|status|restart}"
+      print_error "Unknown command: $command"
+      print_info "Usage: $0 {start|stop|status|restart} [provider]"
+      print_info ""
+      print_info "Available providers:"
+      print_info "  - anthropic (default, native Claude API)"
+      print_info "  - z.ai (GLM-4.6 via z.ai)"
+      print_info "  - synthetic (Synthetic.new HuggingFace models)"
+      print_info ""
+      print_info "Examples:"
+      print_info "  $0 start           # Start with default Anthropic provider"
+      print_info "  $0 start z.ai      # Start with z.ai provider (GLM-4.6)"
+      print_info "  $0 start synthetic # Start with Synthetic provider"
       exit 1
       ;;
   esac

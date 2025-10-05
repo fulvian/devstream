@@ -7,16 +7,24 @@ GREEN=${GREEN:-'\033[0;32m'}
 YELLOW=${YELLOW:-'\033[1;33m'}
 NC=${NC:-'\033[0m'}
 
-# Source main env if not already loaded
-if [ -z "$ZAI_BASE_URL" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Source root .env first (single source of truth)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
+
+# Then source provider config (for BASE_URL and model mappings)
+if [ -f "$PROJECT_ROOT/.env.llm-providers" ]; then
     source "$PROJECT_ROOT/.env.llm-providers"
 fi
 
 # Validate API key (existence only, no connectivity test)
 if [ -z "$ZAI_API_KEY" ]; then
-    echo -e "${RED}❌ Error: ZAI_API_KEY not set in .env.llm-providers${NC}"
+    echo -e "${RED}❌ Error: ZAI_API_KEY not set in root .env${NC}"
     exit 1
 fi
 
