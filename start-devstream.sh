@@ -484,13 +484,9 @@ start_claude_with_devstream() {
   # Start Claude Code in the project directory
   cd "$PROJECT_ROOT"
 
-  # Force API key mode if z.ai provider
-  if [ "$active_provider" = "z.ai" ]; then
-    print_info "💡 Using API Key mode (required for z.ai)"
-    claude --api-key "$ANTHROPIC_API_KEY"
-  else
-    claude
-  fi
+  # All authentication handled via ANTHROPIC_AUTH_TOKEN env var
+  # (already exported by provider script)
+  claude
 }
 
 # Function to stop server
