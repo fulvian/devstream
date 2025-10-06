@@ -34,6 +34,7 @@ class DevStreamMcpServer {
   private planTools: PlanTools;
   private memoryTools: MemoryTools;
   private autoSaveService: AutoSaveService;
+  private heartbeatInterval?: NodeJS.Timeout;
 
   constructor(dbPath: string) {
     // Initialize MCP server
@@ -377,7 +378,22 @@ class DevStreamMcpServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
+    // Get database path for logging
+    const dbPath = process.argv[2] || 'unknown';
+
+    // Comprehensive startup health log
     console.error('🚀 DevStream MCP Server started - HYBRID SEARCH v2.0 (better-sqlite3 + sqlite-vec)');
+    console.error(`📊 Server Info:`);
+    console.error(`   PID: ${process.pid}`);
+    console.error(`   Transport: stdio`);
+    console.error(`   Database: ${dbPath}`);
+    console.error(`   Metrics endpoint: http://localhost:9090/health`);
+
+    // Start heartbeat logging (every 5 minutes)
+    this.heartbeatInterval = setInterval(() => {
+      const uptimeMinutes = Math.floor(process.uptime() / 60);
+      console.error(`💓 MCP server heartbeat (uptime: ${uptimeMinutes} min, PID: ${process.pid})`);
+    }, 5 * 60 * 1000); // 5 minutes
 
     // Start auto-save background service
     try {
@@ -390,18 +406,60 @@ class DevStreamMcpServer {
   }
 
   /**
-   * Cleanup and close connections
+   * Cleanup and close connections with timeout safety
+   *
+   * Context7 Pattern: Graceful shutdown with 5-second timeout protection.
+   * Ensures server doesn't hang during cleanup phase.
+   *
+   * @param reason - Reason for cleanup (for logging)
+   */
+  async cleanup(reason: string = 'shutdown'): Promise<void> {
+    console.error(`🔄 Initiating cleanup (reason: ${reason})...`);
+
+    // Safety timeout: Force exit after 5 seconds if cleanup hangs
+    const cleanupTimeout = setTimeout(() => {
+      console.error('⚠️ Cleanup timeout (5s exceeded), forcing exit');
+      process.exit(1);
+    }, 5000);
+
+    try {
+      // Step 1: Stop heartbeat timer
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+        console.error('  ✅ Heartbeat timer stopped');
+      }
+
+      // Step 2: Stop auto-save service (graceful shutdown)
+      console.error('  └─ Stopping auto-save service...');
+      try {
+        await this.autoSaveService.stop();
+        console.error('  ✅ Auto-save service stopped');
+      } catch (error) {
+        console.error('  ⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      // Step 3: Close database connection
+      console.error('  └─ Closing database connection...');
+      try {
+        await this.database.close();
+        console.error('  ✅ Database connection closed');
+      } catch (error) {
+        console.error('  ⚠️ Error closing database:', error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      console.error('✅ Cleanup completed successfully');
+    } finally {
+      // Always clear timeout to prevent forced exit
+      clearTimeout(cleanupTimeout);
+    }
+  }
+
+  /**
+   * Legacy close() method - delegates to cleanup()
+   * @deprecated Use cleanup() for better observability
    */
   async close(): Promise<void> {
-    // Stop auto-save service first (graceful shutdown)
-    try {
-      await this.autoSaveService.stop();
-    } catch (error) {
-      console.error('⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
-    }
-
-    // Close database connection
-    await this.database.close();
+    await this.cleanup('legacy-close');
   }
 }
 
@@ -420,16 +478,37 @@ async function main() {
 
   const server = new DevStreamMcpServer(dbPath);
 
-  // Handle graceful shutdown
+  /**
+   * MCP Spec 2025-03-26 Compliance: Signal-Based Lifecycle
+   *
+   * Per MCP specification, server shutdown is SIGNAL-BASED, not stdin EOF-based.
+   * Rationale:
+   * - stdin EOF occurs during Claude Code operations like /compact
+   * - Shutting down on stdin EOF causes disconnection (server becomes unreachable)
+   * - Proper shutdown is via SIGTERM (graceful) or SIGINT (user interrupt)
+   *
+   * Research sources:
+   * - https://modelcontextprotocol.io/specification/2025-03-26/basic/lifecycle
+   * - Node.js best practices for long-running processes
+   * - DevStream Context7 research findings (2025-10-02)
+   *
+   * Behavior:
+   * - Server stays alive during stdin EOF (e.g., /compact command)
+   * - Server shuts down gracefully on SIGTERM (Docker/kill)
+   * - Server shuts down gracefully on SIGINT (Ctrl+C)
+   */
+
+  // Handle SIGINT (Ctrl+C / user interrupt)
   process.on('SIGINT', async () => {
-    console.error('Shutting down DevStream MCP Server...');
-    await server.close();
+    console.error('🛑 SIGINT received (user interrupt), initiating graceful shutdown...');
+    await server.cleanup('SIGINT');
     process.exit(0);
   });
 
+  // Handle SIGTERM (graceful termination from Docker/kill)
   process.on('SIGTERM', async () => {
-    console.error('Shutting down DevStream MCP Server...');
-    await server.close();
+    console.error('🛑 SIGTERM received (graceful termination), initiating graceful shutdown...');
+    await server.cleanup('SIGTERM');
     process.exit(0);
   });
 

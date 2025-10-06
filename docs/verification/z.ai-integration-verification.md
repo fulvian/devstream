@@ -29,7 +29,7 @@ The z.ai integration for DevStream is **fully functional and production-ready**.
   - Sources root `.env` for API key
   - Sources `.env.llm-providers` for configuration
   - Exports `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
-  - Exports `ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY`
+  - Exports `ANTHROPIC_API_KEY=$ZAI_API_KEY`
   - Validates key existence (no connectivity test for fast startup)
 
 ### API Endpoint
@@ -61,7 +61,7 @@ The z.ai integration for DevStream is **fully functional and production-ready**.
 **Rationale**:
 - Claude Code does not support `--api-key` as a CLI argument
 - Authentication must be handled via environment variables
-- `ANTHROPIC_AUTH_TOKEN` already exported by `scripts/providers/z.ai.sh`
+- `ANTHROPIC_API_KEY` already exported by `scripts/providers/z.ai.sh`
 
 **Changes**:
 - File: `start-devstream.sh:487-489`
@@ -70,7 +70,7 @@ The z.ai integration for DevStream is **fully functional and production-ready**.
 
 ### Validation
 - ✅ z.ai provider configuration loads correctly
-- ✅ `ANTHROPIC_AUTH_TOKEN` exported by provider script
+- ✅ `ANTHROPIC_API_KEY` exported by provider script
 - ✅ Claude Code launches successfully without errors
 
 ---
@@ -97,7 +97,7 @@ The z.ai integration for DevStream is **fully functional and production-ready**.
 1. **Configuration Load**: Sources `.env.llm-providers` → sets `DEVSTREAM_LLM_PROVIDER=z.ai`
 2. **Provider Script Execution**: Runs `scripts/providers/z.ai.sh`:
    - Loads `ZAI_API_KEY` from root `.env`
-   - Exports `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
+   - Exports `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`
    - Validates key existence
    - Prints configuration summary
 3. **Claude Code Launch**: Starts with z.ai endpoint transparently
@@ -143,7 +143,7 @@ Script displays active provider on launch:
 - ✅ API key `ZAI_API_KEY` detected in environment
 - ✅ Environment variables export correctly:
   - `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
-  - `ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY` (validated, not displayed)
+  - `ANTHROPIC_API_KEY=$ZAI_API_KEY` (validated, not displayed)
 - ✅ Launch script recognizes z.ai provider
 - ✅ No errors during provider configuration
 
@@ -188,7 +188,7 @@ Load .env.llm-providers (set DEVSTREAM_LLM_PROVIDER)
     ↓
 Execute scripts/providers/z.ai.sh
     ↓
-Export ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN
+Export ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY
     ↓
 Launch Claude Code (transparent z.ai usage)
 ```
@@ -200,7 +200,7 @@ Launch Claude Code (transparent z.ai usage)
 | `ZAI_BASE_URL` | `.env.llm-providers` | API endpoint URL |
 | `DEVSTREAM_LLM_PROVIDER` | `.env.llm-providers` | Active provider selector |
 | `ANTHROPIC_BASE_URL` | Provider script export | Claude Code API endpoint |
-| `ANTHROPIC_AUTH_TOKEN` | Provider script export | Claude Code authentication |
+| `ANTHROPIC_API_KEY` | Provider script export | Claude Code authentication |
 
 ---
 
@@ -212,7 +212,7 @@ Launch Claude Code (transparent z.ai usage)
 | ✅ Provider script executes without errors | PASS | `scripts/providers/z.ai.sh` runs successfully |
 | ✅ Base URL correctly configured | PASS | `https://api.z.ai/api/anthropic` |
 | ✅ Model mapping defined | PASS | Opus/Sonnet→glm-4.6, Haiku→glm-4.5-air |
-| ✅ Environment variables export | PASS | `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` |
+| ✅ Environment variables export | PASS | `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` |
 | ✅ Launch process works | PASS | No errors during configuration |
 | ✅ Critical bug fixed (--api-key flag) | PASS | Commit c60d0d5 applied |
 | ✅ Git commits documented | PASS | 3 commits with proper messages |

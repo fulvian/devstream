@@ -105,6 +105,29 @@ class MemoryRateLimiter:
         # aiolimiter's has_capacity checks if we can acquire without blocking
         return self.limiter.has_capacity()
 
+    def get_current_rate(self) -> float:
+        """
+        Calculate current operations per second rate.
+
+        Returns:
+            Current rate in operations per second (0.0 if no recent activity)
+
+        Note:
+            Returns rate based on total_operations over time_period window.
+            If last operation was >time_period ago, rate is 0.0.
+        """
+        if self.total_operations == 0:
+            return 0.0
+
+        # Check if last operation was within the time period
+        time_since_last = time.time() - self._last_acquire_time
+        if time_since_last > self.time_period:
+            return 0.0
+
+        # Calculate rate based on total operations
+        # Note: This is a simple approximation for monitoring
+        return min(self.total_operations / self.time_period, self.max_rate)
+
     def get_stats(self) -> Dict[str, Any]:
         """
         Get rate limiter statistics.
@@ -117,6 +140,7 @@ class MemoryRateLimiter:
                 - throttled_operations: Operations delayed by rate limiter
                 - throttle_rate: Percentage of throttled operations
                 - last_acquire_time: Timestamp of last acquire
+                - current_rate: Current operations per second
         """
         throttle_rate = (
             (self.throttled_operations / self.total_operations * 100)
@@ -131,6 +155,7 @@ class MemoryRateLimiter:
             "throttled_operations": self.throttled_operations,
             "throttle_rate": f"{throttle_rate:.1f}%",
             "last_acquire_time": self._last_acquire_time,
+            "current_rate": self.get_current_rate(),
         }
 
 
@@ -226,3 +251,25 @@ def get_ollama_stats() -> Dict[str, Any]:
         Dictionary with utilization metrics
     """
     return ollama_rate_limiter.get_stats()
+
+
+def get_rate_limiter_stats() -> Dict[str, Dict[str, Any]]:
+    """
+    Get statistics for all rate limiters.
+
+    Returns:
+        Dictionary with stats for both memory and ollama limiters:
+            {
+                "memory": {...},
+                "ollama": {...}
+            }
+
+    Usage:
+        stats = get_rate_limiter_stats()
+        print(f"Memory rate: {stats['memory']['current_rate']} ops/sec")
+        print(f"Ollama rate: {stats['ollama']['current_rate']} ops/sec")
+    """
+    return {
+        "memory": get_memory_stats(),
+        "ollama": get_ollama_stats()
+    }

@@ -232,6 +232,10 @@ class OllamaEmbeddingClient:
 
         Raises:
             No exceptions raised - graceful degradation on all errors
+
+        Note:
+            Model auto-unloads after 5 minutes of inactivity (keep_alive="5m").
+            Cold start penalty: ~2-3s when model reloads after idle period.
         """
         if not text or not text.strip():
             self.logger.warning("Empty text provided for embedding generation")
@@ -261,7 +265,8 @@ class OllamaEmbeddingClient:
             # Note: Using input (not prompt) for batch-compatible API
             response = ollama.embed(
                 model=self.model,
-                input=text  # Single string, but API accepts list too
+                input=text,  # Single string, but API accepts list too
+                keep_alive="5m"  # Auto-unload after 5 min inactivity
             )
 
             # Extract embeddings from response
@@ -337,6 +342,10 @@ class OllamaEmbeddingClient:
 
         Returns:
             List of embeddings (or None for failures) in same order as input
+
+        Note:
+            Model auto-unloads after 5 minutes of inactivity (keep_alive="5m").
+            Cold start penalty: ~2-3s when model reloads after idle period.
         """
         if not texts:
             return []
@@ -363,7 +372,8 @@ class OllamaEmbeddingClient:
                     # Context7 Pattern: ollama.embed() with list input
                     response = ollama.embed(
                         model=self.model,
-                        input=batch  # List of strings
+                        input=batch,  # List of strings
+                        keep_alive="5m"  # Auto-unload after 5 min inactivity
                     )
 
                     # Extract embeddings
@@ -403,6 +413,10 @@ class OllamaEmbeddingClient:
 
         Returns:
             True if Ollama is available, False otherwise
+
+        Note:
+            Model auto-unloads after 5 minutes of inactivity (keep_alive="5m").
+            Cold start penalty: ~2-3s when model reloads after idle period.
         """
         try:
             import ollama
@@ -410,7 +424,8 @@ class OllamaEmbeddingClient:
             # Try to generate a simple embedding
             response = ollama.embed(
                 model=self.model,
-                input="test"
+                input="test",
+                keep_alive="5m"  # Auto-unload after 5 min inactivity
             )
 
             self.logger.info("Ollama connection successful")

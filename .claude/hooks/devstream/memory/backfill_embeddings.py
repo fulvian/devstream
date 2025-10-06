@@ -147,6 +147,10 @@ class EmbeddingBackfillService:
 
         Returns:
             List of embedding vectors or None if failed
+
+        Note:
+            Model auto-unloads after 5 minutes of inactivity (keep_alive="5m").
+            Cold start penalty: ~2-3s when model reloads after idle period.
         """
         try:
             # Dynamic import to avoid startup dependency
@@ -157,7 +161,8 @@ class EmbeddingBackfillService:
             # Context7 pattern: Batch embedding with array input
             response = ollama.embed(
                 model=self.ollama_model,
-                input=texts
+                input=texts,
+                keep_alive="5m"  # Auto-unload after 5 min inactivity
             )
 
             embeddings = response.get('embeddings', [])

@@ -25,7 +25,7 @@ Each script:
 1. Sources `.env.llm-providers` configuration
 2. Validates API keys
 3. Tests connectivity (Synthetic only - quick validation)
-4. Exports `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
+4. Exports `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`
 5. Prints configuration summary
 
 ## Configuration
@@ -44,7 +44,7 @@ Edit `.env.llm-providers` in project root to configure providers.
 Provider scripts set these variables for Claude Code:
 
 - `ANTHROPIC_BASE_URL` - API endpoint URL
-- `ANTHROPIC_AUTH_TOKEN` - API authentication token
+- `ANTHROPIC_API_KEY` - API authentication token
 
 ## Validation Levels
 

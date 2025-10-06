@@ -12,6 +12,7 @@ This guide covers common issues and their solutions for DevStream.
 - [Memory System Issues](#memory-system-issues)
 - [Context7 Issues](#context7-issues)
 - [Agent System Issues](#agent-system-issues)
+- [MCP Server Issues](#mcp-server-issues)
 - [Database Issues](#database-issues)
 - [Performance Issues](#performance-issues)
 - [Getting Help](#getting-help)
@@ -611,6 +612,212 @@ print(result)
 # Edit .env.devstream
 DEVSTREAM_AUTO_DELEGATION_AUTO_APPROVE=0.90  # Was 0.95
 ```
+
+---
+
+## MCP Server Issues
+
+### Issue: MCP Tools Unavailable After `/compact`
+
+**Symptom**:
+```
+User: List DevStream tasks
+Claude: Error: MCP tool mcp__devstream__devstream_list_tasks not available
+```
+
+**Root Cause**: MCP server disconnection (historically caused by stdin EOF during `/compact`)
+
+**Quick Fix**: Use the reconnection script
+
+```bash
+# Run reconnection helper (from project root)
+./scripts/reconnect-mcp.sh
+```
+
+**Expected output**:
+```
+🔄 DevStream MCP Reconnection Helper
+======================================
+
+✅ Found .mcp.json in project root
+✅ Triggered .mcp.json file watcher (touch)
+
+🔍 Checking MCP server status...
+✅ MCP server is running (port 9090 active)
+✅ MCP server health check passed
+
+📋 Next Steps:
+==============
+
+1. Check if Claude Code detected the reload
+2. If tools are still unavailable: Restart Claude Code
+3. Verify tools after restart: mcp__devstream__devstream_list_tasks
+
+✅ Reconnection trigger complete!
+```
+
+**What the script does**:
+1. Verifies `.mcp.json` exists in project root
+2. Touches `.mcp.json` to trigger Claude Code file watcher
+3. Verifies MCP server is running (port 9090)
+4. Verifies health endpoint responds
+
+**If tools still unavailable after reconnection**:
+```bash
+# Step 1: Verify server is actually running
+ps aux | grep devstream-mcp | grep -v grep
+
+# Step 2: Check server health
+curl http://localhost:9090/health
+# Expected: {"status":"ok","uptime":123}
+
+# Step 3: Check server logs
+tail -50 ~/.claude/logs/mcp-server.log
+
+# Step 4: Restart Claude Code (close and reopen)
+```
+
+### Manual Reconnection Steps
+
+**If reconnection script fails, follow these steps**:
+
+#### 1. Verify MCP Server is Running
+
+```bash
+# Check server process
+ps aux | grep devstream-mcp | grep -v grep
+
+# Check server port
+lsof -i :9090
+
+# Check server health endpoint
+curl http://localhost:9090/health
+```
+
+**Expected results**:
+- ✅ Process found with PID
+- ✅ Port 9090 in LISTEN state
+- ✅ Health endpoint returns `{"status":"ok"}`
+
+**If server is NOT running**:
+```bash
+# Start MCP server
+./start-devstream.sh
+
+# Verify server started
+tail -f ~/.claude/logs/mcp-server.log
+# Expected: "🚀 DevStream MCP Server started..."
+
+# Verify health endpoint
+curl http://localhost:9090/health
+```
+
+#### 2. Trigger Claude Code Reload
+
+```bash
+# Touch .mcp.json to trigger file watcher
+touch .mcp.json
+
+# Wait for Claude Code to detect change (2-3 seconds)
+sleep 3
+```
+
+#### 3. Test MCP Tools
+
+**Test command**:
+```python
+mcp__devstream__devstream_list_tasks:
+  status: "active"
+```
+
+**Expected output**: List of tasks or empty array (no error)
+
+#### 4. If Still Unavailable: Restart Claude Code
+
+**Steps**:
+1. Close Claude Code completely (quit application)
+2. Verify server is running: `curl http://localhost:9090/health`
+3. Reopen Claude Code
+4. Wait 5-10 seconds for MCP initialization
+5. Test MCP tool: `mcp__devstream__devstream_list_tasks`
+
+**Why restart helps**:
+- Forces MCP client to reconnect to server
+- Reloads `.mcp.json` configuration
+- Clears any stale client-side state
+
+### Detecting MCP Disconnection
+
+**Symptoms**:
+- ❌ MCP tools show "not available" error
+- ❌ No Context7 documentation in context injection
+- ❌ Memory search returns no results
+- ❌ No new memory entries after file edits
+- ❌ `mcp__devstream__*` tools missing from tool list
+
+**Diagnostic commands**:
+
+```bash
+# 1. Check server process
+ps aux | grep devstream-mcp | grep -v grep
+# Expected: Process running
+
+# 2. Check server port
+lsof -i :9090
+# Expected: devstream-mcp LISTEN
+
+# 3. Check server logs for errors
+tail -100 ~/.claude/logs/mcp-server.log | grep -i error
+# Expected: No errors
+
+# 4. Check server heartbeat (should be recent)
+tail -50 ~/.claude/logs/mcp-server.log | grep "💓"
+# Expected: "💓 MCP server heartbeat (uptime: X min, PID: XXXXX)" within last 5 minutes
+
+# 5. Test server directly
+curl http://localhost:9090/health
+# Expected: {"status":"ok","uptime":123}
+```
+
+**Healthy server indicators**:
+- ✅ Process running with valid PID
+- ✅ Port 9090 listening
+- ✅ No errors in recent logs
+- ✅ Heartbeat log within last 5 minutes
+- ✅ Health endpoint responds successfully
+
+**If any check fails**: Server crashed or not started
+```bash
+# Restart MCP server
+./start-devstream.sh
+
+# Verify startup
+tail -f ~/.claude/logs/mcp-server.log
+```
+
+### Understanding MCP Lifecycle
+
+**How MCP server lifecycle works** (per MCP spec 2025-03-26):
+
+```
+Server Start → Running → Signal Received → Cleanup → Exit
+               ↑         ↓                  ↓
+               └─────────┘ (stays alive)   └→ Graceful shutdown
+            (ignores stdin EOF)
+```
+
+**Key behaviors**:
+- ✅ Server stays alive during `/compact` (stdin EOF ignored)
+- ✅ Server only shuts down on SIGTERM/SIGINT signals
+- ✅ Cleanup includes: stop heartbeat, checkpoint tasks, close database
+- ✅ Cleanup has 5-second timeout protection
+
+**Why stdin EOF is ignored**:
+- stdin EOF occurs during normal operations (e.g., `/compact`)
+- Terminating on stdin EOF would break client-server connection
+- Proper shutdown is signal-based (SIGTERM/SIGINT)
+
+**For detailed lifecycle information**: See [MCP Lifecycle Management](../development/mcp-lifecycle-management.md)
 
 ---
 

@@ -125,7 +125,8 @@ case "${PROVIDER}" in
 
         # Export for Claude Code
         export ANTHROPIC_BASE_URL="${ZAI_BASE_URL}"
-        export ANTHROPIC_AUTH_TOKEN="${ZAI_API_KEY}"
+        unset ANTHROPIC_AUTH_TOKEN
+        export ANTHROPIC_API_KEY="${ZAI_API_KEY}"
 
         # Output configuration
         echo ""

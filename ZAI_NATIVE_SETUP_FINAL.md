@@ -13,7 +13,7 @@
 
 **URL**: `https://api.z.ai/api/anthropic`
 **Compatibilità**: 100% Anthropic API compatible
-**Autenticazione**: `x-api-key` header
+**Autenticazione**: `x-api-key` header (`ANTHROPIC_API_KEY` nel runtime)
 
 **Features Automatiche**:
 - ✅ **Reasoning Mode**: ENABLED di default (no config needed!)
@@ -42,6 +42,7 @@ ZAI_MODEL_HAIKU=glm-4.5-air
 # Activation logic
 if [ "$DEVSTREAM_LLM_PROVIDER" = "z.ai" ]; then
     export ANTHROPIC_BASE_URL=$ZAI_BASE_URL
+    unset ANTHROPIC_AUTH_TOKEN
     export ANTHROPIC_API_KEY=$ZAI_API_KEY
 fi
 ```
@@ -313,13 +314,14 @@ export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 1. ✅ Carica `.env` (ZAI_API_KEY)
 2. ✅ Override `DEVSTREAM_LLM_PROVIDER=z.ai`
 3. ✅ Source `.env.llm-providers`
-4. ✅ Export `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
-5. ✅ Export `ANTHROPIC_API_KEY=5a51efd5...`
-6. ✅ Avvia Claude Code
-7. ✅ Claude Code → z.ai API → GLM-4.6
-8. ✅ Reasoning mode ATTIVO (automatico)
-9. ✅ Context 200K tokens
-10. ✅ Tool calling nativo
+4. ✅ Esegue `claude /logout` (rimuove token claude.ai)
+5. ✅ Export `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
+6. ✅ Export `ANTHROPIC_API_KEY=5a51efd5...`
+7. ✅ Avvia Claude Code
+8. ✅ Claude Code → z.ai API → GLM-4.6
+9. ✅ Reasoning mode ATTIVO (automatico)
+10. ✅ Context 200K tokens
+11. ✅ Tool calling nativo
 
 **NO** Router, **NO** configurazioni complesse, **NO** parametri custom.
 

@@ -143,19 +143,22 @@ switch_auth_provider() {
       # Reset Claude Code settings to default
       reset_claude_settings_to_default
 
-      # Verify Claude.ai authentication
+      # Verify Claude.ai authentication (non-blocking)
       if command -v claude >/dev/null 2>&1; then
         if ! claude auth status 2>/dev/null | grep -q "Logged in"; then
-          print_error "Not logged into Claude.ai - run: claude login"
-          print_info "Visit: https://claude.ai/"
-          return 1
+          print_warning "Claude CLI not logged in"
+          print_info "   If Claude Code login fails, run: claude login"
+          print_info "   Visit: https://claude.ai/"
         else
-          print_status "✅ Switched to Anthropic Max Plan (OAuth)"
+          print_status "✅ Claude CLI authenticated"
           print_info "   Using Claude.ai subscription via OAuth login"
         fi
       else
-        print_warning "Claude CLI not found - cannot verify authentication"
+        print_info "Claude CLI not found (authentication handled by Claude Code)"
       fi
+
+      print_status "✅ Switched to Anthropic Max Plan (OAuth)"
+      print_info "   Authentication: Claude Code OAuth login"
       ;;
     *)
       print_error "Unknown provider: $provider"
@@ -601,6 +604,37 @@ show_agent_status() {
   echo ""
 }
 
+prepare_codex_runtime() {
+  print_status "🛠️  Preparing Codex CLI integration"
+  echo ""
+
+  local codex_home="${DEVSTREAM_CODEX_HOME:-$PROJECT_ROOT/data/codex_home}"
+  export DEVSTREAM_CODEX_HOME="$codex_home"
+  mkdir -p "$codex_home/.claude/logs/devstream"
+
+  local sample_path="${DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH:-$PROJECT_ROOT/data/codex_event_samples.jsonl}"
+  export DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH="$sample_path"
+  mkdir -p "$(dirname "$sample_path")"
+
+  print_info "Codex home: $DEVSTREAM_CODEX_HOME"
+  print_info "Sample payload log: $DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH"
+  echo ""
+
+  print_feature "Comandi utili"
+  print_info "  • Singolo evento: DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh --event '{\"event_type\":\"session_start\",\"session_id\":\"demo\",\"cwd\":\".\"}'"
+  print_info "  • Sequenza JSON: DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh --file events_demo.json"
+  print_info "  • Stream STDIN: cat events_demo.jsonl | DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh"
+  echo ""
+
+  print_feature "Concorrenza Claude + Codex"
+  print_info "  • I log Codex sono isolati in $codex_home/.claude/logs/devstream"
+  print_info "  • Claude Code continua a usare ~/.claude/logs/devstream (nessun conflitto)"
+  print_info "  • Assicurati che l'MCP server sia in esecuzione una sola volta (condiviso da entrambi)"
+  echo ""
+
+  print_status "✅ Codex relay pronto: esegui i comandi sopra in una shell dedicata"
+}
+
 # Function to start Claude Code with DevStream
 start_claude_with_devstream() {
   print_status "🚀 Starting Claude Code with DevStream..."
@@ -758,6 +792,15 @@ main() {
       show_agent_status
       ;;
 
+    codex)
+      load_llm_provider "$provider"
+      check_python_venv
+      load_devstream_config
+      check_prerequisites
+      start_mcp_server
+      prepare_codex_runtime
+      ;;
+
     restart)
       stop_server
       sleep 2
@@ -767,6 +810,7 @@ main() {
     *)
       print_error "Unknown command: $command"
       print_info "Usage: $0 {start|stop|status|restart} [provider]"
+      print_info "       $0 codex [provider]"
       print_info ""
       print_info "Available providers:"
       print_info "  - anthropic (default, Anthropic Max Plan via OAuth)"

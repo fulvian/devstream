@@ -213,13 +213,64 @@ async def main():
 
 
 if __name__ == "__main__":
+    """
+    SessionStart hook entry point with asyncio loop safety.
+
+    Handles two execution contexts:
+    1. Claude Code hooks (event loop already running)
+    2. Standalone execution (no event loop)
+
+    Fix: Never call run_until_complete() on running loop.
+    Reference: https://docs.python.org/3/library/asyncio-task.html#asyncio.get_running_loop
+
+    Exception Handling:
+    - CancelledError: Task cancelled during execution (graceful warning)
+    - RuntimeError: No loop vs loop closed/thread mismatch (distinguish)
+    - Generic Exception: Catch-all with detailed logging + re-raise
+    """
+    import structlog
+
+    logger = structlog.get_logger()
+
     try:
-        # Check if already in event loop context (Claude Code hooks provide event loop)
+        # Attempt to get existing running loop
         loop = asyncio.get_running_loop()
-        # Schedule task in existing loop
+
+        # CORRECT: Schedule task in existing loop WITHOUT running it
+        # The loop is already running, task will execute automatically
         task = loop.create_task(main())
-        # Ensure task completes before hook exits
-        loop.run_until_complete(task)
-    except RuntimeError:
-        # No event loop exists - standalone execution
-        asyncio.run(main())
+
+        logger.debug("SessionStart scheduled in existing event loop",
+                    loop_id=id(loop), task_repr=str(task))
+
+        # NOTE: Do NOT await or run_until_complete here!
+        # The hook framework will handle task completion.
+
+    except RuntimeError as e:
+        # Distinguish between "no running loop" vs other RuntimeErrors
+        if "no running event loop" in str(e).lower():
+            # Expected case: standalone execution without event loop
+            logger.debug("SessionStart creating new event loop")
+            try:
+                asyncio.run(main())
+            except asyncio.CancelledError:
+                logger.warning("SessionStart task cancelled during execution")
+            except Exception as ex:
+                logger.error("SessionStart execution failed",
+                           error=str(ex), error_type=type(ex).__name__)
+                raise
+        else:
+            # Other RuntimeError: loop closed, thread mismatch, etc.
+            logger.error("SessionStart asyncio runtime error",
+                        error=str(e), error_type="RuntimeError")
+            raise
+
+    except asyncio.CancelledError:
+        # Task cancelled in existing loop (non-critical)
+        logger.warning("SessionStart task cancelled in existing loop")
+
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.error("SessionStart unexpected error",
+                    error=str(e), error_type=type(e).__name__)
+        raise

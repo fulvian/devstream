@@ -20,9 +20,10 @@
 1. Load .env (ZAI_API_KEY)
 2. Export DEVSTREAM_LLM_PROVIDER=z.ai
 3. Export ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
-4. Export ANTHROPIC_API_KEY=5a51efd5...
-5. Start Claude Code
-6. Claude Code → z.ai API → GLM-4.6
+4. Esegui `claude /logout` (lo script salva il token in `~/.claude*.backup-zai-*` se necessario)
+5. Export ANTHROPIC_API_KEY=5a51efd5...
+6. Start Claude Code
+7. Claude Code → z.ai API → GLM-4.6
 ```
 
 ## ✨ Reasoning Mode

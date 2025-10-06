@@ -1,6 +1,7 @@
 {
   "name": "@devstream/mcp-server",
   "version": "1.0.0",
+  "type": "module",
   "description": "MCP Server for DevStream task management and memory system integration with Claude Code",
   "main": "dist/index.js",
   "bin": {
