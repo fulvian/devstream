@@ -143,7 +143,7 @@ export class HybridSearchEngine {
       }
 
       // Generate query embedding with metrics
-      console.log(`🧠 Generating query embedding for: "${query}"`);
+      console.error(`🧠 Generating query embedding for: "${query}"`);
       const queryEmbedding = await MetricsCollector.trackEmbeddingGeneration(
         this.ollamaClient.getDefaultModel(),
         async () => await this.ollamaClient.generateEmbedding(query)
@@ -221,7 +221,7 @@ export class HybridSearchEngine {
           async () => await this.database.query<HybridSearchResult>(sql, params)
         );
 
-        console.log(`✅ Hybrid search completed: ${results.length} results`);
+        console.error(`✅ Hybrid search completed: ${results.length} results`);
 
         // Track result count and RRF scores
         MetricsCollector.recordResults('hybrid', results.length);
@@ -303,7 +303,7 @@ export class HybridSearchEngine {
         console.error(`❌ Hybrid search failed: ${errorMessage}`);
 
         // Fallback to FTS5 only
-        console.log('🔄 Falling back to FTS5 search...');
+        console.error('🔄 Falling back to FTS5 search...');
         return this.ftsOnlySearch(query, searchConfig.k);
       }
     });
@@ -390,7 +390,7 @@ export class HybridSearchEngine {
         async () => await this.database.query<HybridSearchResult>(sql, [sanitizedQuery, limit])
       );
 
-      console.log(`✅ FTS5 search completed: ${results.length} results`);
+      console.error(`✅ FTS5 search completed: ${results.length} results`);
       MetricsCollector.recordResults('keyword', results.length);
 
       // Track search quality metrics
@@ -446,7 +446,7 @@ export class HybridSearchEngine {
         async () => await this.database.query<HybridSearchResult>(sql, [embeddingBuffer, limit])
       );
 
-      console.log(`✅ Vector search completed: ${results.length} results`);
+      console.error(`✅ Vector search completed: ${results.length} results`);
       MetricsCollector.recordResults('vector', results.length);
 
       // Track search quality metrics
