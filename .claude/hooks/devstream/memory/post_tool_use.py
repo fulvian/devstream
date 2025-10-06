@@ -961,14 +961,105 @@ class PostToolUseHook:
             self.base.warning_feedback(f"Memory storage failed: {str(e)[:50]}")
             context.output.exit_success()
 
+    async def run_fallback_mode(self):
+        """
+        Fallback mode for when no Claude Code context is available.
+
+        This mode allows the PostToolUse hook to function during testing
+        or when executed directly without full Claude Code integration.
+        """
+        print("🔄 PostToolUse hook running in fallback mode")
+
+        try:
+            # Get current session information
+            sys.path.insert(0, str(Path(__file__).parent.parent / 'sessions'))
+            from work_session_manager import WorkSessionManager
+            session_manager = WorkSessionManager()
+
+            # Try to get current active session
+            import sqlite3
+            # Database configuration
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            db_path = str(project_root / 'data' / 'devstream.db')
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT id, started_at FROM work_sessions WHERE status="active" ORDER BY started_at DESC LIMIT 1')
+            session = cursor.fetchone()
+
+            if session:
+                session_id, started_at = session
+                print(f"📊 Found active session: {session_id}")
+
+                # Store a test record to verify the hook works
+                test_content = f"PostToolUse fallback mode test at {datetime.now().isoformat()}"
+
+                result = await self.base.safe_mcp_call(
+                    self.mcp_client,
+                    "devstream_store_memory",
+                    {
+                        "content": test_content,
+                        "content_type": "code",
+                        "keywords": ["post_tool_use", "fallback", "test", session_id[:8]]
+                    }
+                )
+
+                if result:
+                    print("✅ PostToolUse fallback mode: Memory storage successful")
+                else:
+                    print("⚠️ PostToolUse fallback mode: Memory storage failed (MCP unavailable)")
+
+                    # Fallback: Store directly in database
+                    try:
+                        # Use synchronous SQLite for fallback mode
+                        conn_sync = sqlite3.connect(db_path)
+                        cursor_sync = conn_sync.cursor()
+
+                        cursor_sync.execute(
+                            """
+                            INSERT INTO semantic_memory
+                            (id, content, content_type, created_at, updated_at, keywords)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                f"fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                                test_content,
+                                "code",
+                                datetime.now().isoformat(),
+                                datetime.now().isoformat(),
+                                json.dumps(["post_tool_use", "fallback", "test"])
+                            )
+                        )
+                        conn_sync.commit()
+                        conn_sync.close()
+
+                        print("✅ PostToolUse fallback mode: Direct database storage successful")
+                    except Exception as e:
+                        print(f"❌ PostToolUse fallback mode: Direct storage failed: {e}")
+
+            else:
+                print("⚠️ No active session found for fallback mode")
+
+            conn.close()
+
+        except Exception as e:
+            print(f"❌ PostToolUse fallback mode error: {e}")
+
 
 def main():
     """Main entry point for PostToolUse hook."""
-    # Create context using cchooks
-    ctx = safe_create_context()
+    # Create context using cchooks with fallback mode
+    ctx = None
+    try:
+        ctx = safe_create_context()
+    except (Exception, SystemExit) as e:
+        # stdin empty or invalid JSON - fallback to manual processing
+        print(f"⚠️  DevStream: No hook input, using fallback mode", file=sys.stderr)
+        ctx = None  # Explicitly set to None for fallback mode
 
-    # Verify it's PostToolUse context
-    if not isinstance(ctx, PostToolUseContext):
+    # Verify it's PostToolUse context (if available)
+    if ctx and not isinstance(ctx, PostToolUseContext):
         print(f"Error: Expected PostToolUseContext, got {type(ctx)}", file=sys.stderr)
         sys.exit(1)
 
@@ -976,12 +1067,19 @@ def main():
     hook = PostToolUseHook()
 
     try:
-        # Run async processing
-        asyncio.run(hook.process(ctx))
+        if ctx:
+            # Run with full context (normal Claude Code execution)
+            asyncio.run(hook.process(ctx))
+        else:
+            # Run in fallback mode (direct execution / testing)
+            asyncio.run(hook.run_fallback_mode())
     except Exception as e:
         # Graceful failure - non-blocking
-        print(f"⚠️  DevStream: PostToolUse error", file=sys.stderr)
-        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        print(f"⚠️  DevStream: PostToolUse error: {str(e)[:100]}", file=sys.stderr)
+        if ctx:
+            ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        else:
+            print(f"Hook completed with error: {str(e)[:100]}", file=sys.stderr)
 
 
 if __name__ == "__main__":

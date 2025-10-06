@@ -272,8 +272,8 @@ class SessionDataExtractor:
             TaskStats with aggregated counts and task titles
 
         Note:
-            Queries micro_tasks WHERE id IN (session.active_tasks)
-            Falls back to empty stats if no active_tasks tracked
+            Queries micro_tasks by matching UUID-style task IDs OR title patterns.
+            Fallback to empty stats if no active_tasks tracked.
         """
         stats = TaskStats()
 
@@ -286,51 +286,143 @@ class SessionDataExtractor:
             async with aiosqlite.connect(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
 
-                # Build SQL IN clause with placeholders
-                placeholders = ','.join('?' * len(session_data.active_tasks))
+                # Separate UUID-style IDs from title strings
+                uuid_tasks = []
+                title_tasks = []
 
-                # Get counts by status (for tracked tasks only)
-                query = f"""
-                    SELECT status, COUNT(*) as count
-                    FROM micro_tasks
-                    WHERE id IN ({placeholders})
-                    GROUP BY status
-                """
-                async with db.execute(query, session_data.active_tasks) as cursor:
-                    async for row in cursor:
-                        status = row['status']
-                        count = row['count']
+                for task in session_data.active_tasks:
+                    # Check if task looks like a UUID (32 hex chars, possibly with hyphens)
+                    import re
+                    if re.match(r'^[a-f0-9]{32}$', task.replace('-', '')) or re.match(r'^[a-f0-9-]{36}$', task):
+                        uuid_tasks.append(task)
+                    else:
+                        title_tasks.append(task)
 
-                        stats.total_tasks += count
+                self.logger.debug(
+                    f"Task classification: {len(uuid_tasks)} UUID tasks, "
+                    f"{len(title_tasks)} title tasks"
+                )
 
-                        if status == 'completed':
-                            stats.completed = count
-                        elif status == 'active':
-                            stats.active = count
-                        elif status == 'failed':
-                            stats.failed = count
+                # Query 1: UUID-style exact matches
+                if uuid_tasks:
+                    placeholders = ','.join('?' * len(uuid_tasks))
 
-                # Get task titles (top 10, prioritize completed)
-                query = f"""
-                    SELECT title
-                    FROM micro_tasks
-                    WHERE id IN ({placeholders})
-                    ORDER BY
-                        CASE status
-                            WHEN 'completed' THEN 1
-                            WHEN 'active' THEN 2
-                            ELSE 3
-                        END,
-                        completed_at DESC
-                    LIMIT 10
-                """
-                async with db.execute(query, session_data.active_tasks) as cursor:
-                    async for row in cursor:
-                        stats.task_titles.append(row['title'])
+                    # Get counts by status
+                    query = f"""
+                        SELECT status, COUNT(*) as count
+                        FROM micro_tasks
+                        WHERE id IN ({placeholders})
+                        GROUP BY status
+                    """
+                    async with db.execute(query, uuid_tasks) as cursor:
+                        async for row in cursor:
+                            status = row['status']
+                            count = row['count']
+
+                            stats.total_tasks += count
+
+                            if status == 'completed':
+                                stats.completed = count
+                            elif status == 'active':
+                                stats.active = count
+                            elif status == 'failed':
+                                stats.failed = count
+
+                    # Get task titles
+                    query = f"""
+                        SELECT title, status, completed_at
+                        FROM micro_tasks
+                        WHERE id IN ({placeholders})
+                        ORDER BY
+                            CASE status
+                                WHEN 'completed' THEN 1
+                                WHEN 'active' THEN 2
+                                ELSE 3
+                            END,
+                            completed_at DESC
+                        LIMIT 10
+                    """
+                    async with db.execute(query, uuid_tasks) as cursor:
+                        async for row in cursor:
+                            stats.task_titles.append(row['title'])
+
+                # Query 2: Keyword-based LIKE matches (Context7 pattern: extract keywords from long titles)
+                if title_tasks:
+                    # Extract meaningful keywords from long TodoWrite titles
+                    import re
+                    all_keywords = set()
+
+                    for title in title_tasks:
+                        # Extract keywords: words 4+ chars, exclude common words
+                        words = re.findall(r'\b[a-zA-Z]{4,}\b', title.lower())
+
+                        # Filter out common words and keep meaningful ones
+                        common_words = {
+                            'this', 'that', 'with', 'from', 'they', 'have', 'been',
+                            'were', 'said', 'each', 'which', 'their', 'time', 'will',
+                            'about', 'would', 'could', 'should', 'other', 'after',
+                            'first', 'into', 'present', 'solution', 'trade', 'offs'
+                        }
+
+                        meaningful_words = [w for w in words if w not in common_words and len(w) >= 4]
+                        all_keywords.update(meaningful_words)
+
+                    # Context7 pattern: Use keyword-based matching for better recall
+                    if all_keywords:
+                        # Limit keywords to most relevant ones to avoid too broad queries
+                        keywords = list(all_keywords)[:8]  # Top 8 keywords
+
+                        self.logger.debug(f"Extracted keywords from titles: {keywords}")
+
+                        # Build keyword-based OR conditions
+                        keyword_conditions = ' OR '.join(['title LIKE ?'] * len(keywords))
+                        keyword_params = [f'%{keyword}%' for keyword in keywords]
+
+                        # Get counts by status
+                        query = f"""
+                            SELECT status, COUNT(*) as count
+                            FROM micro_tasks
+                            WHERE {keyword_conditions}
+                            GROUP BY status
+                        """
+                        async with db.execute(query, keyword_params) as cursor:
+                            async for row in cursor:
+                                status = row['status']
+                                count = row['count']
+
+                                stats.total_tasks += count
+
+                                if status == 'completed':
+                                    stats.completed = count
+                                elif status == 'active':
+                                    stats.active = count
+                                elif status == 'failed':
+                                    stats.failed = count
+
+                        # Get task titles (distinct, limit to avoid duplicates)
+                        query = f"""
+                            SELECT DISTINCT title, status, completed_at
+                            FROM micro_tasks
+                            WHERE {keyword_conditions}
+                            ORDER BY
+                                CASE status
+                                    WHEN 'completed' THEN 1
+                                    WHEN 'active' THEN 2
+                                    ELSE 3
+                                END,
+                                completed_at DESC
+                            LIMIT 10
+                        """
+                        async with db.execute(query, keyword_params) as cursor:
+                            async for row in cursor:
+                                title = row['title']
+                                if title not in stats.task_titles:  # Deduplicate
+                                    stats.task_titles.append(title)
 
             self.logger.debug(
                 f"Task stats (tracking-based): {stats.total_tasks} total, "
-                f"{stats.completed} completed, from {len(session_data.active_tasks)} tracked tasks"
+                f"{stats.completed} completed, from {len(session_data.active_tasks)} tracked items "
+                f"({len(uuid_tasks)} UUID + {len(title_tasks)} titles)"
             )
 
             return stats
