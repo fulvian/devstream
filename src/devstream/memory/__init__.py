@@ -41,6 +41,7 @@ from .storage import MemoryStorage
 from .processing import TextProcessor
 from .search import HybridSearchEngine
 from .context import ContextAssembler
+from .embedding_generator import EmbeddingGenerator, EmbeddingConfig, EmbeddingGenerationError
 from .exceptions import (
     MemoryError,
     StorageError,
@@ -68,6 +69,10 @@ __all__ = [
     "TextProcessor",
     "HybridSearchEngine",
     "ContextAssembler",
+    # FASE 2: Embedding generation
+    "EmbeddingGenerator",
+    "EmbeddingConfig",
+    "EmbeddingGenerationError",
     # Exceptions
     "MemoryError",
     "StorageError",

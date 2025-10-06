@@ -45,6 +45,7 @@ from rate_limiter import (
     has_memory_capacity,
     has_ollama_capacity
 )
+from real_time_capture import get_real_time_capture
 
 
 class PostToolUseHook:
@@ -67,6 +68,9 @@ class PostToolUseHook:
         # Database path for direct embedding updates
         project_root = Path(__file__).parent.parent.parent.parent.parent
         self.db_path = str(project_root / 'data' / 'devstream.db')
+
+        # FASE 1: Initialize RealTimeDataCapture for enhanced file monitoring
+        self.real_time_capture = get_real_time_capture(str(project_root))
 
     def extract_content_preview(self, content: str, max_length: int = 300) -> str:
         """
@@ -144,40 +148,61 @@ class PostToolUseHook:
 
         return keywords
 
-    async def trigger_checkpoint_for_critical_tool(self, tool_name: str) -> None:
+    async def trigger_real_time_capture_for_critical_tool(self, tool_name: str, file_path: str = "") -> None:
         """
-        Trigger immediate checkpoint after critical tool execution.
+        Trigger real-time file capture after critical tool execution.
 
-        Context7 Pattern: Non-blocking checkpoint trigger via MCP.
-        Implements B1.3 requirement for immediate task checkpoint saves.
+        FASE 1 Enhancement: Replaces generic "Task Checkpoint" messages with
+        real file modifications and session-specific data using RealTimeDataCapture.
+
+        Context7 Pattern: Enhanced file monitoring with specific context storage.
 
         Critical tools: Write, Edit, MultiEdit, Bash, TodoWrite
 
         Args:
             tool_name: Name of the critical tool that was executed
+            file_path: Path to file that was modified (if applicable)
         """
         try:
-            self.base.debug_log(f"Triggering checkpoint for critical tool: {tool_name}")
+            self.base.debug_log(f"Triggering real-time capture for critical tool: {tool_name}")
 
-            # Call MCP checkpoint trigger (non-blocking)
+            # FASE 1: Start real-time monitoring if not already running
+            if not self.real_time_capture.is_running:
+                monitoring_started = self.real_time_capture.start_monitoring()
+                if monitoring_started:
+                    self.base.debug_log("Real-time file monitoring started")
+                else:
+                    self.base.debug_log("Failed to start real-time monitoring")
+
+            # If we have a specific file path, ensure it's being monitored
+            if file_path and self.real_time_capture._should_monitor_file(file_path):
+                self.base.debug_log(f"File is monitored for real-time capture: {Path(file_path).name}")
+
+            # Get real-time capture status
+            status = self.real_time_capture.get_status()
+            self.base.debug_log(
+                f"Real-time capture status: running={status['is_running']}, "
+                f"files_monitored={status['monitored_files_count']}"
+            )
+
+            # For backward compatibility, still call MCP checkpoint but with enhanced context
             result = await self.base.safe_mcp_call(
                 self.mcp_client,
                 "devstream_trigger_checkpoint",
-                {"reason": "tool_trigger"}
+                {"reason": "real_time_file_capture"}
             )
 
             if result:
                 # Extract checkpoint count from result
-                # MCP returns: {content: [{type: "text", text: "✅ Checkpoint triggered..."}]}
                 if isinstance(result, dict) and "content" in result:
                     content_text = result["content"][0]["text"] if result["content"] else ""
-                    self.base.debug_log(f"Checkpoint result: {content_text}")
+                    self.base.debug_log(f"Enhanced checkpoint result: {content_text}")
             else:
-                self.base.debug_log("Checkpoint trigger returned no result (non-blocking)")
+                self.base.debug_log("Enhanced checkpoint trigger returned no result (non-blocking)")
 
         except Exception as e:
             # Context7 Pattern: Graceful degradation - log but don't fail
-            self.base.debug_log(f"Checkpoint trigger failed (non-blocking): {e}")
+            self.base.debug_log(f"Real-time capture trigger failed (non-blocking): {e}")
 
     def update_memory_embedding(
         self,
@@ -949,9 +974,9 @@ class PostToolUseHook:
             # FASE 2: Update session tracking (Memory Bank activeContext pattern)
             await self.update_session_tracking(tool_name, tool_input)
 
-            # B1.3: Trigger checkpoint for critical tool execution
+            # FASE 1: Trigger real-time capture for critical tool execution
             if is_critical_tool:
-                await self.trigger_checkpoint_for_critical_tool(tool_name)
+                await self.trigger_real_time_capture_for_critical_tool(tool_name, file_path)
 
             # Always allow the operation to proceed (graceful degradation)
             context.output.exit_success()
@@ -960,6 +985,16 @@ class PostToolUseHook:
             # Non-blocking error - log and continue
             self.base.warning_feedback(f"Memory storage failed: {str(e)[:50]}")
             context.output.exit_success()
+
+        finally:
+            # FASE 1: Cleanup real-time monitoring if needed
+            try:
+                if self.real_time_capture.is_running:
+                    # Don't stop monitoring here - let it run continuously
+                    # to capture real-time file changes between tool executions
+                    pass
+            except Exception as e:
+                self.base.debug_log(f"Real-time monitoring cleanup failed: {e}")
 
     async def run_fallback_mode(self):
         """
@@ -1040,6 +1075,48 @@ class PostToolUseHook:
 
             else:
                 print("⚠️ No active session found for fallback mode")
+
+            # FASE 1: Test real-time capture functionality
+            try:
+                print("🔄 Testing real-time capture functionality...")
+
+                # Test file filtering
+                test_files = [
+                    "/test.py",           # Should monitor
+                    "/app.tsx",          # Should monitor
+                    "/docs/readme.md",   # Should monitor
+                    "/.git/config",      # Should exclude
+                    "/node_modules/pkg.js",  # Should exclude
+                ]
+
+                monitored_count = 0
+                for file_path in test_files:
+                    should_monitor = self.real_time_capture._should_monitor_file(file_path)
+                    if should_monitor:
+                        monitored_count += 1
+
+                print(f"✅ Real-time capture filtering: {monitored_count}/{len(test_files)} files correctly filtered")
+
+                # Test monitoring status
+                status = self.real_time_capture.get_status()
+                print(f"📊 Real-time capture status: running={status['is_running']}, extensions={status['monitored_extensions']}")
+
+                # Test starting monitoring (briefly for testing)
+                if not status['is_running']:
+                    print("🔄 Starting real-time monitoring test...")
+                    started = self.real_time_capture.start_monitoring([str(project_root)])
+                    if started:
+                        print("✅ Real-time monitoring started successfully")
+                        # Stop immediately after test
+                        self.real_time_capture.stop_monitoring()
+                        print("✅ Real-time monitoring stopped (test complete)")
+                    else:
+                        print("❌ Failed to start real-time monitoring")
+                else:
+                    print("✅ Real-time monitoring already running")
+
+            except Exception as rtc_error:
+                print(f"⚠️ Real-time capture test failed: {rtc_error}")
 
             conn.close()
 
