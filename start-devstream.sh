@@ -276,6 +276,9 @@ load_llm_provider() {
 
   print_status "Loading LLM Provider: $provider"
 
+  # Export provider for downstream functions
+  export DEVSTREAM_LLM_PROVIDER="$provider"
+
   # Load root .env first (single source of truth)
   if [ -f "$PROJECT_ROOT/.env" ]; then
     set -a
@@ -703,17 +706,15 @@ start_claude_with_devstream() {
   # Start Claude Code in the project directory
   cd "$PROJECT_ROOT"
 
-  # Build Claude Code command with model-specific parameters
-  local claude_command="claude"
-
-  # Add --model parameter for z.ai provider
+  # Check if z.ai provider is selected and use dedicated script
   if [ "$active_provider" = "z.ai" ]; then
-    claude_command="$claude_command --model glm-4.6"
+    print_info "🔄 Launching Claude Code with GLM-4.6 via dedicated script..."
+    # Use the dedicated z.ai script which handles all environment setup
+    exec "$PROJECT_ROOT/scripts/start-claude-zai.sh"
+  else
+    # Default Claude Code launch for Anthropic provider
+    claude
   fi
-
-  # All authentication handled via ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN env vars
-  # (already exported by switch_auth_provider function)
-  $claude_command
 }
 
 # Function to stop server
