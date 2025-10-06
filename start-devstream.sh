@@ -703,9 +703,17 @@ start_claude_with_devstream() {
   # Start Claude Code in the project directory
   cd "$PROJECT_ROOT"
 
-  # All authentication handled via ANTHROPIC_API_KEY env var
+  # Build Claude Code command with model-specific parameters
+  local claude_command="claude"
+
+  # Add --model parameter for z.ai provider
+  if [ "$active_provider" = "z.ai" ]; then
+    claude_command="$claude_command --model glm-4.6"
+  fi
+
+  # All authentication handled via ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN env vars
   # (already exported by switch_auth_provider function)
-  claude
+  $claude_command
 }
 
 # Function to stop server
