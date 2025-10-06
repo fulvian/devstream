@@ -1,81 +1,82 @@
 # 🚀 Quick Start: Claude Code con z.ai (GLM-4.6)
 
-## ✅ Configurazione Completata
+## 🎯 Modello di Sottoscrizione Duale
 
-La chiave API z.ai è già configurata in `.env` (single source of truth).
+**IMPORTANTE**: Anthropic Max Plan e z.ai sono sistemi **separati e indipendenti**.
 
-## 🎯 Come Avviare Claude Code con GLM-4.6
+| Provider | Autenticazione | Sottoscrizione | Modello |
+|----------|---------------|----------------|---------|
+| **Anthropic** | OAuth (claude login) | Max Plan | Claude Sonnet 4.5 |
+| **z.ai** | API Key | Coding Plan | GLM-4.6 |
 
-### Opzione 1: Launcher Automatico (RACCOMANDATO) ✅
+> ⚠️ **Non puoi mescolare le sottoscrizioni**: z.ai richiede la propria API key e sottoscrizione separata.
+
+## ✅ Prerequisiti
+
+### 1. Anthropic Max Plan (Default)
+```bash
+# Verifica login
+claude auth status
+
+# Se non loggato:
+claude login
+```
+
+### 2. z.ai Coding Plan (Opzionale)
+1. Registrati su https://z.ai/
+2. Ottieni API key da https://z.ai/manage-apikey/apikey-list
+3. Aggiungi a `.env`:
+```bash
+ZAI_API_KEY=your-api-key-here
+```
+
+## 🚀 Avvio Rapido
+
+### Opzione 1: Anthropic Max Plan (Default) ✅
+
+```bash
+./start-devstream.sh start
+```
+
+**Cosa fa lo script**:
+- ✅ Verifica `claude auth status` (OAuth login)
+- ✅ Unset TUTTE le variabili API (preserva Max Plan)
+- ✅ Avvia DevStream MCP Server
+- ✅ Avvia Claude Code con Sonnet 4.5
+
+### Opzione 2: z.ai Provider
 
 ```bash
 ./start-devstream.sh start z.ai
 ```
 
 **Cosa fa lo script**:
-- ✅ Carica `.env` (root) con tutte le API keys
-- ✅ Override `DEVSTREAM_LLM_PROVIDER=z.ai`
-- ✅ Source `.env.llm-providers` per configurazione provider
+- ✅ Valida `ZAI_API_KEY` in `.env`
 - ✅ Imposta `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`
-- ✅ Imposta `ANTHROPIC_API_KEY` dalla chiave z.ai in `.env`
-- ✅ Avvia DevStream MCP Server
-- ✅ Avvia Claude Code con z.ai backend
-
-### Opzione 2: Configurazione Manuale
-
-```bash
-# 1. Source root .env
-source .env
-
-# 2. Override provider
-export DEVSTREAM_LLM_PROVIDER=z.ai
-
-# 3. Source provider config
-source .env.llm-providers
-
-# 4. Avvia Claude Code
-claude
-```
-
-### Opzione 3: One-Liner (per test rapidi)
-
-```bash
-source .env && export DEVSTREAM_LLM_PROVIDER=z.ai && source .env.llm-providers && claude
-```
+- ✅ Imposta `ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY`
+- ✅ Avvia Claude Code con GLM-4.6
 
 ## 📊 Mapping Modelli
 
-| Claude Model | z.ai Model | Descrizione |
-|--------------|------------|-------------|
-| claude-opus-* | glm-4.6 | Flagship reasoning (massime prestazioni) |
-| claude-sonnet-4-5* | glm-4.6 | Stesso modello (cost-effective) |
-| claude-haiku-* | glm-4.5-air | Ultra-veloce (risposte rapide) |
+| Claude Model | Anthropic | z.ai | Descrizione |
+|--------------|-----------|------|-------------|
+| claude-opus-* | Opus 3.5 | glm-4.6 | Flagship reasoning |
+| claude-sonnet-4-5* | Sonnet 4.5 | glm-4.6 | Production |
+| claude-haiku-* | Haiku 3.5 | glm-4.5-air | Ultra-veloce |
 
-## 🧪 Test Connessione API
+## 🔄 Switching tra Providers
 
+### Da Anthropic a z.ai
 ```bash
-# Test rapido (già eseguito con successo ✅)
-./test_zai_connection.sh 5a51efd5fd5f450886ef55241ded3dc7.0NT4E02LD3NLHftM
-
-# Output atteso:
-# ✅ Connessione z.ai RIUSCITA!
-# 📝 Risposta API: "Connessione z.ai funzionante!"
-# 🎯 Provider z.ai pronto per l'uso con Claude Code
+./start-devstream.sh restart z.ai
 ```
 
-## 📝 Architettura Configurazione
+### Da z.ai ad Anthropic
+```bash
+./start-devstream.sh restart anthropic
+```
 
-```
-Root .env (SINGLE SOURCE OF TRUTH)
-  ↓
-  └─ ZAI_API_KEY=5a51efd5fd5f450886ef55241ded3dc7.0NT4E02LD3NLHftM
-     ↓
-     ├─ .env.llm-providers (provider config)
-     │  └─ ZAI_API_KEY=${ZAI_API_KEY:-} (inherited)
-     │
-     └─ scripts/providers/z.ai.sh
-        └─ source .env → ZAI_API_KEY available
-```
+> ✅ **Preservazione Settings**: hooks e mcpServers sono preservati automaticamente
 
 ## 🔐 Gestione Credenziali
 
@@ -83,53 +84,96 @@ Root .env (SINGLE SOURCE OF TRUTH)
 
 ```bash
 # .env (root) - UNICA FONTE
-ZAI_API_KEY=5a51efd5fd5f450886ef55241ded3dc7.0NT4E02LD3NLHftM
-SYNTHETIC_API_KEY=syn_2931060d44941b8444d15620bb6dc23d
-OPENROUTER_API_KEY=sk-or-v1-...
+ZAI_API_KEY=your-zai-api-key-here
+CONTEXT7_API_KEY=your-context7-api-key-here
+GITHUB_PERSONAL_ACCESS_TOKEN=your-github-token-here
 ```
 
 ## ⚙️ Verifica Stato Corrente
 
 ```bash
 # Check provider attivo
-grep "^DEVSTREAM_LLM_PROVIDER=" .env.llm-providers
+echo $ANTHROPIC_BASE_URL
 
-# Check chiave API z.ai
+# Output:
+# - (vuoto) = Anthropic Max Plan
+# - https://api.z.ai/api/anthropic = z.ai
+
+# Verifica autenticazione Anthropic
+claude auth status
+
+# Verifica chiave z.ai
 grep "^ZAI_API_KEY=" .env
-
-# Test completo
-bash scripts/providers/z.ai.sh
 ```
 
 ## 🚨 Troubleshooting
 
-### Errore: "ZAI_API_KEY not set"
+### Errore: "Not logged into Claude.ai"
+```bash
+# Login OAuth per Anthropic Max Plan
+claude login
+
+# Verifica
+claude auth status
+```
+
+### Errore: "ZAI_API_KEY not configured"
 ```bash
 # Verifica .env contiene la chiave
 cat .env | grep ZAI_API_KEY
 
 # Se mancante, aggiungi:
-echo "ZAI_API_KEY=5a51efd5fd5f450886ef55241ded3dc7.0NT4E02LD3NLHftM" >> .env
+echo "ZAI_API_KEY=your-api-key-here" >> .env
 ```
 
-### Errore: "API 401 Unauthorized"
+### Errore: "API 401 Unauthorized" (z.ai)
 - Verifica credito disponibile su https://z.ai/
 - Controlla validità chiave API su https://z.ai/manage-apikey/apikey-list
+- Verifica sottoscrizione Coding Plan attiva
 
-### Modelli non trovati
-- GLM-4.6 disponibile per account Pro
-- GLM-4.5-air disponibile per tutti
+### Max Plan non funziona dopo switch z.ai
+```bash
+# Reset completo ad Anthropic
+./start-devstream.sh restart anthropic
+
+# Verifica tutte le variabili API sono unset
+env | grep ANTHROPIC
+# Output atteso: (nessun output, tutte unset)
+```
+
+## 📚 Architettura Semplificata
+
+```
+start-devstream.sh
+  ↓
+  ├─ Provider: anthropic (default)
+  │  ├─ Verifica: claude auth status
+  │  ├─ Unset: ANTHROPIC_BASE_URL
+  │  ├─ Unset: ANTHROPIC_API_KEY
+  │  └─ Unset: ANTHROPIC_AUTH_TOKEN
+  │
+  └─ Provider: z.ai
+     ├─ Valida: ZAI_API_KEY in .env
+     ├─ Export: ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
+     └─ Export: ANTHROPIC_AUTH_TOKEN=$ZAI_API_KEY
+```
 
 ## 📚 Risorse
 
-- **z.ai Dashboard**: https://z.ai/
+### Anthropic
+- **Max Plan Dashboard**: https://claude.ai/
+- **CLI Login**: `claude login`
+- **Documentazione**: https://docs.anthropic.com/
+
+### z.ai
+- **Dashboard**: https://z.ai/
 - **API Keys**: https://z.ai/manage-apikey/apikey-list
-- **Documentazione**: https://z.ai/docs
+- **Documentazione**: https://docs.z.ai/
 - **Modelli disponibili**: https://open.bigmodel.cn/
 
 ---
 
-**Status**: ✅ Configurazione validata (2025-10-06)
-**Test API**: ✅ Connessione riuscita (HTTP 200)
-**Credenziali**: ✅ Root .env configurato
+**Status**: ✅ Dual subscription model (2025-10-06)
+**Providers**: Anthropic Max Plan (OAuth) + z.ai Coding Plan (API)
+**Architettura**: Semplificata (rimosso .env.llm-providers)
 **Ready**: ✅ Pronto per produzione
