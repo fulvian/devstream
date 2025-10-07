@@ -128,13 +128,17 @@ class MemoryStorage:
                 if (memory.embedding and
                     hasattr(self, '_vec_table_available') and self._vec_table_available):
 
-                    embedding_json = json.dumps(memory.embedding)
+                    # Convert embedding to binary format for sqlite-vec
+                    import struct
+                    embedding_array = np.array(memory.embedding, dtype=np.float32)
+                    embedding_binary = embedding_array.tobytes()
+
                     await conn.execute(text("""
-                        INSERT OR REPLACE INTO vec_semantic_memory(memory_id, content_embedding)
+                        INSERT OR REPLACE INTO vec_semantic_memory(memory_id, embedding)
                         VALUES (:memory_id, :embedding)
                     """), {
                         'memory_id': memory.id,
-                        'embedding': embedding_json
+                        'embedding': embedding_binary
                     })
 
                     logger.info(f"Synced memory to virtual tables", memory_id=memory.id, has_embedding=True)
@@ -367,15 +371,22 @@ class MemoryStorage:
             VectorSearchError: Se la search fallisce
         """
         try:
-            # Convert numpy array to format expected by sqlite-vec
-            query_vector = json.dumps(query_embedding.tolist())
+            # Convert numpy array to binary format expected by sqlite-vec
+            query_array = np.array(query_embedding, dtype=np.float32)
+            query_vector = query_array.tobytes()
 
             async with self.connection_pool.engine.connect() as conn:
+                # CRITICAL: Load sqlite-vec extension before vector search
+                # Each connection from pool needs extension loaded separately
+                raw_conn = await conn.get_raw_connection()
+                if not vec_manager.load_extension(raw_conn):
+                    logger.warning("sqlite-vec extension not available - vector search may fail")
+
                 result = await conn.execute(
                     text("""
                     SELECT memory_id, distance
                     FROM vec_semantic_memory
-                    WHERE content_embedding MATCH :query_vector
+                    WHERE embedding MATCH :query_vector
                     ORDER BY distance
                     LIMIT :k
                     """),
@@ -404,6 +415,12 @@ class MemoryStorage:
         """
         try:
             async with self.connection_pool.engine.connect() as conn:
+                # Load sqlite-vec extension for consistency (includes FTS5)
+                # Each connection from pool needs extension loaded separately
+                raw_conn = await conn.get_raw_connection()
+                if not vec_manager.load_extension(raw_conn):
+                    logger.warning("sqlite-vec extension not available - FTS search may fail")
+
                 result = await conn.execute(
                     text("""
                     SELECT memory_id, rank
