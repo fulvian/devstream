@@ -33,7 +33,7 @@ class EmbeddingConfig(BaseModel):
 
     Context7-validated settings for Ollama integration and batch processing.
     """
-    model_name: str = Field(default="gemma2", description="Ollama model for embeddings")
+    model_name: str = Field(default="embeddinggemma:300m", description="Ollama model for embeddings")
     batch_size: int = Field(default=10, ge=1, le=50, description="Batch size for processing")
     max_retries: int = Field(default=3, ge=1, le=10, description="Maximum retry attempts")
     base_delay: float = Field(default=1.0, ge=0.1, le=10.0, description="Base delay for exponential backoff (seconds)")
@@ -143,11 +143,11 @@ class EmbeddingGenerator:
                     input=text
                 )
 
-                embedding = response.get('embeddings', [])
+                embedding = response.embeddings
                 if not embedding:
                     raise EmbeddingGenerationError("Empty embedding response")
 
-                embedding_vector = embedding[0]
+                embedding_vector = embedding
                 logger.debug("Embedding generated successfully",
                            dimension=len(embedding_vector),
                            attempt=attempt)

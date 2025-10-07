@@ -276,7 +276,11 @@ class ContextAssembler:
         header_parts = []
 
         if memory.content_type:
-            header_parts.append(f"Type: {memory.content_type.value}")
+            # Handle both enum and string content types
+            if hasattr(memory.content_type, 'value'):
+                header_parts.append(f"Type: {memory.content_type.value}")
+            else:
+                header_parts.append(f"Type: {memory.content_type}")
 
         if memory.task_id:
             header_parts.append(f"Task: {memory.task_id}")

@@ -421,6 +421,31 @@ class MemoryStorage:
             logger.error(f"FTS search failed: {e}")
             raise StorageError(f"FTS search failed: {e}") from e
 
+    def _safe_json_loads(self, value):
+        """
+        Safely load JSON data, handling cases where data is already deserialized.
+
+        Args:
+            value: Value to load, can be string, list, dict, or None
+
+        Returns:
+            Deserialized Python object or empty default
+        """
+        if value is None:
+            return None
+        elif isinstance(value, (list, dict)):
+            # Data is already deserialized
+            return value
+        elif isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                # Return empty default if JSON parsing fails
+                return []
+        else:
+            # Return empty default for unexpected types
+            return []
+
     def _row_to_memory_entry(self, row) -> MemoryEntry:
         """Convert database row to MemoryEntry model."""
         return MemoryEntry(
@@ -430,20 +455,20 @@ class MemoryStorage:
             task_id=row.task_id,
             content=row.content,
             content_type=ContentType(row.content_type),
-            content_format=ContentFormat(row.content_format),
-            keywords=json.loads(row.keywords) if row.keywords else [],
-            entities=json.loads(row.entities) if row.entities else [],
-            sentiment=row.sentiment,
-            complexity_score=row.complexity_score,
-            embedding=json.loads(row.embedding) if row.embedding else None,
+            content_format=ContentFormat(row.content_format) if row.content_format is not None else ContentFormat.TEXT,
+            keywords=self._safe_json_loads(row.keywords) or [],
+            entities=self._safe_json_loads(row.entities) or [],
+            sentiment=row.sentiment if row.sentiment is not None else 0.0,
+            complexity_score=row.complexity_score if row.complexity_score is not None else 1,
+            embedding=self._safe_json_loads(row.embedding),
             embedding_model=row.embedding_model,
             embedding_dimension=row.embedding_dimension,
-            context_snapshot=json.loads(row.context_snapshot) if row.context_snapshot else {},
-            related_memory_ids=json.loads(row.related_memory_ids) if row.related_memory_ids else [],
-            access_count=row.access_count,
+            context_snapshot=self._safe_json_loads(row.context_snapshot) or {},
+            related_memory_ids=self._safe_json_loads(row.related_memory_ids) or [],
+            access_count=row.access_count if row.access_count is not None else 0,
             last_accessed_at=row.last_accessed_at,
-            relevance_score=row.relevance_score,
-            is_archived=row.is_archived,
+            relevance_score=row.relevance_score if row.relevance_score is not None else 1.0,
+            is_archived=row.is_archived if row.is_archived is not None else False,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
