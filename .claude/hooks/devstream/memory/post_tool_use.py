@@ -35,7 +35,7 @@ from typing import Optional, Dict, Any, List
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
 from cchooks import safe_create_context, PostToolUseContext
-from devstream_base import DevStreamHookBase
+from devstream_base import DevStreamHookBase, FeedbackLevel
 from mcp_client import get_mcp_client
 from ollama_client import OllamaEmbeddingClient
 from sqlite_vec_helper import get_db_connection_with_vec
@@ -46,6 +46,16 @@ from rate_limiter import (
     has_ollama_capacity
 )
 from real_time_capture import get_real_time_capture
+
+# Protocol State Manager imports (FASE 2 Integration)
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'protocol'))
+    from protocol_state_manager import ProtocolStateManager, ProtocolStep
+    from task_state_sync import TaskStateSync
+    PROTOCOL_SYNC_AVAILABLE = True
+except ImportError as e:
+    PROTOCOL_SYNC_AVAILABLE = False
+    _SYNC_IMPORT_ERROR = str(e)
 
 
 class PostToolUseHook:
@@ -71,6 +81,21 @@ class PostToolUseHook:
 
         # FASE 1: Initialize RealTimeDataCapture for enhanced file monitoring
         self.real_time_capture = get_real_time_capture(str(project_root))
+
+        # FASE 2: Protocol State Sync components
+        self.protocol_manager = None
+        self.task_sync = None
+
+        if PROTOCOL_SYNC_AVAILABLE:
+            try:
+                self.protocol_manager = ProtocolStateManager()
+                self.task_sync = TaskStateSync()
+                self.base.debug_log("Protocol sync components initialized")
+            except Exception as e:
+                self.base.user_feedback(
+                    f"Protocol sync initialization failed: {e}",
+                    FeedbackLevel.MINIMAL
+                )
 
     def extract_content_preview(self, content: str, max_length: int = 300) -> str:
         """
@@ -828,9 +853,10 @@ class PostToolUseHook:
 
     async def process(self, context: PostToolUseContext) -> None:
         """
-        Main hook processing logic - Enhanced multi-tool capture.
+        Main hook processing logic - Enhanced multi-tool capture with Protocol State Sync (FASE 2).
 
         FASE 3 Enhancement: Multi-tool routing with filtering and metadata extraction.
+        FASE 2 Integration: Automatic protocol state synchronization for task progress.
 
         Args:
             context: PostToolUse context from cchooks
@@ -846,6 +872,50 @@ class PostToolUseHook:
             self.base.debug_log("Memory storage disabled")
             context.output.exit_success()
             return
+
+        # FASE 2: Protocol State Synchronization
+        if PROTOCOL_SYNC_AVAILABLE and self.protocol_manager and self.task_sync:
+            try:
+                # Get current protocol state
+                current_state = await self.protocol_manager.get_current_state()
+
+                # Only sync if we're in an active protocol session
+                if current_state.protocol_step != ProtocolStep.IDLE:
+                    # Build tool execution context for sync
+                    tool_execution = {
+                        "tool": context.tool_name,
+                        "input": {
+                            "file_path": getattr(context, 'file_path', None),
+                            "content_preview": getattr(context, 'content', '')[:200] if hasattr(context, 'content') else None
+                        },
+                        "output": {
+                            "success": getattr(context, 'success', True),
+                            "preview": str(context)[:200] if hasattr(context, '__str__') else None
+                        },
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                    # Sync task progress automatically
+                    await self.task_sync.sync_task_progress(tool_execution)
+
+                    # Check if this tool execution completes a step
+                    step_completion = await self.task_sync.check_step_completion(tool_execution)
+                    if step_completion.completed:
+                        # Advance protocol step automatically
+                        updated_state = await self.protocol_manager.advance_step(
+                            current_state,
+                            step_completion.next_step
+                        )
+                        self.base.debug_log(
+                            f"Protocol step advanced: {current_state.protocol_step} → {step_completion.next_step} (tool: {context.tool_name})"
+                        )
+
+            except Exception as e:
+                self.base.user_feedback(
+                    f"Protocol state sync error: {e}",
+                    FeedbackLevel.MINIMAL
+                )
+                # Continue with normal processing on error
 
         # Extract tool information
         tool_name = context.tool_name

@@ -23,7 +23,7 @@ from typing import Optional, Dict, Any, List
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
 from cchooks import safe_create_context, UserPromptSubmitContext
-from devstream_base import DevStreamHookBase
+from devstream_base import DevStreamHookBase, FeedbackLevel
 from context7_client import Context7Client
 from mcp_client import get_mcp_client
 
@@ -36,6 +36,17 @@ try:
 except ImportError as e:
     AGENT_DELEGATION_AVAILABLE = False
     _DELEGATION_IMPORT_ERROR = str(e)
+
+# Protocol State Manager imports (FASE 2 Integration)
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'protocol'))
+    from protocol_state_manager import ProtocolStateManager, ProtocolStep
+    from enforcement_gate import EnforcementGate
+    from task_first_handler import TaskFirstHandler
+    PROTOCOL_ENFORCEMENT_AVAILABLE = True
+except ImportError as e:
+    PROTOCOL_ENFORCEMENT_AVAILABLE = False
+    _PROTOCOL_IMPORT_ERROR = str(e)
 
 
 class UserPromptSubmitHook:
@@ -51,6 +62,23 @@ class UserPromptSubmitHook:
 
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher = None
+
+        # Protocol Enforcement components (FASE 2 Integration)
+        self.protocol_manager = None
+        self.enforcement_gate = None
+        self.task_handler = None
+
+        if PROTOCOL_ENFORCEMENT_AVAILABLE:
+            try:
+                self.protocol_manager = ProtocolStateManager()
+                self.enforcement_gate = EnforcementGate()
+                self.task_handler = TaskFirstHandler()
+                self.base.debug_log("Protocol enforcement components initialized")
+            except Exception as e:
+                self.base.user_feedback(
+                    f"Protocol enforcement initialization failed: {e}",
+                    FeedbackLevel.MINIMAL
+                )
         self.agent_router = None
 
         if AGENT_DELEGATION_AVAILABLE:
@@ -473,7 +501,7 @@ This query appears to be related to task management. Consider using TodoWrite fo
 
     async def process(self, context: UserPromptSubmitContext) -> None:
         """
-        Main hook processing logic.
+        Main hook processing logic with Protocol Enforcement integration (FASE 2).
 
         Args:
             context: UserPromptSubmit context from cchooks
@@ -491,6 +519,68 @@ This query appears to be related to task management. Consider using TodoWrite fo
             self.base.debug_log("User input too short for enhancement")
             context.output.exit_success()
             return
+
+        # FASE 2: Protocol Enforcement Integration
+        if PROTOCOL_ENFORCEMENT_AVAILABLE and self.protocol_manager:
+            try:
+                # Get current protocol state
+                current_state = await self.protocol_manager.get_current_state()
+
+                # Analyze task complexity for protocol enforcement
+                complexity = await self.estimate_task_complexity(user_input)
+
+                if complexity["enforce_protocol"]:
+                    self.base.debug_log(
+                        f"Protocol enforcement triggered: {complexity['triggers']} (score: {complexity['complexity_score']})"
+                    )
+
+                    # Check if we need to enforce task creation first (Step 0)
+                    if current_state.protocol_step == ProtocolStep.IDLE:
+                        task_id = await self.task_handler.enforce_task_creation(user_input)
+                        if task_id:
+                            # Advance to DISCUSSION step with task created
+                            current_state = await self.protocol_manager.advance_step(
+                                current_state,
+                                ProtocolStep.DISCUSSION,
+                                task_id=task_id
+                            )
+                            self.base.debug_log(
+                                f"Task creation enforced: {task_id} → {current_state.protocol_step}"
+                            )
+
+                    # Show enforcement gate and handle user response
+                    enforcement_result = await self.enforcement_gate.show_enforcement_gate(
+                        user_input,
+                        complexity,
+                        current_state
+                    )
+
+                    if enforcement_result["decision"] == "cancel":
+                        self.base.debug_log("User cancelled protocol enforcement")
+                        context.output.exit_success()
+                        return
+                    elif enforcement_result["decision"] == "override":
+                        await self.enforcement_gate.log_override_decision(
+                            user_input,
+                            complexity,
+                            enforcement_result["risks_acknowledged"]
+                        )
+                        self.base.user_feedback(
+                            "⚠️ Protocol override chosen - quality gates disabled",
+                            FeedbackLevel.MINIMAL
+                        )
+                        # Continue with normal processing but with gates disabled
+                    else:  # protocol
+                        self.base.debug_log("Protocol enforcement approved")
+                        # Add protocol instructions to user input
+                        user_input = f"{user_input}\n\n{enforcement_result['protocol_instructions']}"
+
+            except Exception as e:
+                self.base.user_feedback(
+                    f"Protocol enforcement error: {e}",
+                    FeedbackLevel.MINIMAL
+                )
+                # Continue with normal processing on error
 
         self.base.debug_log(f"Processing user query: {len(user_input)} chars")
 
