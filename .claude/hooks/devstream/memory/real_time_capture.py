@@ -38,8 +38,12 @@ from typing import Optional, Dict, Any, List, Set
 from datetime import datetime
 from dataclasses import dataclass
 
-# Watchdog imports (Context7 pattern)
+# Watchdog imports (Context7 pattern: use PollingObserver on macOS to prevent kernel panics)
+# See: https://github.com/gorakhargosh/watchdog/blob/master/README.rst
+# FSEvents on macOS can cause segmentation faults and kernel panics
+import platform
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
 # Add parent directories to path
@@ -50,6 +54,16 @@ from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
 from debouncer import debounce
 from logger import get_devstream_logger
+
+# Import crash prevention (Context7 best practice integration)
+try:
+    from monitoring.crash_prevention import get_crash_monitor, should_disable_file_monitoring
+except ImportError:
+    # Fallback if crash prevention module not available
+    def get_crash_monitor():
+        return None
+    def should_disable_file_monitoring():
+        return False
 
 # Initialize structured logging
 logger = get_devstream_logger("real_time_capture").logger
@@ -167,8 +181,17 @@ class RealTimeDataCapture:
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.db_path = str(self.project_root / 'data' / 'devstream.db')
 
-        # Watchdog observer (Context7 pattern)
-        self.observer: Optional[Observer] = None
+        # Watchdog observer (Context7 best practice: use PollingObserver on macOS)
+        # Prevents kernel panics and segmentation faults with FSEvents
+        if platform.system() == 'Darwin':  # macOS
+            self.observer: Optional[PollingObserver] = None
+            self.observer_type = 'polling'  # Safer but less responsive
+            logger.info("Using PollingObserver on macOS (prevents FSEvents kernel panics)")
+        else:
+            self.observer: Optional[Observer] = None
+            self.observer_type = 'native'   # Use native observer on other platforms
+            logger.info("Using native Observer")
+
         self.event_handler = RealTimeFileEventHandler(self)
 
         # Debounced event tracking (Context7 pattern: reduce noise)
@@ -182,9 +205,15 @@ class RealTimeDataCapture:
         self.is_running = False
         self.start_time: Optional[datetime] = None
 
+        # Crash prevention (Context7 integration)
+        self.crash_monitor = get_crash_monitor()
+        if self.crash_monitor:
+            logger.info("Crash prevention monitor integrated")
+
         logger.info("RealTimeDataCapture initialized",
                    project_root=str(self.project_root),
-                   monitored_extensions=list(self.MONITORED_EXTENSIONS))
+                   monitored_extensions=list(self.MONITORED_EXTENSIONS),
+                   observer_type=self.observer_type)
 
     def _should_monitor_file(self, file_path: str) -> bool:
         """
@@ -470,9 +499,29 @@ class RealTimeDataCapture:
             logger.warning("Real-time monitoring already running")
             return True
 
+        # CRASH PREVENTION: Safety check before starting monitoring
+        if self.crash_monitor and should_disable_file_monitoring():
+            logger.error("File monitoring DISABLED for crash prevention")
+            return False
+
+        # Assess current risk level
+        if self.crash_monitor:
+            risk_metrics = self.crash_monitor.assess_crash_risk()
+            if risk_metrics.risk_level.value in ['critical', 'high']:
+                logger.warning("High system risk detected for file monitoring",
+                             risk_level=risk_metrics.risk_level.value,
+                             warnings=risk_metrics.warnings)
+
         try:
-            # Initialize watchdog observer
-            self.observer = Observer()
+            # Initialize watchdog observer (Context7 best practice for macOS)
+            if self.observer_type == 'polling':
+                # Use PollingObserver on macOS to prevent kernel panics
+                self.observer = PollingObserver()
+                logger.info("PollingObserver initialized (macOS FSEvents-safe)")
+            else:
+                # Use native observer on other platforms
+                self.observer = Observer()
+                logger.info("Native Observer initialized")
 
             # Determine paths to monitor
             monitor_paths = paths or [str(self.project_root)]
