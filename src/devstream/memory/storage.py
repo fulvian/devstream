@@ -19,6 +19,7 @@ from ..database.connection import ConnectionPool
 from ..database.sqlite_vec_manager import vec_manager
 from .models import MemoryEntry, ContentType, ContentFormat
 from .exceptions import StorageError, VectorSearchError
+from .embedding_generator import EmbeddingGenerator, EmbeddingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,20 @@ class MemoryStorage:
     sia storage relazionale che vector search operations.
     """
 
-    def __init__(self, connection_pool: ConnectionPool):
+    def __init__(self, connection_pool: ConnectionPool, embedding_config: Optional[EmbeddingConfig] = None):
         """
-        Initialize storage con database manager.
+        Initialize storage con database manager e embedding generator.
 
         Args:
-            db_manager: Configured database manager instance
+            connection_pool: Database connection pool instance
+            embedding_config: Optional configuration for embedding generation
         """
         self.connection_pool = connection_pool
         self.metadata = MetaData()
         self._init_tables()
+
+        # FASE 2: Initialize embedding generator with Context7 patterns
+        self.embedding_generator = EmbeddingGenerator(connection_pool, embedding_config)
 
     def _init_tables(self) -> None:
         """Initialize memory-specific tables and virtual tables."""
@@ -123,13 +128,17 @@ class MemoryStorage:
                 if (memory.embedding and
                     hasattr(self, '_vec_table_available') and self._vec_table_available):
 
-                    embedding_json = json.dumps(memory.embedding)
+                    # Convert embedding to binary format for sqlite-vec
+                    import struct
+                    embedding_array = np.array(memory.embedding, dtype=np.float32)
+                    embedding_binary = embedding_array.tobytes()
+
                     await conn.execute(text("""
-                        INSERT OR REPLACE INTO vec_semantic_memory(memory_id, content_embedding)
+                        INSERT OR REPLACE INTO vec_semantic_memory(memory_id, embedding)
                         VALUES (:memory_id, :embedding)
                     """), {
                         'memory_id': memory.id,
-                        'embedding': embedding_json
+                        'embedding': embedding_binary
                     })
 
                     logger.info(f"Synced memory to virtual tables", memory_id=memory.id, has_embedding=True)
@@ -362,15 +371,22 @@ class MemoryStorage:
             VectorSearchError: Se la search fallisce
         """
         try:
-            # Convert numpy array to format expected by sqlite-vec
-            query_vector = json.dumps(query_embedding.tolist())
+            # Convert numpy array to binary format expected by sqlite-vec
+            query_array = np.array(query_embedding, dtype=np.float32)
+            query_vector = query_array.tobytes()
 
             async with self.connection_pool.engine.connect() as conn:
+                # CRITICAL: Load sqlite-vec extension before vector search
+                # Each connection from pool needs extension loaded separately
+                raw_conn = await conn.get_raw_connection()
+                if not vec_manager.load_extension(raw_conn):
+                    logger.warning("sqlite-vec extension not available - vector search may fail")
+
                 result = await conn.execute(
                     text("""
                     SELECT memory_id, distance
                     FROM vec_semantic_memory
-                    WHERE content_embedding MATCH :query_vector
+                    WHERE embedding MATCH :query_vector
                     ORDER BY distance
                     LIMIT :k
                     """),
@@ -399,6 +415,12 @@ class MemoryStorage:
         """
         try:
             async with self.connection_pool.engine.connect() as conn:
+                # Load sqlite-vec extension for consistency (includes FTS5)
+                # Each connection from pool needs extension loaded separately
+                raw_conn = await conn.get_raw_connection()
+                if not vec_manager.load_extension(raw_conn):
+                    logger.warning("sqlite-vec extension not available - FTS search may fail")
+
                 result = await conn.execute(
                     text("""
                     SELECT memory_id, rank
@@ -416,6 +438,31 @@ class MemoryStorage:
             logger.error(f"FTS search failed: {e}")
             raise StorageError(f"FTS search failed: {e}") from e
 
+    def _safe_json_loads(self, value):
+        """
+        Safely load JSON data, handling cases where data is already deserialized.
+
+        Args:
+            value: Value to load, can be string, list, dict, or None
+
+        Returns:
+            Deserialized Python object or empty default
+        """
+        if value is None:
+            return None
+        elif isinstance(value, (list, dict)):
+            # Data is already deserialized
+            return value
+        elif isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                # Return empty default if JSON parsing fails
+                return []
+        else:
+            # Return empty default for unexpected types
+            return []
+
     def _row_to_memory_entry(self, row) -> MemoryEntry:
         """Convert database row to MemoryEntry model."""
         return MemoryEntry(
@@ -425,20 +472,148 @@ class MemoryStorage:
             task_id=row.task_id,
             content=row.content,
             content_type=ContentType(row.content_type),
-            content_format=ContentFormat(row.content_format),
-            keywords=json.loads(row.keywords) if row.keywords else [],
-            entities=json.loads(row.entities) if row.entities else [],
-            sentiment=row.sentiment,
-            complexity_score=row.complexity_score,
-            embedding=json.loads(row.embedding) if row.embedding else None,
+            content_format=ContentFormat(row.content_format) if row.content_format is not None else ContentFormat.TEXT,
+            keywords=self._safe_json_loads(row.keywords) or [],
+            entities=self._safe_json_loads(row.entities) or [],
+            sentiment=row.sentiment if row.sentiment is not None else 0.0,
+            complexity_score=row.complexity_score if row.complexity_score is not None else 1,
+            embedding=self._safe_json_loads(row.embedding),
             embedding_model=row.embedding_model,
             embedding_dimension=row.embedding_dimension,
-            context_snapshot=json.loads(row.context_snapshot) if row.context_snapshot else {},
-            related_memory_ids=json.loads(row.related_memory_ids) if row.related_memory_ids else [],
-            access_count=row.access_count,
+            context_snapshot=self._safe_json_loads(row.context_snapshot) or {},
+            related_memory_ids=self._safe_json_loads(row.related_memory_ids) or [],
+            access_count=row.access_count if row.access_count is not None else 0,
             last_accessed_at=row.last_accessed_at,
-            relevance_score=row.relevance_score,
-            is_archived=row.is_archived,
+            relevance_score=row.relevance_score if row.relevance_score is not None else 1.0,
+            is_archived=row.is_archived if row.is_archived is not None else False,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+    async def store_memories_with_embeddings(self, memory_entries: list[MemoryEntry]) -> list[MemoryEntry]:
+        """
+        Store multiple memory entries with automatic embedding generation.
+
+        FASE 2: Context7 pattern for batch embedding generation and atomic storage.
+        Uses the EmbeddingGenerator for robust Ollama integration with retry logic
+        and atomic batch operations.
+
+        Args:
+            memory_entries: List of memory entries to store with embeddings
+
+        Returns:
+            List of stored memory entries with embeddings populated
+
+        Raises:
+            StorageError: If storage operation fails
+            EmbeddingGenerationError: If embedding generation fails critically
+        """
+        if not memory_entries:
+            logger.info("No memory entries provided for storage with embeddings")
+            return []
+
+        logger.info("Starting batch storage with embedding generation",
+                   count=len(memory_entries),
+                   model=self.embedding_generator.config.model_name)
+
+        try:
+            # Step 1: Ensure model is available
+            if not await self.embedding_generator.pull_model_if_needed():
+                logger.warning("Embedding model not available, proceeding without embeddings")
+                # Store without embeddings rather than failing entirely
+                return [await self.store_memory(entry) for entry in memory_entries]
+
+            # Step 2: Generate embeddings and store atomically
+            processed_entries = await self.embedding_generator.generate_and_store_embeddings(memory_entries)
+
+            logger.info("Batch storage with embeddings completed",
+                       total_stored=len(processed_entries),
+                       with_embeddings=sum(1 for e in processed_entries if e.embedding))
+
+            return processed_entries
+
+        except Exception as e:
+            logger.error("Failed to store memories with embeddings",
+                       count=len(memory_entries),
+                       error=str(e))
+            raise StorageError(f"Batch storage with embeddings failed: {e}") from e
+
+    async def update_memory_embeddings(self, memory_ids: list[str]) -> list[MemoryEntry]:
+        """
+        Generate and update embeddings for existing memory entries.
+
+        FASE 2: Batch embedding generation for existing entries without embeddings.
+
+        Args:
+            memory_ids: List of memory IDs to update with embeddings
+
+        Returns:
+            List of updated memory entries with embeddings
+
+        Raises:
+            StorageError: If update operation fails
+        """
+        if not memory_ids:
+            logger.info("No memory IDs provided for embedding update")
+            return []
+
+        logger.info("Starting embedding update for existing memories",
+                   count=len(memory_ids))
+
+        try:
+            # Step 1: Retrieve existing memory entries
+            existing_entries = []
+            for memory_id in memory_ids:
+                entry = await self.get_memory(memory_id)
+                if entry:
+                    existing_entries.append(entry)
+                else:
+                    logger.warning("Memory entry not found for embedding update", memory_id=memory_id)
+
+            if not existing_entries:
+                logger.info("No existing memory entries found for embedding update")
+                return []
+
+            # Step 2: Generate embeddings and update
+            updated_entries = await self.embedding_generator.generate_and_store_embeddings(existing_entries)
+
+            logger.info("Embedding update completed",
+                   total_requested=len(memory_ids),
+                   found_entries=len(existing_entries),
+                   updated_entries=len(updated_entries),
+                   with_embeddings=sum(1 for e in updated_entries if e.embedding))
+
+            return updated_entries
+
+        except Exception as e:
+            logger.error("Failed to update memory embeddings",
+                       memory_ids=memory_ids,
+                       error=str(e))
+            raise StorageError(f"Memory embedding update failed: {e}") from e
+
+    async def get_embedding_generator_status(self) -> dict[str, Any]:
+        """
+        Get status information about the embedding generator.
+
+        Returns:
+            Dictionary with embedding generator status information
+        """
+        try:
+            model_available = await self.embedding_generator.check_model_availability()
+
+            return {
+                "model_name": self.embedding_generator.config.model_name,
+                "model_available": model_available,
+                "batch_size": self.embedding_generator.config.batch_size,
+                "max_retries": self.embedding_generator.config.max_retries,
+                "base_delay": self.embedding_generator.config.base_delay,
+                "timeout": self.embedding_generator.config.timeout,
+            }
+
+        except Exception as e:
+            logger.error("Failed to get embedding generator status", error=str(e))
+            return {
+                "error": str(e),
+                "model_name": getattr(self.embedding_generator.config, 'model_name', 'unknown'),
+                "model_available": False,
+            }

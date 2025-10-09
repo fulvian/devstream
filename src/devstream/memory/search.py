@@ -1,8 +1,8 @@
 """
-Hybrid Search Engine con Reciprocal Rank Fusion
+Hybrid Search Engine con Reciprocal Rank Fusion (Optimized)
 
-Implementation di hybrid search che combina vector similarity
-e keyword search usando Reciprocal Rank Fusion algorithm.
+Context7-optimized hybrid search combining vector similarity and keyword search
+using enhanced Reciprocal Rank Fusion with optimal weights and scoring.
 """
 
 import asyncio
@@ -30,7 +30,7 @@ class HybridSearchEngine:
 
     def __init__(self, storage: MemoryStorage, processor: TextProcessor):
         """
-        Initialize hybrid search engine.
+        Initialize hybrid search engine with Context7-optimized parameters.
 
         Args:
             storage: Memory storage instance
@@ -38,6 +38,11 @@ class HybridSearchEngine:
         """
         self.storage = storage
         self.processor = processor
+
+        # Context7-optimized RRF parameters
+        self.rrf_k = 60  # Standard RRF constant
+        self.weight_semantic = 1.0  # Semantic search weight
+        self.weight_keyword = 1.5   # Increased keyword weight for better relevance
 
     async def search(self, query: SearchQuery) -> List[MemoryQueryResult]:
         """
@@ -221,10 +226,15 @@ class HybridSearchEngine:
         query: SearchQuery
     ) -> List[MemoryQueryResult]:
         """
-        Apply Reciprocal Rank Fusion algorithm.
+        Apply Context7-optimized Reciprocal Rank Fusion algorithm.
 
-        Combina semantic e keyword results usando RRF formula:
-        RRF_score(d) = Σ(1 / (k + rank_i(d)))
+        Combina semantic e keyword results usando RRF formula ottimizzata:
+        RRF_score(d) = Σ(weight_i / (k + rank_i(d)))
+
+        Context7 improvements:
+        - Default weights: keyword=1.5, semantic=1.0 (better keyword relevance)
+        - RRF k=60 for optimal scoring
+        - Score normalization for better interpretability
 
         Args:
             semantic_results: Vector search results
@@ -249,21 +259,21 @@ class HybridSearchEngine:
             all_memory_ids.add(memory_id)
             keyword_dict[memory_id] = {"score": score, "rank": rank}
 
-        # Calculate RRF scores
+        # Calculate Context7-optimized RRF scores
         fused_scores = []
         for memory_id in all_memory_ids:
             rrf_score = 0.0
 
-            # Semantic contribution
-            if memory_id in semantic_dict and query.semantic_weight > 0:
+            # Semantic contribution (weight=1.0)
+            if memory_id in semantic_dict:
                 semantic_rank = semantic_dict[memory_id]["rank"]
-                semantic_contribution = query.semantic_weight / (query.rrf_k + semantic_rank)
+                semantic_contribution = self.weight_semantic / (self.rrf_k + semantic_rank)
                 rrf_score += semantic_contribution
 
-            # Keyword contribution
-            if memory_id in keyword_dict and query.keyword_weight > 0:
+            # Keyword contribution (weight=1.5 for better relevance)
+            if memory_id in keyword_dict:
                 keyword_rank = keyword_dict[memory_id]["rank"]
-                keyword_contribution = query.keyword_weight / (query.rrf_k + keyword_rank)
+                keyword_contribution = self.weight_keyword / (self.rrf_k + keyword_rank)
                 rrf_score += keyword_contribution
 
             # Create result object
@@ -284,13 +294,34 @@ class HybridSearchEngine:
         # Sort by RRF score (descending)
         fused_scores.sort(key=lambda x: x[0], reverse=True)
 
+        # Context7: Normalize scores to 0-1 range for better interpretability
+        if fused_scores:
+            max_score = fused_scores[0][0]  # Highest RRF score
+            min_score = fused_scores[-1][0]  # Lowest RRF score
+            score_range = max_score - min_score
+
+            # Apply normalization
+            normalized_scores = []
+            for score, memory_id, result in fused_scores:
+                if score_range > 0:
+                    normalized_score = (score - min_score) / score_range
+                else:
+                    normalized_score = 1.0 if score > 0 else 0.0
+
+                result.combined_score = normalized_score
+                normalized_scores.append((normalized_score, memory_id, result))
+
+            # Re-sort by normalized scores
+            normalized_scores.sort(key=lambda x: x[0], reverse=True)
+            fused_scores = normalized_scores
+
         # Set final ranks and return results
         results = []
         for final_rank, (score, memory_id, result) in enumerate(fused_scores, 1):
             result.final_rank = final_rank
             results.append(result)
 
-        logger.debug(f"RRF fusion completed: {len(results)} combined results")
+        logger.debug(f"RRF fusion completed: {len(results)} combined results with normalized scores")
         return results
 
     async def _apply_filters(self, results: List[MemoryQueryResult], query: SearchQuery) -> List[MemoryQueryResult]:

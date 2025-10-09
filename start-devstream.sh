@@ -102,6 +102,202 @@ except Exception as e:
   fi
 }
 
+# Function to handle authentication switching
+switch_auth_provider() {
+  local provider="${1:-anthropic}"
+
+  print_status "Switching authentication provider to: $provider"
+
+  case "$provider" in
+    "z.ai")
+      # Validate z.ai API key
+      if [ -z "${ZAI_API_KEY:-}" ]; then
+        print_error "ZAI_API_KEY not configured in .env"
+        print_error "Get your API key from: https://z.ai/manage-apikey/apikey-list"
+        return 1
+      fi
+
+      # Set z.ai environment with CORRECT variable names per official docs
+      # See: https://docs.z.ai/scenario-example/develop-tools/claude
+      export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+      export ANTHROPIC_AUTH_TOKEN="$ZAI_API_KEY"  # z.ai requires AUTH_TOKEN, not API_KEY
+
+      # Configure Claude Code settings for GLM-4.6
+      configure_claude_settings_for_zai
+
+      print_status "✅ Switched to z.ai (GLM-4.6)"
+      print_info "   Base URL: $ANTHROPIC_BASE_URL"
+      print_info "   Auth Token: ${ZAI_API_KEY:0:10}..."
+      print_info "   Model: GLM-4.6 (configured in settings.json)"
+      ;;
+    "anthropic"|"")
+      # Reset to Anthropic Max Plan (OAuth-based authentication)
+      # CRITICAL: Must unset ALL API env vars to preserve Max Plan subscription
+      # See: https://docs.anthropic.com/en/api/client-sdks
+      print_info "Resetting to Anthropic Max Plan (OAuth)..."
+
+      unset ANTHROPIC_BASE_URL      # Remove z.ai override
+      unset ANTHROPIC_API_KEY       # CRITICAL: Prevents Max Plan bypass
+      unset ANTHROPIC_AUTH_TOKEN    # CRITICAL: Prevents Max Plan bypass
+
+      # Reset Claude Code settings to default
+      reset_claude_settings_to_default
+
+      # Verify Claude.ai authentication (non-blocking)
+      if command -v claude >/dev/null 2>&1; then
+        if ! claude auth status 2>/dev/null | grep -q "Logged in"; then
+          print_warning "Claude CLI not logged in"
+          print_info "   If Claude Code login fails, run: claude login"
+          print_info "   Visit: https://claude.ai/"
+        else
+          print_status "✅ Claude CLI authenticated"
+          print_info "   Using Claude.ai subscription via OAuth login"
+        fi
+      else
+        print_info "Claude CLI not found (authentication handled by Claude Code)"
+      fi
+
+      print_status "✅ Switched to Anthropic Max Plan (OAuth)"
+      print_info "   Authentication: Claude Code OAuth login"
+      ;;
+    *)
+      print_error "Unknown provider: $provider"
+      print_info "Supported providers: anthropic, z.ai"
+      return 1
+      ;;
+  esac
+}
+
+# Function to configure Claude Code settings for z.ai
+configure_claude_settings_for_zai() {
+  local settings_file="$HOME/.claude/settings.json"
+
+  print_status "Configuring Claude Code settings for GLM-4.6..."
+
+  # Backup existing settings
+  if [ -f "$settings_file" ]; then
+    cp "$settings_file" "$settings_file.backup-zai-$(date +%Y%m%d_%H%M%S)"
+    print_info "✅ Backed up existing settings"
+  fi
+
+  # Use Python for robust JSON manipulation (best practice from Context7)
+  "$VENV_DIR/bin/python" << EOF
+import json
+import os
+
+settings_file = "$settings_file"
+
+# Read existing settings or create new
+existing_data = {}
+if os.path.exists(settings_file):
+    try:
+        with open(settings_file, 'r') as f:
+            existing_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        print("Warning: Could not parse existing settings, creating new ones")
+
+# Preserve hooks and mcpServers if they exist
+preserved_data = {
+    "hooks": existing_data.get("hooks", {}),
+    "mcpServers": existing_data.get("mcpServers", {}),
+    "alwaysThinkingEnabled": existing_data.get("alwaysThinkingEnabled", False)
+}
+
+# Create new configuration
+new_config = {
+    **preserved_data,
+    "model": "glm-4.6",
+    "env": {
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.6",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air"
+    }
+}
+
+# Write new settings
+with open(settings_file, 'w') as f:
+    json.dump(new_config, f, indent=2)
+
+print("✅ Claude Code settings updated successfully")
+EOF
+
+  if [ $? -eq 0 ]; then
+    print_status "✅ Claude Code configured for GLM-4.6"
+  else
+    print_error "❌ Failed to configure Claude Code settings"
+    return 1
+  fi
+}
+
+# Function to reset Claude Code settings to default
+reset_claude_settings_to_default() {
+  local settings_file="$HOME/.claude/settings.json"
+
+  print_status "Resetting Claude Code settings to default..."
+
+  if [ -f "$settings_file" ]; then
+    # Use Python for robust JSON manipulation
+    "$VENV_DIR/bin/python" << EOF
+import json
+import os
+
+settings_file = "$settings_file"
+
+# Read existing settings
+if os.path.exists(settings_file):
+    try:
+        with open(settings_file, 'r') as f:
+            existing_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        print("Warning: Could not parse existing settings")
+        exit(1)
+
+    # Preserve only hooks and mcpServers, remove model-specific config
+    default_config = {
+        "hooks": existing_data.get("hooks", {}),
+        "mcpServers": existing_data.get("mcpServers", {}),
+        "alwaysThinkingEnabled": existing_data.get("alwaysThinkingEnabled", False)
+    }
+
+    # Write default settings
+    with open(settings_file, 'w') as f:
+        json.dump(default_config, f, indent=2)
+
+    print("✅ Claude Code settings reset to default")
+else:
+    print("No settings file found")
+EOF
+  fi
+}
+
+# Function to load LLM provider configuration
+load_llm_provider() {
+  local provider="${1:-anthropic}"
+
+  print_status "Loading LLM Provider: $provider"
+
+  # Export provider for downstream functions
+  export DEVSTREAM_LLM_PROVIDER="$provider"
+
+  # Load root .env first (single source of truth)
+  if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+    export DEVSTREAM_ANTHROPIC_API_KEY_DEFAULT="${ANTHROPIC_API_KEY:-}"
+    print_info "Root .env loaded"
+  fi
+
+  # Switch authentication provider after base env is available
+  switch_auth_provider "$provider"
+
+  # For non-anthropic providers, load additional config
+  if [ "$provider" != "anthropic" ] && [ -f "$PROJECT_ROOT/.env.llm-providers" ]; then
+    source "$PROJECT_ROOT/.env.llm-providers"
+    print_info "Additional provider configuration loaded"
+  fi
+}
+
 # Function to load DevStream configuration
 load_devstream_config() {
   print_status "Loading DevStream configuration..."
@@ -194,6 +390,15 @@ check_prerequisites() {
     all_good=false
   else
     print_info "Node.js: $(node --version)"
+  fi
+
+  # Check jq (required for JSON manipulation)
+  if ! command -v jq >/dev/null 2>&1; then
+    print_error "jq not found - required for Claude Code settings management"
+    print_info "Install jq: brew install jq"
+    all_good=false
+  else
+    print_info "jq: $(jq --version)"
   fi
 
   # Check database
@@ -402,6 +607,37 @@ show_agent_status() {
   echo ""
 }
 
+prepare_codex_runtime() {
+  print_status "🛠️  Preparing Codex CLI integration"
+  echo ""
+
+  local codex_home="${DEVSTREAM_CODEX_HOME:-$PROJECT_ROOT/data/codex_home}"
+  export DEVSTREAM_CODEX_HOME="$codex_home"
+  mkdir -p "$codex_home/.claude/logs/devstream"
+
+  local sample_path="${DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH:-$PROJECT_ROOT/data/codex_event_samples.jsonl}"
+  export DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH="$sample_path"
+  mkdir -p "$(dirname "$sample_path")"
+
+  print_info "Codex home: $DEVSTREAM_CODEX_HOME"
+  print_info "Sample payload log: $DEVSTREAM_CODEX_SAMPLE_OUTPUT_PATH"
+  echo ""
+
+  print_feature "Comandi utili"
+  print_info "  • Singolo evento: DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh --event '{\"event_type\":\"session_start\",\"session_id\":\"demo\",\"cwd\":\".\"}'"
+  print_info "  • Sequenza JSON: DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh --file events_demo.json"
+  print_info "  • Stream STDIN: cat events_demo.jsonl | DEVSTREAM_CODEX_HOME=\"$codex_home\" scripts/codex/relay.sh"
+  echo ""
+
+  print_feature "Concorrenza Claude + Codex"
+  print_info "  • I log Codex sono isolati in $codex_home/.claude/logs/devstream"
+  print_info "  • Claude Code continua a usare ~/.claude/logs/devstream (nessun conflitto)"
+  print_info "  • Assicurati che l'MCP server sia in esecuzione una sola volta (condiviso da entrambi)"
+  echo ""
+
+  print_status "✅ Codex relay pronto: esegui i comandi sopra in una shell dedicata"
+}
+
 # Function to start Claude Code with DevStream
 start_claude_with_devstream() {
   print_status "🚀 Starting Claude Code with DevStream..."
@@ -410,6 +646,24 @@ start_claude_with_devstream() {
   print_info "═══════════════════════════════════════════════"
   print_info "  DevStream v2.0 - Production Ready"
   print_info "═══════════════════════════════════════════════"
+  echo ""
+
+  # Show active LLM provider
+  local active_provider="${DEVSTREAM_LLM_PROVIDER:-anthropic}"
+  local base_url="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+
+  print_feature "LLM Provider:"
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "  🤖 z.ai (GLM-4.6) - Zhipu AI flagship model"
+    print_info "  🧠 Reasoning Mode: ENABLED (default)"
+    print_info "  📏 Context Window: 200K tokens"
+    print_info "  🛠️  Tool Calling: Native support"
+  else
+    print_info "  🤖 Anthropic Max Plan - Claude Sonnet 4.5"
+    print_info "  🔐 Authentication: OAuth login"
+    print_info "  📏 Context Window: 200K tokens"
+  fi
+  print_info "  📡 Base URL: $base_url"
   echo ""
 
   print_feature "Core Features:"
@@ -435,12 +689,32 @@ start_claude_with_devstream() {
   print_info "  • Context7: Automatic library detection + docs"
   echo ""
 
+  # Show switching information
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "🔄 To switch back to Claude Sonnet:"
+    print_info "   ./start-devstream.sh restart anthropic"
+    print_info "   # or ./start-devstream.sh (default)"
+  else
+    print_info "🔄 To switch to GLM-4.6:"
+    print_info "   ./start-devstream.sh restart z.ai"
+  fi
+  echo ""
+
   print_status "Starting Claude Code..."
   echo ""
 
   # Start Claude Code in the project directory
   cd "$PROJECT_ROOT"
-  claude
+
+  # Check if z.ai provider is selected and use dedicated script
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "🔄 Launching Claude Code with GLM-4.6 via dedicated script..."
+    # Use the dedicated z.ai script which handles all environment setup
+    exec "$PROJECT_ROOT/scripts/start-claude-zai.sh"
+  else
+    # Default Claude Code launch for Anthropic provider
+    claude
+  fi
 }
 
 # Function to stop server
@@ -466,8 +740,14 @@ main() {
   echo ""
 
   # Parse command line arguments
-  case "${1:-start}" in
+  local command="${1:-start}"
+  local provider="${2:-anthropic}"
+
+  case "$command" in
     start)
+      # Load LLM provider configuration FIRST
+      load_llm_provider "$provider"
+
       # Check Python virtual environment
       check_python_venv
 
@@ -521,15 +801,33 @@ main() {
       show_agent_status
       ;;
 
+    codex)
+      load_llm_provider "$provider"
+      check_python_venv
+      load_devstream_config
+      check_prerequisites
+      start_mcp_server
+      prepare_codex_runtime
+      ;;
+
     restart)
       stop_server
       sleep 2
-      main start
+      main start "$provider"
       ;;
 
     *)
-      print_error "Unknown command: $1"
-      print_info "Usage: $0 {start|stop|status|restart}"
+      print_error "Unknown command: $command"
+      print_info "Usage: $0 {start|stop|status|restart} [provider]"
+      print_info "       $0 codex [provider]"
+      print_info ""
+      print_info "Available providers:"
+      print_info "  - anthropic (default, Anthropic Max Plan via OAuth)"
+      print_info "  - z.ai (GLM-4.6 via z.ai API)"
+      print_info ""
+      print_info "Examples:"
+      print_info "  $0 start           # Start with Anthropic Max Plan (OAuth)"
+      print_info "  $0 start z.ai      # Start with z.ai provider (GLM-4.6)"
       exit 1
       ;;
   esac

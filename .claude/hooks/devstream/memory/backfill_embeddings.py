@@ -26,6 +26,7 @@ import argparse
 # Add utils to path
 sys.path.append(str(Path(__file__).parent.parent / 'utils'))
 from logger import get_devstream_logger
+from sqlite_vec_helper import get_db_connection_with_vec
 
 
 @dataclass
@@ -79,26 +80,19 @@ class EmbeddingBackfillService:
 
     def _get_db_connection(self) -> sqlite3.Connection:
         """
-        Get database connection with sqlite-vec extension loaded.
+        Get database connection with sqlite-vec extension loaded via ConnectionManager.
 
-        Context7 Pattern (from sqlite-vec official docs):
-        - Use sqlite_vec.load(db) for proper extension loading
-        - This enables vec0 virtual tables and vector operations
-        - Triggers can then sync to vec_semantic_memory automatically
+        Uses centralized get_db_connection_with_vec() which:
+        - Enforces WAL mode via ConnectionManager
+        - Loads sqlite-vec extension for vector operations
+        - Provides thread-safe connection pooling
 
         Returns:
-            SQLite connection with sqlite-vec loaded
+            SQLite connection with sqlite-vec loaded and WAL mode enabled
         """
-        import sqlite_vec
-
-        conn = sqlite3.connect(self.db_path)
+        # Use helper that integrates ConnectionManager + sqlite-vec
+        conn = get_db_connection_with_vec(self.db_path)
         conn.row_factory = sqlite3.Row
-
-        # Context7 pattern: Load sqlite-vec extension properly
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
-
         return conn
 
     def get_records_without_embeddings(self) -> List[BackfillRecord]:
@@ -147,6 +141,10 @@ class EmbeddingBackfillService:
 
         Returns:
             List of embedding vectors or None if failed
+
+        Note:
+            Model auto-unloads after 5 minutes of inactivity (keep_alive="5m").
+            Cold start penalty: ~2-3s when model reloads after idle period.
         """
         try:
             # Dynamic import to avoid startup dependency
@@ -157,7 +155,8 @@ class EmbeddingBackfillService:
             # Context7 pattern: Batch embedding with array input
             response = ollama.embed(
                 model=self.ollama_model,
-                input=texts
+                input=texts,
+                keep_alive="5m"  # Auto-unload after 5 min inactivity
             )
 
             embeddings = response.get('embeddings', [])
@@ -372,7 +371,7 @@ async def main():
         '--db-path',
         type=str,
         default=None,
-        help="Path to DevStream database (default: data/devstream.db)"
+        help="Path to DevStream database (default: data.noindex/devstream.db)"
     )
 
     args = parser.parse_args()
@@ -382,7 +381,7 @@ async def main():
         db_path = args.db_path
     else:
         project_root = Path(__file__).parent.parent.parent.parent.parent
-        db_path = str(project_root / 'data' / 'devstream.db')
+        db_path = str(project_root / 'data.noindex' / 'devstream.db')
 
     # Create service
     service = EmbeddingBackfillService(

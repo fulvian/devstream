@@ -20,20 +20,28 @@ Source: https://github.com/asg017/sqlite-vec (Python Integration)
 import sqlite3
 from typing import Optional
 from pathlib import Path
+import sys
+
+# Import connection manager
+sys.path.append(str(Path(__file__).parent))
+from connection_manager import get_connection_manager
 
 
 def get_db_connection_with_vec(db_path: Optional[str] = None) -> sqlite3.Connection:
     """
-    Get SQLite connection with sqlite-vec extension loaded.
+    Get SQLite connection with sqlite-vec extension loaded via ConnectionManager.
+
+    Uses centralized ConnectionManager for automatic WAL mode enforcement,
+    then loads sqlite-vec extension for vector operations.
 
     Context7 Pattern: Enable extensions, load sqlite-vec, disable extensions.
-    This ensures vec0 virtual tables and triggers work correctly.
+    WAL mode and safety pragmas are automatically set by ConnectionManager.
 
     Args:
-        db_path: Path to database file (default: data/devstream.db)
+        db_path: Path to database file (default: data.noindex/devstream.db)
 
     Returns:
-        sqlite3.Connection with sqlite-vec extension loaded
+        sqlite3.Connection with sqlite-vec extension loaded and WAL mode enabled
 
     Raises:
         ImportError: If sqlite-vec not installed
@@ -45,11 +53,6 @@ def get_db_connection_with_vec(db_path: Optional[str] = None) -> sqlite3.Connect
         >>> version = cursor.execute("SELECT vec_version()").fetchone()[0]
         >>> print(f"vec_version={version}")
     """
-    # Determine database path
-    if db_path is None:
-        project_root = Path(__file__).parent.parent.parent.parent.parent
-        db_path = str(project_root / 'data' / 'devstream.db')
-
     try:
         # Import sqlite_vec (Context7 pattern)
         import sqlite_vec
@@ -58,8 +61,11 @@ def get_db_connection_with_vec(db_path: Optional[str] = None) -> sqlite3.Connect
             "sqlite-vec not installed. Install with: pip install sqlite-vec"
         ) from e
 
-    # Context7 Pattern: Load extension properly
-    conn = sqlite3.connect(db_path)
+    # Get connection via ConnectionManager (automatic WAL mode + safety pragmas)
+    manager = get_connection_manager(db_path)
+    conn = manager._get_thread_connection()
+
+    # Load sqlite-vec extension
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
@@ -93,7 +99,7 @@ def get_devstream_db() -> sqlite3.Connection:
     Convenience wrapper for get_db_connection_with_vec() with default path.
 
     Returns:
-        sqlite3.Connection to data/devstream.db with sqlite-vec loaded
+        sqlite3.Connection to data.noindex/devstream.db with sqlite-vec loaded
     """
     return get_db_connection_with_vec()
 
