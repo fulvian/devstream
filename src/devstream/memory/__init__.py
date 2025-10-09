@@ -41,6 +41,16 @@ from .storage import MemoryStorage
 from .processing import TextProcessor
 from .search import HybridSearchEngine
 from .context import ContextAssembler
+from .embedding_generator import EmbeddingGenerator, EmbeddingConfig, EmbeddingGenerationError
+from .quality_evaluator import (
+    RAGMetricsEvaluator,
+    EvaluationQuery,
+    EvaluationDataset,
+    EvaluationReport,
+    MetricResult,
+    MetricType,
+)
+from .memory_manager import MemoryManager
 from .exceptions import (
     MemoryError,
     StorageError,
@@ -68,6 +78,19 @@ __all__ = [
     "TextProcessor",
     "HybridSearchEngine",
     "ContextAssembler",
+    # FASE 2: Embedding generation
+    "EmbeddingGenerator",
+    "EmbeddingConfig",
+    "EmbeddingGenerationError",
+    # RAG Quality Evaluation
+    "RAGMetricsEvaluator",
+    "EvaluationQuery",
+    "EvaluationDataset",
+    "EvaluationReport",
+    "MetricResult",
+    "MetricType",
+    # High-level Interface
+    "MemoryManager",
     # Exceptions
     "MemoryError",
     "StorageError",

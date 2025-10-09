@@ -343,25 +343,42 @@ export class TaskTools {
         throw new Error(`Task not found: ${input.task_id}`);
       }
 
-      // Update task status
-      const updateFields: string[] = ['status = ?'];
-      const updateParams: any[] = [input.status];
+      // BEGIN TRANSACTION with SAVEPOINT (Context7-backed: SQLite checkpoint pattern)
+      // Savepoint allows granular rollback without canceling entire transaction
+      await this.database.execute('BEGIN TRANSACTION');
+      await this.database.execute('SAVEPOINT task_update_checkpoint');
 
-      // Set timestamps based on status
-      if (input.status === 'active' && !task.started_at) {
-        updateFields.push("started_at = datetime('now')");
-      } else if (['completed', 'failed', 'skipped'].includes(input.status) && !task.completed_at) {
-        updateFields.push("completed_at = datetime('now')");
-      }
+      try {
+        // Update task status
+        const updateFields: string[] = ['status = ?', "updated_at = datetime('now')"];
+        const updateParams: any[] = [input.status];
 
-      await this.database.execute(
-        `UPDATE micro_tasks SET ${updateFields.join(', ')} WHERE id = ?`,
-        [...updateParams, input.task_id]
-      );
+        // Set timestamps based on status
+        if (input.status === 'active' && !task.started_at) {
+          updateFields.push("started_at = datetime('now')");
+        } else if (['completed', 'failed', 'skipped'].includes(input.status) && !task.completed_at) {
+          updateFields.push("completed_at = datetime('now')");
+        }
 
-      // Store update notes in memory if provided
-      if (input.notes) {
-        await this.storeTaskUpdate(input.task_id, input.status, input.notes);
+        await this.database.execute(
+          `UPDATE micro_tasks SET ${updateFields.join(', ')} WHERE id = ?`,
+          [...updateParams, input.task_id]
+        );
+
+        // Store update notes in memory if provided
+        if (input.notes) {
+          await this.storeTaskUpdate(input.task_id, input.status, input.notes);
+        }
+
+        // RELEASE SAVEPOINT (commit successful update)
+        await this.database.execute('RELEASE SAVEPOINT task_update_checkpoint');
+        await this.database.execute('COMMIT');
+
+      } catch (savepointError) {
+        // ROLLBACK TO SAVEPOINT (restore state before update)
+        await this.database.execute('ROLLBACK TO SAVEPOINT task_update_checkpoint');
+        await this.database.execute('ROLLBACK');
+        throw savepointError;
       }
 
       return {

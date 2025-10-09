@@ -1,0 +1,51 @@
+{
+  "LOG": false,
+  "LOG_LEVEL": "info",
+  "CLAUDE_PATH": "",
+  "HOST": "127.0.0.1",
+  "PORT": 3456,
+  "APIKEY": "",
+  "API_TIMEOUT_MS": "600000",
+  "PROXY_URL": "",
+  "transformers": [],
+  "Providers": [
+    {
+      "name": "GLM46",
+      "api_base_url": "http://X.X.12.12:30000/v1/chat/completions",
+      "api_key": "0000",
+      "models": [
+        "zai-org/GLM-4.6"
+      ],
+      "transformer": {
+        "use": [
+          "OpenAI",
+          ["maxtoken", {"max_tokens": 200000}],
+          "enhancetool"
+        ],
+        "zai-org/GLM-4.6": {
+          "use": ["reasoning"]
+        }
+      }
+    }
+  ],
+  "StatusLine": {
+    "enabled": false,
+    "currentStyle": "default",
+    "default": {
+      "modules": []
+    },
+    "powerline": {
+      "modules": []
+    }
+  },
+  "Router": {
+    "default": "GLM46,zai-org/GLM-4.6",
+    "background": "GLM46,zai-org/GLM-4.6",
+    "think": "GLM46,zai-org/GLM-4.6",
+    "longContext": "GLM46,zai-org/GLM-4.6",
+    "longContextThreshold": 150000,
+    "webSearch": "",
+    "image": ""
+  },
+  "CUSTOM_ROUTER_PATH": ""
+}

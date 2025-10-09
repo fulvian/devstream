@@ -1,37 +1,91 @@
 #!/usr/bin/env node
 /**
  * DevStream Production Startup Script
- * Context7-compliant production deployment
+ * Context7-compliant production deployment with robust path resolution
  */
 
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { readFileSync } from 'fs';
+import { dirname, join, resolve } from 'path';
+import { readFileSync, existsSync } from 'fs';
 
-// Load production environment from .env.production
+// ============================================================================
+// Path Resolution (Context7 Pattern: import.meta.url + fileURLToPath)
+// ============================================================================
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const projectRoot = resolve(__dirname, '..'); // Navigate to project root
 
-try {
-  const envFile = readFileSync(join(__dirname, '.env.production'), 'utf8');
-  envFile.split('\n').forEach(line => {
-    const match = line.match(/^([^#=]+)=(.*)$/);
-    if (match) {
-      const key = match[1].trim();
-      const value = match[2].trim();
-      if (key && !process.env[key]) {
-        process.env[key] = value;
+/**
+ * Load environment variables from .env.production
+ * Override mode: Production config ALWAYS takes precedence
+ */
+function loadProductionEnv() {
+  const prodEnvPath = join(__dirname, '.env.production');
+
+  if (!existsSync(prodEnvPath)) {
+    console.warn('⚠️  .env.production not found, using environment defaults');
+    return;
+  }
+
+  try {
+    const envFile = readFileSync(prodEnvPath, 'utf8');
+    let loadedCount = 0;
+
+    envFile.split('\n').forEach(line => {
+      // Skip comments and empty lines
+      if (!line || line.trim().startsWith('#')) return;
+
+      const match = line.match(/^([^#=]+)=(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim().replace(/^["']|["']$/g, ''); // Remove quotes
+
+        if (key) {
+          // OVERRIDE MODE: Production config ALWAYS wins
+          process.env[key] = value;
+          loadedCount++;
+        }
       }
-    }
-  });
-} catch (err) {
-  console.warn('⚠️  Could not load .env.production, using defaults');
+    });
+
+    console.log(`✅ Loaded ${loadedCount} variables from .env.production`);
+  } catch (err) {
+    console.error(`❌ Error loading .env.production: ${err.message}`);
+    process.exit(1);
+  }
 }
+
+/**
+ * Resolve path relative to project root
+ * Supports both absolute paths and relative paths
+ *
+ * @param {string} configPath - Path from config (absolute or relative)
+ * @returns {string} Absolute resolved path
+ */
+function resolveProjectPath(configPath) {
+  // Already absolute? Use as-is
+  if (configPath.startsWith('/')) {
+    return configPath;
+  }
+
+  // Relative path: resolve from project root
+  return join(projectRoot, configPath);
+}
+
+// ============================================================================
+// Load Environment First
+// ============================================================================
+
+loadProductionEnv();
 
 console.log('🚀 DevStream Production Startup\n');
 console.log('='.repeat(70));
 
-// Import modules
+// ============================================================================
+// Import Modules (after environment loaded)
+// ============================================================================
+
 const { DevStreamDatabase } = await import('./dist/database.js');
 const { getOllamaClient } = await import('./dist/ollama-client.js');
 const { HybridSearchEngine } = await import('./dist/tools/hybrid-search.js');
@@ -41,7 +95,17 @@ async function startProduction() {
   try {
     // 1. Initialize Database
     console.log('\n📊 Step 1: Initializing database...');
-    const dbPath = process.env.DEVSTREAM_DB_PATH || '/Users/fulvioventura/devstream/data/devstream.db';
+    console.log(`   Project root:  ${projectRoot}`);
+    console.log(`   Script dir:    ${__dirname}`);
+    console.log(`   CWD:           ${process.cwd()}`);
+
+    // Resolve database path (supports both absolute and relative)
+    const dbPathRaw = process.env.DEVSTREAM_DB_PATH || 'data/devstream.db';
+    const dbPath = resolveProjectPath(dbPathRaw);
+
+    console.log(`   DB config:     ${dbPathRaw}`);
+    console.log(`   DB resolved:   ${dbPath}`);
+
     const database = new DevStreamDatabase(dbPath);
     await database.initialize();
     console.log(`✅ Database initialized: ${dbPath}`);
@@ -99,11 +163,12 @@ async function startProduction() {
     console.log('   - Operations:   OPERATIONAL_RUNBOOK.md');
 
     console.log('\n⚙️  Configuration:');
+    console.log(`   - Project Root: ${projectRoot}`);
     console.log(`   - Database:     ${dbPath}`);
-    console.log(`   - Ollama:       ${process.env.OLLAMA_HOST}`);
+    console.log(`   - Ollama:       ${process.env.OLLAMA_HOST || 'http://localhost:11434'}`);
     console.log(`   - Model:        ${model}`);
     console.log(`   - Metrics Port: ${metricsPort}`);
-    console.log(`   - Node Env:     ${process.env.NODE_ENV}`);
+    console.log(`   - Node Env:     ${process.env.NODE_ENV || 'development'}`);
 
     console.log('\n✨ MCP Server ready for Claude Code integration!');
     console.log('   Add this server to Claude Code MCP settings.\n');
@@ -112,21 +177,16 @@ async function startProduction() {
     console.log('Press Ctrl+C to stop...\n');
 
     // Graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\n\n⏳ Shutting down gracefully...');
+    const shutdown = async (signal) => {
+      console.log(`\n\n⏳ Received ${signal}, shutting down gracefully...`);
       await metricsServer.stop();
       console.log('✅ Metrics server stopped');
       console.log('👋 Goodbye!\n');
       process.exit(0);
-    });
+    };
 
-    process.on('SIGTERM', async () => {
-      console.log('\n\n⏳ Shutting down gracefully...');
-      await metricsServer.stop();
-      console.log('✅ Metrics server stopped');
-      console.log('👋 Goodbye!\n');
-      process.exit(0);
-    });
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   } catch (error) {
     console.error('\n❌ Production startup failed:', error.message);
@@ -135,6 +195,8 @@ async function startProduction() {
     console.error('   2. Verify Ollama is running: curl http://localhost:11434/api/tags');
     console.error('   3. Check metrics port is available: lsof -i :9090');
     console.error('   4. Review logs for detailed errors');
+    console.error(`   5. Project root: ${projectRoot}`);
+    console.error(`   6. DB path: ${process.env.DEVSTREAM_DB_PATH || 'NOT SET'}`);
     console.error('\n📖 See OPERATIONAL_RUNBOOK.md for more help\n');
     process.exit(1);
   }

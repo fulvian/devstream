@@ -51,10 +51,20 @@ class DevStreamLogger:
         Context7 Best Practice: Use structlog.configure with cache_logger_on_first_use
         for thread-safe, performance-optimized logging without logging.basicConfig issues.
 
+        CRITICAL FIX: Check if structlog is already configured to prevent "threads can only be started once" error.
+        structlog.configure() can only be called once per process.
+
         Args:
             log_level: Logging level string
         """
-        # Configure structlog ONLY (Context7 pattern - avoid logging.basicConfig in multi-logger scenarios)
+        # CRITICAL FIX: Check if structlog is already configured (Context7 best practice)
+        # This prevents the "threads can only be started once" error
+        if structlog.is_configured():
+            # Structlog already configured, just setup our specific handlers
+            self._setup_handlers_only(log_level)
+            return
+
+        # Configure structlog ONLY if not already configured (Context7 pattern)
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -73,19 +83,43 @@ class DevStreamLogger:
         )
 
         # Setup standard logging handlers manually (Context7 pattern - avoid basicConfig)
+        self._setup_handlers_only(log_level)
+
+    def _setup_handlers_only(self, log_level: str) -> None:
+        """
+        Setup logging handlers only, without reconfiguring structlog.
+
+        Called when structlog is already configured to prevent duplicate configuration.
+
+        Args:
+            log_level: Logging level string
+        """
+        # Setup standard logging handlers manually (Context7 pattern - avoid basicConfig)
         root_logger = logging.getLogger()
-        if not root_logger.handlers:
-            # Set level
+
+        # Check if we already have our hook-specific handler to avoid duplicates
+        hook_handler_name = f'devstream_{self.hook_name}_handler'
+        for handler in root_logger.handlers:
+            if getattr(handler, 'name', None) == hook_handler_name:
+                return  # Handler already exists
+
+        # Set level if not already set
+        if not root_logger.level or root_logger.level == logging.NOTSET:
             root_logger.setLevel(getattr(logging, log_level.upper()))
 
-            # Add file handler
-            file_handler = logging.FileHandler(self.log_dir / f'{self.hook_name}.jsonl')
-            file_handler.setFormatter(logging.Formatter('%(message)s'))
-            root_logger.addHandler(file_handler)
+        # Add file handler with unique name
+        file_handler = logging.FileHandler(self.log_dir / f'{self.hook_name}.jsonl')
+        file_handler.setFormatter(logging.Formatter('%(message)s'))
+        file_handler.name = hook_handler_name  # Name to track and avoid duplicates
+        root_logger.addHandler(file_handler)
 
-            # Add stderr handler
+        # Add stderr handler (only add once)
+        stderr_handler_name = 'devstream_stderr_handler'
+        has_stderr = any(getattr(h, 'name', None) == stderr_handler_name for h in root_logger.handlers)
+        if not has_stderr:
             stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter('%(message)s'))
+            stream_handler.name = stderr_handler_name
             root_logger.addHandler(stream_handler)
 
     def log_hook_start(

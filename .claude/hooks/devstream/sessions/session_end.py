@@ -40,6 +40,7 @@ Context7 Patterns:
 
 import sys
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -52,11 +53,13 @@ from cchooks import safe_create_context, SessionEndContext
 from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
 from ollama_client import OllamaEmbeddingClient
+from session_coordinator import get_session_coordinator
 
 # Import session components
 from session_data_extractor import SessionDataExtractor
 from session_summary_generator import SessionSummaryGenerator, format_session_for_storage
 from work_session_manager import WorkSessionManager
+from atomic_file_writer import write_atomic
 
 
 class SessionEndHook:
@@ -82,9 +85,66 @@ class SessionEndHook:
         self.session_manager = WorkSessionManager()
         self.ollama_client = OllamaEmbeddingClient()
 
+        # Session coordinator for multi-session management
+        self.coordinator = get_session_coordinator()
+
         # Database path
         project_root = Path(__file__).parent.parent.parent.parent.parent
-        self.db_path = str(project_root / 'data' / 'devstream.db')
+        self.db_path = str(project_root / 'data.noindex' / 'devstream.db')
+
+    def cleanup_ollama_models(self) -> bool:
+        """
+        Force unload Ollama models on session end.
+
+        Executes `ollama stop embeddinggemma:300m` to immediately release
+        model from memory (~1.21GB).
+
+        Returns:
+            True if cleanup successful, False otherwise
+
+        Note:
+            Non-blocking. Logs errors but doesn't raise exceptions to
+            prevent session end failure.
+        """
+        try:
+            result = subprocess.run(
+                ['ollama', 'stop', 'embeddinggemma:300m'],
+                capture_output=True,
+                timeout=5,  # 5-second timeout
+                text=True,
+                check=False  # Don't raise on non-zero exit
+            )
+
+            if result.returncode == 0:
+                self.base.debug_log(
+                    "Ollama models unloaded successfully "
+                    "(model=embeddinggemma:300m, memory_freed_mb=1210)"
+                )
+                return True
+            else:
+                self.base.debug_log(
+                    f"Ollama cleanup non-zero exit: returncode={result.returncode}, "
+                    f"stderr={result.stderr.strip()}"
+                )
+                return False
+
+        except subprocess.TimeoutExpired:
+            self.base.debug_log(
+                "Ollama cleanup timeout after 5s (command='ollama stop embeddinggemma:300m')"
+            )
+            return False
+
+        except FileNotFoundError:
+            self.base.debug_log(
+                "Ollama CLI not found - skip cleanup (note: Ollama may not be installed or not in PATH)"
+            )
+            return False
+
+        except Exception as e:
+            self.base.debug_log(
+                f"Ollama cleanup unexpected error: {str(e)} (error_type={type(e).__name__})"
+            )
+            return False
 
     async def get_active_session_id(self) -> Optional[str]:
         """
@@ -253,13 +313,14 @@ class SessionEndHook:
                 from session_data_extractor import MemoryStats
                 memory_stats = MemoryStats()
 
-            # Step 3: Extract task stats (time-range query)
+            # Step 3: Extract task stats (FASE 3: tracking-based with time fallback)
             self.base.debug_log("Step 3: Extracting task stats...")
 
             if session_data.started_at:
                 task_stats = await self.data_extractor.get_task_stats(
                     session_data.started_at,
-                    session_data.ended_at or datetime.now()
+                    session_data.ended_at or datetime.now(),
+                    session_data=session_data  # FASE 3: Pass session_data for tracking
                 )
                 self.base.debug_log(
                     f"Task stats: {task_stats.total_tasks} total, "
@@ -296,16 +357,34 @@ class SessionEndHook:
             else:
                 self.base.warning_feedback("Summary storage failed (non-blocking)")
 
-            # Step 5.5: Write summary to file for SessionStart hook
-            self.base.debug_log("Step 5.5: Writing summary to file...")
+            # Step 5.5: Write summary to file for SessionStart hook (ATOMIC)
+            self.base.debug_log("Step 5.5: Writing summary to marker file (atomic)...")
 
-            try:
-                summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
-                summary_file.parent.mkdir(parents=True, exist_ok=True)
-                summary_file.write_text(summary_markdown)
-                self.base.debug_log(f"Summary written to {summary_file}")
-            except Exception as e:
-                self.base.debug_log(f"Failed to write summary file: {e}")
+            summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+            # Ensure parent directory exists
+            summary_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Atomic write with logging
+            write_success = await write_atomic(summary_file, summary_markdown)
+
+            if write_success:
+                self.base.debug_log(
+                    f"✅ Marker file written atomically: {summary_file} "
+                    f"(source=session_end, size={len(summary_markdown)} chars)"
+                )
+
+                # Log marker file creation for telemetry
+                self.base.debug_log(
+                    f"📊 Marker file telemetry: "
+                    f"exists={summary_file.exists()}, "
+                    f"size={summary_file.stat().st_size if summary_file.exists() else 0}, "
+                    f"source=session_end"
+                )
+            else:
+                self.base.debug_log(
+                    f"❌ Marker file write failed: {summary_file} (source=session_end)"
+                )
 
             # Step 6: Update session status to "completed"
             self.base.debug_log("Step 6: Updating session status...")
@@ -313,13 +392,33 @@ class SessionEndHook:
             # Use WorkSessionManager to end session properly
             session_ended = await self.session_manager.end_session(
                 session_id=session_id,
-                summary=summary_markdown[:500]  # First 500 chars as summary
+                context_summary=summary_markdown[:500]  # First 500 chars as summary
             )
 
             if session_ended:
                 self.base.debug_log("Session status updated to completed")
             else:
                 self.base.warning_feedback("Session status update failed")
+
+            # Step 7: Cleanup Ollama models (non-blocking, best-effort)
+            self.base.debug_log("Step 7: Cleaning up Ollama models...")
+
+            cleanup_success = self.cleanup_ollama_models()
+            if cleanup_success:
+                self.base.debug_log("Ollama cleanup complete - models unloaded")
+            else:
+                self.base.debug_log("Ollama cleanup failed (non-critical, session end continues)")
+
+            # Step 8: Unregister session from coordinator
+            self.base.debug_log("Step 8: Unregistering session from coordinator...")
+
+            if self.coordinator.unregister_session(session_id):
+                active_count = self.coordinator.get_session_count()
+                self.base.debug_log(
+                    f"Session unregistered from coordinator (active sessions: {active_count})"
+                )
+            else:
+                self.base.debug_log("Session unregister failed (non-critical)")
 
             # Success feedback
             self.base.success_feedback(
@@ -333,17 +432,18 @@ class SessionEndHook:
             self.base.debug_log(f"Session end processing error: {e}")
             return False
 
-    async def process(self, context: SessionEndContext) -> None:
+    async def process(self, context: Optional[SessionEndContext]) -> None:
         """
         Main hook processing logic.
 
         Args:
-            context: SessionEnd context from cchooks
+            context: SessionEnd context from cchooks (or None if stdin empty)
         """
         # Check if hook should run
         if not self.base.should_run():
             self.base.debug_log("Hook disabled via config")
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
             return
 
         try:
@@ -352,7 +452,8 @@ class SessionEndHook:
 
             if not session_id:
                 self.base.debug_log("No active session to end")
-                context.output.exit_success()
+                if context:
+                    context.output.exit_success()
                 return
 
             # Process session end
@@ -363,21 +464,29 @@ class SessionEndHook:
                 self.base.warning_feedback("Session end processing failed")
 
             # Always allow session to end (graceful degradation)
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
 
         except Exception as e:
             # Non-blocking error - log and continue
             self.base.warning_feedback(f"SessionEnd error: {str(e)[:50]}")
-            context.output.exit_success()
+            if context:
+                context.output.exit_success()
 
 
 def main():
     """Main entry point for SessionEnd hook."""
-    # Create context using cchooks
-    ctx = safe_create_context()
+    # Try to create context using cchooks
+    ctx = None
+    try:
+        ctx = safe_create_context()
+    except (Exception, SystemExit) as e:
+        # stdin empty or invalid JSON - fallback to manual session lookup
+        print(f"⚠️  DevStream: No hook input, using fallback mode", file=sys.stderr)
+        ctx = None  # Explicitly set to None for fallback mode
 
-    # Verify it's SessionEnd context
-    if not isinstance(ctx, SessionEndContext):
+    # Verify it's SessionEnd context (if available)
+    if ctx and not isinstance(ctx, SessionEndContext):
         print(f"Error: Expected SessionEndContext, got {type(ctx)}", file=sys.stderr)
         sys.exit(1)
 
@@ -385,12 +494,17 @@ def main():
     hook = SessionEndHook()
 
     try:
-        # Run async processing
+        # Run async processing (hook will handle missing context internally)
         asyncio.run(hook.process(ctx))
     except Exception as e:
         # Graceful failure - non-blocking
-        print(f"⚠️  DevStream: SessionEnd error", file=sys.stderr)
-        ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        print(f"⚠️  DevStream: SessionEnd error: {str(e)}", file=sys.stderr)
+        if ctx:
+            ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")
+        else:
+            # No ctx - just exit gracefully
+            print("Summary generation attempted despite missing context", file=sys.stderr)
+            sys.exit(0)
 
 
 if __name__ == "__main__":

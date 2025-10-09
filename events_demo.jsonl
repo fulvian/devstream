@@ -1,0 +1,5 @@
+{"event_type":"session_start","session_id":"codex-demo","cwd":"."}
+{"event_type":"user_prompt_submit","session_id":"codex-demo","user_input":"Implement a new feature"}
+{"event_type":"tool_pre_execute","session_id":"codex-demo","tool_input":{"file_path":"src/app.py","content":"print(\"hello\")"}}
+{"event_type":"tool_post_execute","session_id":"codex-demo","tool_name":"Write","tool_input":{"file_path":"src/app.py","content":"print(\"hello\")"},"tool_result":{"success":true}}
+{"event_type":"session_stop","session_id":"codex-demo"}

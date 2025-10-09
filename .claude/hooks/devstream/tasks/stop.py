@@ -2,10 +2,13 @@
 """
 DevStream SessionEnd Hook - Session Summary & Memory Storage
 Lightweight session wrap-up executed on Claude Code session termination.
+
+B2 Behavioral Refinement: Uses SessionSummaryManager for centralized summary logic.
 """
 
 import sys
 import json
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -29,142 +32,28 @@ def log(message: str) -> None:
         pass  # Silent fail on logging errors
 
 
-def extract_session_summary() -> str:
+async def extract_session_summary() -> str:
     """
-    Extract structured summary from semantic memory following LangMem + Anthropic best practices.
-    Uses direct SQLite queries following sqlite-utils patterns.
+    Extract structured summary using SessionSummaryManager.
+    Delegates to centralized manager for consistency.
 
     Returns:
         Formatted summary string with session context
     """
     try:
-        import sqlite3
-        import re
-        from datetime import datetime, timedelta
+        # Import SessionSummaryManager
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'sessions'))
+        from session_summary_manager import SessionSummaryManager
 
-        # Get project root and database path
-        project_root = Path(__file__).parent.parent.parent.parent.parent
-        db_path = project_root / "data" / "devstream.db"
+        # Create manager and generate summary
+        manager = SessionSummaryManager()
+        success, summary = await manager.generate_and_store_summary()
 
-        if not db_path.exists():
-            log(f"⚠️ Database not found: {db_path}")
-            return generate_fallback_summary()
+        if success:
+            log(f"✅ Session summary generated successfully")
+        else:
+            log(f"⚠️ Summary generated with warnings")
 
-        # Connect to database
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        # Query recent memories (last 24 hours to capture session activity)
-        cutoff_time = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-
-        query = """
-        SELECT content, content_type, created_at, keywords
-        FROM semantic_memory
-        WHERE created_at >= ?
-        ORDER BY created_at DESC
-        LIMIT 100
-        """
-
-        cursor.execute(query, (cutoff_time,))
-        memories = cursor.fetchall()
-        conn.close()
-
-        if not memories:
-            log("⚠️ No recent memories found for summary extraction")
-            return generate_fallback_summary()
-
-        log(f"📊 Found {len(memories)} memories to analyze")
-
-        # Extract structured information from memories
-        completed_tasks = []
-        modified_files = set()
-        key_decisions = []
-        errors = []
-        session_context = []
-
-        for memory in memories:
-            content = memory['content']
-            content_lower = content.lower()
-            content_type = memory['content_type']
-
-            # Skip generic session-end markers
-            if 'Session Completed' in content and 'DevStream session ended' in content:
-                continue
-
-            # Extract completed tasks (TodoWrite completions)
-            if 'todo' in content_lower and any(kw in content_lower for kw in ['completed', 'done', '✅']):
-                # Extract task descriptions from markdown lists
-                task_lines = [
-                    line.strip('- *✅').strip()
-                    for line in content.split('\n')
-                    if line.strip().startswith(('- ', '* ', '✅'))
-                    and len(line.strip()) > 5
-                ]
-                completed_tasks.extend(task_lines[:5])
-
-            # Extract modified files (Edit/Write mentions)
-            if any(keyword in content_lower for keyword in ['edit', 'write', 'modified', 'updated', 'file']):
-                # Look for file paths with common patterns
-                file_patterns = [
-                    r'`([^`]+\.(py|md|json|ts|js|yaml|yml))`',  # Backtick-quoted files
-                    r'\.claude/hooks/[^\s]+\.py',
-                    r'/[a-zA-Z0-9_/]+\.(py|md|json|ts|js)',
-                    r'[a-zA-Z0-9_]+\.(py|md|json)',
-                ]
-                for pattern in file_patterns:
-                    matches = re.findall(pattern, content)
-                    if matches:
-                        # Handle tuple matches from groups
-                        for match in matches:
-                            if isinstance(match, tuple):
-                                modified_files.add(match[0])
-                            else:
-                                modified_files.add(match)
-
-            # Extract key decisions
-            if content_type == 'decision':
-                # Extract first meaningful sentence
-                sentences = content.split('.')
-                for sentence in sentences[:3]:
-                    sentence = sentence.strip()
-                    if len(sentence) > 30 and not sentence.startswith('#'):
-                        key_decisions.append(sentence)
-                        break
-
-            # Extract errors and issues
-            if any(marker in content for marker in ['❌', '⚠️']) or 'error' in content_lower or 'failed' in content_lower:
-                # Extract error context
-                error_lines = [line.strip() for line in content.split('\n') if '❌' in line or 'error' in line.lower()]
-                for error_line in error_lines[:3]:
-                    if len(error_line) > 20:
-                        errors.append(error_line[:200])
-
-            # Capture documentation and learning content for context
-            if content_type in ['documentation', 'learning'] and len(content) > 100:
-                # Extract title or first line
-                lines = [l.strip() for l in content.split('\n') if l.strip() and not l.strip().startswith('#')]
-                if lines:
-                    session_context.append(lines[0][:150])
-
-        # Deduplicate and clean
-        completed_tasks = list(dict.fromkeys(completed_tasks))[:6]
-        modified_files = sorted(list(modified_files))[:12]
-        key_decisions = list(dict.fromkeys(key_decisions))[:4]
-        errors = list(dict.fromkeys(errors))[:3]
-
-        # Generate structured summary with enhanced parameters
-        summary = generate_structured_summary(
-            completed_tasks=completed_tasks,
-            modified_files=modified_files,
-            key_decisions=key_decisions,
-            errors=errors,
-            session_context=session_context[:2],
-            session_start_time=None,  # Could extract from first memory timestamp
-            total_memories=len(memories)
-        )
-
-        log(f"✅ Extracted summary: {len(completed_tasks)} tasks, {len(modified_files)} files, {len(key_decisions)} decisions, {len(memories)} memories")
         return summary
 
     except Exception as e:
@@ -500,58 +389,17 @@ DevStream session completed. Unable to extract detailed summary from memory.
 """
 
 
-def store_session_end() -> tuple[bool, str]:
+async def store_session_end() -> tuple[bool, str]:
     """
-    Extract and store session summary in semantic memory.
-    Following Context7 best practice: enable_load_extension() + sqlite_vec.load()
+    Extract and store session summary using SessionSummaryManager.
+    Delegates all logic to centralized manager.
 
     Returns:
         Tuple of (success: bool, summary: str)
     """
     try:
-        import sqlite3
-        import sqlite_vec
-
-        # Extract structured summary from recent memories
-        summary = extract_session_summary()
-
-        # Store summary in database (Context7-compliant vec0 loading)
-        project_root = Path(__file__).parent.parent.parent.parent.parent
-        db_path = project_root / "data" / "devstream.db"
-
-        if db_path.exists():
-            # Connect and enable extension loading (Context7 best practice)
-            conn = sqlite3.connect(str(db_path))
-            conn.enable_load_extension(True)  # ✅ Enable loading
-            sqlite_vec.load(conn)              # ✅ Load vec0 extension
-            conn.enable_load_extension(False)  # ✅ Security: disable after load
-
-            cursor = conn.cursor()
-
-            # Generate MD5 hash for ID (matches existing schema pattern)
-            import hashlib
-            timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-            memory_id = hashlib.md5(f"session-summary-{timestamp_str}".encode()).hexdigest()
-
-            # Insert summary into semantic_memory (without embedding, so trigger won't activate vec0)
-            cursor.execute("""
-                INSERT INTO semantic_memory (id, content, content_type, keywords, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                memory_id,
-                summary,
-                "context",
-                "session-end,summary,devstream",
-                timestamp_str
-            ))
-
-            conn.commit()
-            conn.close()
-
-            log(f"✅ Session summary stored (id: {memory_id[:8]}..., {len(summary)} chars)")
-        else:
-            log("⚠️ Database not found, summary not stored")
-
+        # Extract and store summary using manager
+        summary = await extract_session_summary()
         return True, summary
 
     except Exception as e:
@@ -562,7 +410,7 @@ def store_session_end() -> tuple[bool, str]:
         return False, fallback_summary
 
 
-def main_logic():
+async def main_logic():
     """Main logic - silent execution with summary file creation."""
     # Read stdin (SessionEnd hook receives minimal input)
     session_id = "unknown"
@@ -574,7 +422,7 @@ def main_logic():
         log(f"⚠️ Failed to parse stdin: {e}")
 
     # Store session end marker and get summary
-    success, summary = store_session_end()
+    success, summary = await store_session_end()
 
     # Write summary to marker file for next SessionStart to display
     summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
@@ -612,8 +460,9 @@ def main():
     log("SessionEnd hook triggered")
 
     try:
-        # Run main logic (will handle sys.exit internally)
-        main_logic()
+        # Run async main logic
+        import asyncio
+        asyncio.run(main_logic())
         # main_logic() exits via sys.exit(0) - this line never reached
 
     except Exception as e:

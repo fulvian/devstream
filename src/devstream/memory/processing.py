@@ -241,14 +241,13 @@ class TextProcessor:
             EmbeddingError: Se l'embedding generation fallisce
         """
         try:
-            request = EmbeddingRequest(
-                model="embeddinggemma",
-                prompt=text,
+            # Use synchronous ollama client embed method
+            response = self.ollama_client.embed(
+                model="embeddinggemma:300m",
+                input=text,
                 options={"temperature": 0.0}  # Deterministic embeddings
             )
-
-            response = await self.ollama_client.generate_embedding(request)
-            return response.embedding
+            return response.embeddings
 
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")

@@ -21,7 +21,8 @@ const StoreMemoryInputSchema = z.object({
 const SearchMemoryInputSchema = z.object({
   query: z.string().min(1),
   content_type: z.enum(['code', 'documentation', 'context', 'output', 'error', 'decision', 'learning']).optional(),
-  limit: z.number().min(1).max(50).optional().default(10)
+  limit: z.number().min(1).max(50).optional().default(10),
+  min_relevance: z.number().min(0.0).max(1.0).optional().default(0.03)
 });
 
 export class MemoryTools {
@@ -52,7 +53,7 @@ export class MemoryTools {
       const importanceScore = this.calculateImportanceScore(input.content_type, input.content);
 
       // Context7 pattern: Generate embedding automatically for all content with metrics
-      console.log(`🧠 Generating embedding for content (${input.content.length} chars)...`);
+      console.error(`🧠 Generating embedding for content (${input.content.length} chars)...`);
       const embedding = await MetricsCollector.trackEmbeddingGeneration(
         this.ollamaClient.getDefaultModel(),
         async () => await this.ollamaClient.generateEmbedding(input.content)
@@ -66,7 +67,7 @@ export class MemoryTools {
         embeddingJson = JSON.stringify(embedding);
         embeddingModel = this.ollamaClient.getDefaultModel();
         embeddingDimension = embedding.length;
-        console.log(`✅ Embedding generated: ${embeddingDimension} dimensions using ${embeddingModel}`);
+        console.error(`✅ Embedding generated: ${embeddingDimension} dimensions using ${embeddingModel}`);
       } else {
         console.warn(`⚠️ Embedding generation failed - storing without vector search capability`);
       }
@@ -109,7 +110,7 @@ export class MemoryTools {
       // Context7 pattern: Sync to vec0 if embedding was generated
       if (embedding && this.database.getVectorSearchStatus()) {
         try {
-          console.log('📊 Syncing to vec0 vector search index...');
+          console.error('📊 Syncing to vec0 vector search index...');
           await MetricsCollector.trackDatabaseOperation('vec0_sync', async () =>
             await this.database.execute(`
               INSERT INTO vec_semantic_memory(embedding, content_type, memory_id, content_preview)
@@ -121,7 +122,7 @@ export class MemoryTools {
               input.content.substring(0, 200)
             ])
           );
-          console.log('✅ vec0 sync completed');
+          console.error('✅ vec0 sync completed');
         } catch (vecError) {
           console.warn('⚠️ vec0 sync failed:', vecError instanceof Error ? vecError.message : 'Unknown error');
           // Continue - FTS5 will still work via trigger
@@ -182,7 +183,7 @@ export class MemoryTools {
       const input = SearchMemoryInputSchema.parse(args);
 
       // Context7 pattern: Use HybridSearchEngine with RRF
-      console.log(`🔍 Performing hybrid search for: "${input.query}"`);
+      console.error(`🔍 Performing hybrid search for: "${input.query}"`);
       const results = await this.hybridSearch.search(input.query, {
         k: input.limit,
         rrf_k: 60,
@@ -190,10 +191,18 @@ export class MemoryTools {
         weight_vec: 1.0
       });
 
-      // Filter by content_type if specified
+      // Filter by minimum relevance threshold (≥ configured threshold, default 0.03)
+      const MIN_RELEVANCE_THRESHOLD = input.min_relevance;
+      console.error(`📊 Filtering results with minimum relevance threshold: ${MIN_RELEVANCE_THRESHOLD}`);
+
+      const relevanceFiltered = results.filter(r =>
+        r.combined_rank >= MIN_RELEVANCE_THRESHOLD
+      );
+
+      // Apply content_type filter AFTER relevance filtering
       const filteredResults = input.content_type
-        ? results.filter(r => r.content_type === input.content_type)
-        : results;
+        ? relevanceFiltered.filter(r => r.content_type === input.content_type)
+        : relevanceFiltered;
 
       if (filteredResults.length === 0) {
         return {
@@ -238,9 +247,10 @@ export class MemoryTools {
           learning: '🧠'
         }[result.content_type] || '📄';
 
-        // Context7 pattern: Show RRF combined rank
+        // Context7 pattern: Show RRF combined rank with updated classification
         const rankScore = (result.combined_rank * 100).toFixed(1);
-        const rankText = result.combined_rank > 0.05 ? 'HIGH' : result.combined_rank > 0.02 ? 'MEDIUM' : 'LOW';
+        const rankText = result.combined_rank >= 0.05 ? 'HIGH' :
+                         result.combined_rank >= 0.03 ? 'MEDIUM' : 'LOW';
 
         output += `${index + 1}. ${typeEmoji} **${result.content_type.toUpperCase()}** Memory\n`;
         output += `   📊 Relevance: ${rankText} (RRF Score: ${rankScore})\n`;

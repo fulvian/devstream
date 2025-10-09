@@ -29,10 +29,12 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / 'utils'))
 from common import DevStreamHookBase, get_project_context
 from logger import get_devstream_logger
+from session_coordinator import get_session_coordinator
 
-# Import WorkSessionManager
+# Import WorkSessionManager and cleanup utilities
 sys.path.append(str(Path(__file__).parent))
 from work_session_manager import WorkSessionManager
+from session_cleanup_utils import SessionCleanupManager
 
 
 class SessionStartHook:
@@ -51,6 +53,12 @@ class SessionStartHook:
         self.structured_logger = get_devstream_logger('session_start')
         self.logger = self.structured_logger.logger  # Compatibility
         self.session_manager = WorkSessionManager()
+
+        # Session coordinator for multi-session management
+        self.coordinator = get_session_coordinator()
+
+        # Enhanced cleanup manager for zombie session handling
+        self.cleanup_manager = SessionCleanupManager(self.coordinator)
 
     def get_session_id(self) -> str:
         """
@@ -88,6 +96,52 @@ class SessionStartHook:
         }
 
         try:
+            # Proactive cleanup of zombie sessions before checking limits
+            self.logger.info("Performing proactive session cleanup...")
+            cleanup_stats = self.cleanup_manager.aggressive_cleanup()
+
+            if cleanup_stats.zombie_sessions_cleaned > 0 or cleanup_stats.stale_sessions_cleaned > 0:
+                self.logger.info(
+                    f"Proactive cleanup removed {cleanup_stats.zombie_sessions_cleaned} zombie "
+                    f"and {cleanup_stats.stale_sessions_cleaned} stale sessions"
+                )
+
+            # Validate registry integrity
+            if not self.cleanup_manager.validate_and_fix_registry():
+                self.logger.warning("Registry validation failed, attempting emergency repair")
+                if not self.cleanup_manager.force_cleanup_all_sessions():
+                    raise RuntimeError("Failed to repair session registry")
+
+            # Check session limits via coordinator (after cleanup)
+            if self.coordinator.is_session_limit_reached():
+                # Emergency override if still at limit after cleanup
+                if self.cleanup_manager.EMERGENCY_OVERRIDE:
+                    self.logger.warning(
+                        f"Session limit still reached after cleanup, using emergency override"
+                    )
+                    # Force cleanup of all sessions as last resort
+                    if not self.cleanup_manager.force_cleanup_all_sessions():
+                        raise RuntimeError(
+                            f"Session limit reached ({self.coordinator.MAX_SESSIONS} sessions) "
+                            f"and emergency cleanup failed. "
+                            f"Please manually delete {self.coordinator.registry_path}"
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Session limit reached ({self.coordinator.MAX_SESSIONS} sessions). "
+                        f"Please close an existing session before starting a new one."
+                    )
+
+            # Register session with coordinator
+            db_path = self.session_manager.db_path
+            if not self.coordinator.register_session(session_id, db_path):
+                raise RuntimeError("Failed to register session with coordinator")
+
+            self.logger.info(
+                f"Session registered with coordinator: {session_id}",
+                extra={"active_sessions": self.coordinator.get_session_count()}
+            )
+
             # Resume or create session
             self.logger.info(f"Initializing session: {session_id}")
             session = await self.session_manager.resume_session(session_id)
@@ -123,6 +177,38 @@ class SessionStartHook:
 
         return results
 
+    async def display_previous_summary(self) -> None:
+        """
+        Display previous session summary if available.
+
+        B2 Behavioral Refinement: Shows summary from marker file.
+        """
+        summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+        if not summary_file.exists():
+            return
+
+        try:
+            with open(summary_file, "r") as f:
+                summary = f.read()
+
+            if summary and len(summary.strip()) > 0:
+                # Display summary to user
+                print("\n" + "=" * 70)
+                print("📋 PREVIOUS SESSION SUMMARY")
+                print("=" * 70)
+                print(summary)
+                print("=" * 70 + "\n")
+
+                self.logger.info("Displayed previous session summary")
+
+                # Delete marker file after display
+                summary_file.unlink()
+                self.logger.debug("Deleted summary marker file")
+
+        except Exception as e:
+            self.logger.error(f"Failed to display previous summary: {e}")
+
     async def run_hook(self, hook_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute SessionStart hook.
@@ -136,6 +222,9 @@ class SessionStartHook:
         self.structured_logger.log_hook_start(hook_data or {}, {
             "phase": "session_start"
         })
+
+        # Display previous session summary (if available)
+        await self.display_previous_summary()
 
         # Get session ID
         session_id = self.get_session_id()
@@ -178,4 +267,64 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    """
+    SessionStart hook entry point with asyncio loop safety.
+
+    Handles two execution contexts:
+    1. Claude Code hooks (event loop already running)
+    2. Standalone execution (no event loop)
+
+    Fix: Never call run_until_complete() on running loop.
+    Reference: https://docs.python.org/3/library/asyncio-task.html#asyncio.get_running_loop
+
+    Exception Handling:
+    - CancelledError: Task cancelled during execution (graceful warning)
+    - RuntimeError: No loop vs loop closed/thread mismatch (distinguish)
+    - Generic Exception: Catch-all with detailed logging + re-raise
+    """
+    import structlog
+
+    logger = structlog.get_logger()
+
+    try:
+        # Attempt to get existing running loop
+        loop = asyncio.get_running_loop()
+
+        # CORRECT: Schedule task in existing loop WITHOUT running it
+        # The loop is already running, task will execute automatically
+        task = loop.create_task(main())
+
+        logger.debug("SessionStart scheduled in existing event loop",
+                    loop_id=id(loop), task_repr=str(task))
+
+        # NOTE: Do NOT await or run_until_complete here!
+        # The hook framework will handle task completion.
+
+    except RuntimeError as e:
+        # Distinguish between "no running loop" vs other RuntimeErrors
+        if "no running event loop" in str(e).lower():
+            # Expected case: standalone execution without event loop
+            logger.debug("SessionStart creating new event loop")
+            try:
+                asyncio.run(main())
+            except asyncio.CancelledError:
+                logger.warning("SessionStart task cancelled during execution")
+            except Exception as ex:
+                logger.error("SessionStart execution failed",
+                           error=str(ex), error_type=type(ex).__name__)
+                raise
+        else:
+            # Other RuntimeError: loop closed, thread mismatch, etc.
+            logger.error("SessionStart asyncio runtime error",
+                        error=str(e), error_type="RuntimeError")
+            raise
+
+    except asyncio.CancelledError:
+        # Task cancelled in existing loop (non-critical)
+        logger.warning("SessionStart task cancelled in existing loop")
+
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.error("SessionStart unexpected error",
+                    error=str(e), error_type=type(e).__name__)
+        raise

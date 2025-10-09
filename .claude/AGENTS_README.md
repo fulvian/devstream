@@ -1,0 +1,170 @@
+---
+name: DevStream Agent System Overview
+description: Complete overview of the DevStream multi-stack agent system architecture and usage
+---
+
+# DevStream Multi-Stack Agent System
+
+## Overview
+
+DevStream utilizes a hierarchical team of specialized AI agents for efficient multi-stack development. Agents operate with isolated context windows and can be invoked directly or coordinated by the orchestrator.
+
+## Architecture
+
+**4-Level Hierarchy**:
+1. **Orchestrator** (tech-lead) - Coordinates multi-agent workflows
+2. **Domain Specialists** - Language/framework experts
+3. **Task Specialists** - Cross-domain skills *(Phase 2+)*
+4. **Quality Assurance** - Code review, security, debugging
+
+## Phase 1 Agents (Production Ready ✅)
+
+### tech-lead (Orchestrator)
+- **Purpose**: Multi-stack coordination and architecture decisions
+- **Tools**: Task, Read, Glob, Grep
+- **Use**: Complex features spanning multiple languages
+
+### python-specialist (Domain)
+- **Purpose**: Python 3.11+, FastAPI, async development
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Python APIs, async operations, testing
+
+### typescript-specialist (Domain)
+- **Purpose**: TypeScript, React, Next.js, Node.js
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Frontend components, Next.js apps, Node APIs
+
+### code-reviewer (QA)
+- **Purpose**: Quality, security, performance validation
+- **Tools**: Read, Grep, Glob, Bash (analysis focus)
+- **Use**: Auto-invoked before commits, manual reviews
+
+## Phase 2 Agents (Production Ready ✅)
+
+### rust-specialist (Domain)
+- **Purpose**: Rust development, memory safety, systems programming
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Memory-safe systems, zero-cost abstractions, high-performance
+
+### go-specialist (Domain)
+- **Purpose**: Go development, goroutines, cloud-native services
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Microservices, concurrent systems, simple deployment
+
+### database-specialist (Domain)
+- **Purpose**: Database design, optimization, query development
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Schema design, index optimization, query performance
+
+### devops-specialist (Domain)
+- **Purpose**: Containerization, CI/CD, infrastructure automation
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Docker, Kubernetes, deployment pipelines, IaC
+
+## Phase 3 Agents (Production Ready ✅)
+
+### testing-specialist (Task)
+- **Purpose**: Test strategy, coverage analysis, E2E testing
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Test architecture, quality validation, cross-stack testing
+
+### api-architect (Task)
+- **Purpose**: API design, OpenAPI specs, multi-stack coordination
+- **Tools**: Inherits all (full flexibility)
+- **Use**: RESTful architecture, API contracts, versioning strategies
+
+### performance-optimizer (Task)
+- **Purpose**: Profiling, optimization, scalability improvements
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Bottleneck identification, memory optimization, latency reduction
+
+### documentation-specialist (Task)
+- **Purpose**: Technical writing, API docs, architecture diagrams
+- **Tools**: Inherits all (full flexibility)
+- **Use**: User guides, OpenAPI docs, system documentation
+
+## Usage
+
+### Direct Invocation
+```bash
+@python-specialist Create FastAPI endpoint for user management
+@typescript-specialist Build React dashboard with charts
+@code-reviewer Review the implementation
+```
+
+### Orchestrated Workflow
+```bash
+@tech-lead Build full-stack user management feature
+
+# tech-lead will:
+# 1. Delegate @python-specialist for backend
+# 2. Delegate @typescript-specialist for frontend
+# 3. Invoke @code-reviewer for final validation
+```
+
+### Browse Agents
+```bash
+/agents  # Interactive agent browser in Claude Code
+```
+
+## Agent Format
+
+Agents use official Claude Code YAML frontmatter:
+
+```yaml
+---
+name: agent-name
+description: When this agent should be used...
+tools: Tool1, Tool2  # Optional - omit to inherit all
+model: sonnet        # Optional - sonnet, opus, haiku
+---
+
+System prompt defining agent expertise...
+```
+
+## Best Practices
+
+- ✅ Use `@tech-lead` for multi-stack coordination
+- ✅ Invoke specialists directly for single-language tasks
+- ✅ `@code-reviewer` validates before all commits
+- ✅ Agents have isolated context (no interference)
+- ✅ Tool inheritance (omit `tools:`) gives full flexibility
+
+## Phase 4 Agents (Production Ready ✅)
+
+### security-auditor (QA)
+- **Purpose**: Comprehensive security audits, threat modeling, compliance validation
+- **Tools**: Read, Grep, Glob, Bash (analysis focus)
+- **Use**: STRIDE threat modeling, OWASP checks, GDPR/SOC2 compliance
+
+### debugger (QA)
+- **Purpose**: Production debugging, root cause analysis, systematic investigation
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Scientific debugging methodology, pdb/debugpy, production incidents
+
+### refactoring-specialist (Task)
+- **Purpose**: Code refactoring, technical debt reduction, legacy code modernization
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Martin Fowler patterns, code smell elimination, SOLID principles
+
+### integration-specialist (Task)
+- **Purpose**: Third-party API integrations, OAuth flows, webhook systems
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Stripe, Twilio, AWS integrations, resilience patterns
+
+### migration-specialist (Task)
+- **Purpose**: Database migrations, framework upgrades, zero-downtime deployments
+- **Tools**: Inherits all (full flexibility)
+- **Use**: Alembic migrations, Python upgrades, blue-green deployments
+
+## Agent Statistics
+
+**Total Agents**: 17/17 (100% complete) ✅
+- Phase 1: 4 agents ✅ (Orchestrator + Core Specialists)
+- Phase 2: 4 agents ✅ (Extended Domain Specialists)
+- Phase 3: 4 agents ✅ (Task Specialists)
+- Phase 4: 5 agents ✅ (Advanced QA + Task Specialists)
+
+---
+
+*Generated by DevStream Agent System - Context7-compliant*

@@ -75,10 +75,10 @@ class WorkSessionManager:
         self.structured_logger = get_devstream_logger('work_session_manager')
         self.logger = self.structured_logger.logger  # Compatibility
 
-        # Database configuration
+        # Database configuration (updated to use data.noindex for Spotlight exclusion)
         if db_path is None:
             project_root = Path(__file__).parent.parent.parent.parent.parent
-            self.db_path = str(project_root / 'data' / 'devstream.db')
+            self.db_path = str(project_root / 'data.noindex' / 'devstream.db')
         else:
             self.db_path = db_path
 
