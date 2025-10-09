@@ -18,6 +18,7 @@ import asyncio
 import subprocess
 import os
 import sys
+import atexit
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from datetime import datetime
@@ -71,6 +72,34 @@ class DevStreamMCPClient:
         # Calculate correct path to MCP server: from hooks/devstream/utils/mcp_client.py -> ../../mcp-devstream-server
         self.mcp_server_path = Path(__file__).parent.parent.parent.parent.parent / 'mcp-devstream-server' / 'dist' / 'index.js'
         self.logger = get_devstream_logger('mcp_client')
+
+        # Persistent connection attributes (Context7 Pattern: STDIO persistent connection)
+        self._persistent_process: Optional[asyncio.subprocess.Process] = None
+        self._stdin: Optional[asyncio.StreamWriter] = None
+        self._stdout: Optional[asyncio.StreamReader] = None
+        self._connection_lock = asyncio.Lock()
+        self._startup_time: Optional[datetime] = None
+        self._request_count = 0
+        self._shutdown_event = asyncio.Event()
+        self._restart_count = 0  # Track connection restarts for monitoring
+
+        # Check if persistent mode is enabled (default: False for backward compatibility)
+        self._persistent_enabled = os.getenv('DEVSTREAM_PERSISTENT_MCP', 'false').lower() == 'true'
+
+        # Register atexit handler for emergency cleanup (Context7 Pattern: exit_stack)
+        if self._persistent_enabled:
+            def cleanup_on_exit():
+                """Emergency cleanup if process exits without proper shutdown."""
+                if self._persistent_process and self._persistent_process.returncode is None:
+                    try:
+                        self._persistent_process.kill()
+                        # Note: Can't use await in atexit, so use synchronous wait
+                        import subprocess
+                        subprocess.run(['kill', '-9', str(self._persistent_process.pid)], timeout=1)
+                    except Exception:
+                        pass
+
+            atexit.register(cleanup_on_exit)
 
 
     async def store_memory(
@@ -598,7 +627,10 @@ class DevStreamMCPClient:
 
     async def _call_mcp_server(self, mcp_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Make actual MCP server call via subprocess.
+        Make actual MCP server call via subprocess OR persistent connection.
+
+        Context7 Pattern: Adaptive routing based on DEVSTREAM_PERSISTENT_MCP flag.
+        Falls back to subprocess if persistent mode fails.
 
         Args:
             mcp_request: MCP request object
@@ -606,6 +638,25 @@ class DevStreamMCPClient:
         Returns:
             MCP response or None on failure
         """
+        # Use persistent connection if enabled
+        if self._persistent_enabled:
+            try:
+                # Ensure connection is alive
+                if not await self._ensure_connection():
+                    self.logger.logger.warning("Persistent connection unavailable, falling back to subprocess")
+                else:
+                    # Send request over persistent connection
+                    response = await self._send_request(mcp_request)
+                    return response
+
+            except Exception as e:
+                self.logger.logger.warning(
+                    f"Persistent connection failed: {e}, falling back to subprocess",
+                    extra={"error_type": type(e).__name__}
+                )
+                # Fall through to subprocess
+
+        # Fallback: Use traditional subprocess pattern
         try:
             # Prepare the MCP server command
             cmd = [
@@ -633,7 +684,7 @@ class DevStreamMCPClient:
             except asyncio.TimeoutError:
                 # Kill hung process
                 process.kill()
-                await process.wait()
+                await process.wait()  # CRITICAL: Prevent zombie
                 self.logger.logger.error(
                     "MCP server timeout (30s)",
                     extra={
@@ -642,6 +693,10 @@ class DevStreamMCPClient:
                     }
                 )
                 return None
+
+            # CRITICAL: Always wait for process to prevent zombies
+            if process.returncode is None:
+                await process.wait()
 
             if process.returncode != 0:
                 error_msg = stderr.decode('utf-8') if stderr else 'Unknown MCP server error'
@@ -686,6 +741,328 @@ class DevStreamMCPClient:
 
         except Exception:
             return False
+
+    async def _start_persistent_server(self) -> bool:
+        """
+        Start persistent MCP server process with STDIO transport.
+
+        Context7 Pattern: Persistent STDIO connection for multiple requests.
+        Spawns Node.js process once and maintains stdin/stdout pipes.
+
+        Returns:
+            True if server started successfully, False otherwise
+
+        Raises:
+            FileNotFoundError: If MCP server executable not found
+            asyncio.TimeoutError: If server startup exceeds 5 seconds
+        """
+        try:
+            # Verify server executable exists
+            if not self.mcp_server_path.exists():
+                self.logger.logger.error(
+                    "MCP server executable not found",
+                    extra={"path": str(self.mcp_server_path)}
+                )
+                raise FileNotFoundError(f"MCP server not found: {self.mcp_server_path}")
+
+            # Prepare command
+            cmd = [
+                'node',
+                str(self.mcp_server_path),
+                str(self.db_path)
+            ]
+
+            self.logger.logger.info(
+                "Starting persistent MCP server",
+                extra={"command": " ".join(cmd)}
+            )
+
+            # Spawn persistent process with STDIO pipes
+            self._persistent_process = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env={**os.environ, 'NODE_ENV': 'production'}
+                ),
+                timeout=5.0
+            )
+
+            # Capture stdin/stdout for communication
+            self._stdin = self._persistent_process.stdin
+            self._stdout = self._persistent_process.stdout
+
+            # Record startup time and reset counters
+            self._startup_time = datetime.now()
+            self._request_count = 0
+
+            self.logger.logger.info(
+                "Persistent MCP server started",
+                extra={
+                    "pid": self._persistent_process.pid,
+                    "startup_time": self._startup_time.isoformat()
+                }
+            )
+
+            return True
+
+        except asyncio.TimeoutError:
+            self.logger.logger.error("MCP server startup timeout (5s)")
+            # Cleanup failed process
+            if self._persistent_process:
+                self._persistent_process.kill()
+                await self._persistent_process.wait()
+                self._persistent_process = None
+            return False
+
+        except Exception as e:
+            self.logger.logger.error(
+                f"Failed to start persistent MCP server: {e}",
+                extra={"error_type": type(e).__name__}
+            )
+            return False
+
+    async def _send_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Send JSON-RPC request over persistent STDIO connection.
+
+        Context7 Pattern: Line-delimited JSON over STDIO pipes.
+        Writes request to stdin, reads response from stdout.
+
+        Args:
+            request: JSON-RPC request object
+
+        Returns:
+            Parsed JSON response or None on failure
+
+        Raises:
+            RuntimeError: If connection not established or communication fails
+            asyncio.TimeoutError: If response not received within 30 seconds
+        """
+        if not self._stdin or not self._stdout:
+            raise RuntimeError("Persistent connection not established")
+
+        if self._persistent_process.returncode is not None:
+            raise RuntimeError(f"MCP server process died (returncode: {self._persistent_process.returncode})")
+
+        try:
+            # Write request to stdin (line-delimited JSON)
+            request_json = json.dumps(request) + '\n'
+            self._stdin.write(request_json.encode('utf-8'))
+            await self._stdin.drain()
+
+            self.logger.logger.debug(
+                "Sent MCP request",
+                extra={
+                    "method": request.get("method"),
+                    "id": request.get("id")
+                }
+            )
+
+            # Read response from stdout (line-delimited JSON)
+            # CRITICAL: Skip non-JSON lines (e.g., console.log from server startup)
+            response = None
+            max_attempts = 10  # Prevent infinite loop
+            for attempt in range(max_attempts):
+                response_line = await asyncio.wait_for(
+                    self._stdout.readline(),
+                    timeout=30.0
+                )
+
+                if not response_line:
+                    raise RuntimeError("MCP server closed connection (empty response)")
+
+                response_text = response_line.decode('utf-8').strip()
+
+                # Skip empty lines
+                if not response_text:
+                    continue
+
+                # Try to parse as JSON
+                try:
+                    response = json.loads(response_text)
+                    break  # Successfully parsed JSON
+                except json.JSONDecodeError:
+                    # Not JSON - likely console.log output from server
+                    self.logger.logger.debug(f"Skipping non-JSON line: {response_text[:100]}")
+                    continue
+
+            if not response:
+                raise RuntimeError("No valid JSON response after 10 attempts")
+
+            # Increment request counter
+            self._request_count += 1
+
+            self.logger.logger.debug(
+                "Received MCP response",
+                extra={
+                    "id": response.get("id"),
+                    "has_result": "result" in response,
+                    "has_error": "error" in response
+                }
+            )
+
+            return response
+
+        except asyncio.TimeoutError:
+            self.logger.logger.error(
+                "MCP request timeout (30s)",
+                extra={"method": request.get("method")}
+            )
+            raise
+
+        except json.JSONDecodeError as e:
+            self.logger.logger.error(
+                f"Invalid JSON in MCP response: {e}",
+                extra={"response_preview": response_line[:200] if response_line else ""}
+            )
+            raise RuntimeError(f"Invalid JSON from MCP server: {e}")
+
+        except Exception as e:
+            self.logger.logger.error(
+                f"MCP communication error: {e}",
+                extra={"error_type": type(e).__name__}
+            )
+            raise
+
+    async def _ensure_connection(self) -> bool:
+        """
+        Ensure persistent connection is alive, reconnect if needed.
+
+        Context7 Pattern: Connection pooling with health monitoring.
+        Acquires lock, checks health, restarts if necessary.
+
+        Returns:
+            True if connection is healthy, False on failure
+        """
+        async with self._connection_lock:
+            # Check if process is alive
+            if self._persistent_process is None or self._persistent_process.returncode is not None:
+                self.logger.logger.warning("MCP connection unhealthy, reconnecting...")
+                self._restart_count += 1
+                success = await self._start_persistent_server()
+                if not success:
+                    self.logger.logger.error("Failed to reconnect to MCP server")
+                    return False
+
+            return True
+
+    async def _health_check_persistent(self) -> bool:
+        """
+        Check if persistent connection is healthy.
+
+        Returns:
+            True if connection responding, False otherwise
+        """
+        if not self._persistent_process or self._persistent_process.returncode is not None:
+            return False
+
+        if not self._stdin or not self._stdout:
+            return False
+
+        try:
+            # Send lightweight ping request
+            ping_request = {
+                "jsonrpc": "2.0",
+                "id": "health_check_persistent",
+                "method": "tools/list",
+                "params": {}
+            }
+
+            response = await asyncio.wait_for(
+                self._send_request(ping_request),
+                timeout=5.0
+            )
+
+            return response is not None
+
+        except Exception as e:
+            self.logger.logger.debug(f"Health check failed: {e}")
+            return False
+
+    async def shutdown(self):
+        """
+        Gracefully shutdown persistent MCP server (exit_stack pattern).
+
+        Context7 Pattern: Proper cleanup to prevent zombie processes.
+        1. Close stdin (signal EOF)
+        2. Wait for graceful exit (5s timeout)
+        3. Force kill if needed
+        4. Always await process.wait() to prevent zombies
+        """
+        if not self._persistent_process:
+            return
+
+        try:
+            self.logger.logger.info(
+                "Shutting down persistent MCP server",
+                extra={
+                    "pid": self._persistent_process.pid,
+                    "uptime_seconds": (datetime.now() - self._startup_time).total_seconds() if self._startup_time else 0,
+                    "requests_served": self._request_count
+                }
+            )
+
+            # Step 1: Close stdin to signal EOF
+            if self._stdin:
+                self._stdin.close()
+                await self._stdin.wait_closed()
+
+            # Step 2: Wait for graceful exit (5s timeout)
+            try:
+                await asyncio.wait_for(
+                    self._persistent_process.wait(),
+                    timeout=5.0
+                )
+                self.logger.logger.info("MCP server exited gracefully")
+
+            except asyncio.TimeoutError:
+                # Step 3: Force kill if not graceful
+                self.logger.logger.warning("MCP server didn't exit gracefully, forcing kill")
+                self._persistent_process.kill()
+                await self._persistent_process.wait()  # CRITICAL: Prevent zombie
+
+        except Exception as e:
+            self.logger.logger.error(f"Error during MCP server shutdown: {e}")
+
+        finally:
+            # Reset connection state
+            self._persistent_process = None
+            self._stdin = None
+            self._stdout = None
+            self._shutdown_event.set()
+
+    async def __aenter__(self):
+        """Context manager entry: ensure connection."""
+        await self._ensure_connection()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit: shutdown connection."""
+        await self.shutdown()
+        return False  # Don't suppress exceptions
+
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get connection monitoring statistics.
+
+        Returns:
+            Dictionary with uptime, request count, restart count
+        """
+        uptime_seconds = 0
+        if self._startup_time:
+            uptime_seconds = (datetime.now() - self._startup_time).total_seconds()
+
+        return {
+            "persistent_enabled": self._persistent_enabled,
+            "connected": self._persistent_process is not None and self._persistent_process.returncode is None,
+            "pid": self._persistent_process.pid if self._persistent_process else None,
+            "uptime_seconds": uptime_seconds,
+            "request_count": self._request_count,
+            "restart_count": self._restart_count,
+            "startup_time": self._startup_time.isoformat() if self._startup_time else None
+        }
 
 # Singleton instance for hook usage
 _mcp_client = None

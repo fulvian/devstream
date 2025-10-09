@@ -44,6 +44,7 @@ try:
     from enforcement_gate import EnforcementGate
     from task_first_handler import TaskFirstHandler
     from interactive_step_validator import InteractiveStepValidator
+    from implementation_plan_generator import ImplementationPlanGenerator
     PROTOCOL_ENFORCEMENT_AVAILABLE = True
 except ImportError as e:
     PROTOCOL_ENFORCEMENT_AVAILABLE = False
@@ -69,6 +70,7 @@ class UserPromptSubmitHook:
         self.enforcement_gate = None
         self.task_handler = None
         self.step_validator = None
+        self.plan_generator = None
 
         if PROTOCOL_ENFORCEMENT_AVAILABLE:
             try:
@@ -76,7 +78,8 @@ class UserPromptSubmitHook:
                 self.enforcement_gate = EnforcementGate()
                 self.task_handler = TaskFirstHandler()
                 self.step_validator = InteractiveStepValidator(self.mcp_client)
-                self.base.debug_log("FASE 3 protocol enforcement components initialized")
+                self.plan_generator = ImplementationPlanGenerator(self.mcp_client)
+                self.base.debug_log("FASE 3 protocol enforcement components initialized (with plan generator)")
             except Exception as e:
                 self.base.user_feedback(
                     f"FASE 3 protocol enforcement initialization failed: {e}",

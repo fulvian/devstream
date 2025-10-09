@@ -201,25 +201,14 @@ Start Claude Code with provider configuration
 
 ### Settings Management
 
-**z.ai Settings** (.claude/settings.json):
-```json
-{
-  "modelRoutingRules": [
-    {
-      "name": "z.ai-glm-4.6-routing",
-      "match": {"modelName": "claude-*"},
-      "modelNameOverride": "glm-4.6"
-    }
-  ]
-}
-```
+**Automatic Configuration**:
+- `configure_claude_settings_for_zai()` (start-devstream.sh) - Configures environment for z.ai provider
+- `reset_claude_settings_to_default()` (start-devstream.sh) - Resets to Anthropic OAuth
 
-**Anthropic Settings** (default):
-```json
-{
-  "modelRoutingRules": []  // Removed by reset_claude_settings_to_default()
-}
-```
+**Settings Preserved During Provider Switching**:
+- Hooks (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart)
+- MCP Servers
+- Custom user preferences
 
 ---
 

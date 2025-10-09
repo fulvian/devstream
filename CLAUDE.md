@@ -1,6 +1,6 @@
 # CLAUDE.md - DevStream Project Rules
 
-**Version**: 2.1.0 | **Date**: 2025-10-01 | **Status**: Production Ready - Phase 3 Complete
+**Version**: 2.2.0 | **Date**: 2025-10-09 | **Status**: Production Ready - Protocol v2.2.0 (Strategic Choice Gate)
 
 ⚠️ **CRITICAL**: These rules are **MANDATORY** and integrated into the DevStream system through automatic hooks. Violating them may cause system malfunctions.
 
@@ -371,15 +371,27 @@ Choose: [1] Protocol  [2] Override  [Cancel]"
 - 🔒 Context7 integration automatic via PreToolUse hook
 - 📊 Validation: Verify Context7 docs in context injection log
 
-#### Step 4: PLANNING (MANDATORY - TodoWrite)
+#### Step 4: PLANNING (MANDATORY - TodoWrite + Implementation Plan)
 - ✅ Create TodoWrite list for non-trivial tasks, micro-tasks MAX 10-15 min, define dependencies, establish completion criteria
+- ✅ **Protocol v2.2.0**: Generate implementation plan with model-specific template (GLM-4.6 or Sonnet 4.5)
+- ✅ **Dual Storage**: Plan saved to DevStream DB + filesystem (`docs/development/plan/piano_[task-slug].md`)
 - 🔒 TodoWrite tool integrated in Claude Code
-- 📊 Validation: Task list must exist before implementation
+- 🔒 **NEW**: `implementation_plan_generator.py` hook automates plan creation at Step 4
+- 📊 Validation: Task list + implementation plan must exist before implementation
 
-#### Step 5: APPROVAL (MANDATORY)
+#### Step 5: APPROVAL (MANDATORY + Strategic Choice Gate)
 - ✅ Present complete plan, show Context7 findings, obtain explicit approval ("OK", "proceed", "approved")
+- ✅ **Protocol v2.2.0 - Strategic Choice Gate**: After approval, choose implementation model:
+  - **Option A**: Continue with **Sonnet 4.5** (architectural work, complex reasoning, 30+ hour focus)
+  - **Option B**: Handoff to **GLM-4.6** (precise execution, cost-optimized ~70% savings, tool calling 90.6%)
+- ✅ **GLM Handoff Workflow** (if Option B selected):
+  1. Generate GLM handoff prompt with complete context transfer
+  2. Save plan + handoff to DB and filesystem
+  3. Display handoff instructions for manual session switch
+  4. Close Sonnet session, start new GLM session with handoff prompt
 - 🔒 Memory registers approval as "decision"
-- 📊 Validation: Verify approval record before commit
+- 🔒 **NEW**: Strategic Choice Gate logs model selection decision
+- 📊 Validation: Verify approval record + model choice before commit
 
 #### Step 6: IMPLEMENTATION (MANDATORY - Guided)
 - ✅ One micro-task at a time, mark "in_progress" → work → mark "completed", document with docstrings + type hints
@@ -395,10 +407,18 @@ Choose: [1] Protocol  [2] Override  [Cancel]"
 
 ## 🔄 PRESCRIPTIVE RULES - Task Lifecycle Management
 
-### Task Creation
-**WHEN**: Work > 30 minutes
-**RULES**: ✅ Use `mcp__devstream__devstream_create_task`, define title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name, register in MCP | ❌ Manual tasks without MCP
-**ENFORCEMENT**: Non-MCP tasks not tracked
+### Task Creation (Protocol v2.2.0 - Step 1 MANDATORY)
+**WHEN**: Work > 15 minutes OR involves code/architecture/research
+**CRITICAL CHANGE**: Task creation moved from Step 5 (APPROVAL) to Step 1 (DISCUSSION) to prevent data loss
+**RULES**:
+- ✅ **AUTOMATIC**: `task_first_handler.py` hook enforces task creation at Step 1 before DISCUSSION
+- ✅ **Complexity Analysis**: Automatic detection based on duration, code involvement, architecture decisions, file count, Context7 requirement
+- ✅ **Interactive Enforcement Gate**: User presented with Protocol/Override/Cancel options via PyInquirer
+- ✅ Use `mcp__devstream__devstream_create_task` for task registration
+- ✅ Define title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name
+- ✅ **Draft Task Cleanup**: Tasks in "pending" status >7 days auto-archived (configurable)
+- ❌ Manual tasks without MCP | ❌ Creating tasks at Step 5 (old protocol)
+**ENFORCEMENT**: `task_first_handler.py` + `enforcement_gate.py` (blocking validation)
 
 ### Task Execution
 **WHEN**: During implementation
@@ -701,8 +721,24 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 - **Partial writes**: Should NEVER occur (atomic write guarantee) - report as bug if observed
 
 ### MCP Server Integration
-**Location**: `mcp-devstream-server/` | **Port**: 3000 | **Tools**: devstream_create_task, devstream_update_task, devstream_list_tasks, devstream_store_memory, devstream_search_memory, devstream_list_plans
+**Location**: `mcp-devstream-server/` | **Port**: 3000
+**Tools**:
+- Task Management: `devstream_create_task`, `devstream_update_task`, `devstream_list_tasks`
+- Memory System: `devstream_store_memory`, `devstream_search_memory`
+- **Protocol v2.2.0 NEW**: `devstream_create_implementation_plan`, `devstream_get_implementation_plan`, `devstream_update_implementation_plan`, `devstream_list_implementation_plans`
 **Config**: `.claude/mcp_servers.json` → `{"devstream": {"command": "node", "args": ["mcp-devstream-server/dist/index.js"], "env": {"DEVSTREAM_DB_PATH": "data/devstream.db"}}}`
+
+### Implementation Plans System (Protocol v2.2.0)
+**Database Schema**: `implementation_plans` table with model-specific storage (GLM-4.6 vs Sonnet 4.5)
+**Dual Storage Pattern**:
+- **Database**: SQLite (`data/devstream.db`) with full metadata, task linkage, model type tracking
+- **Filesystem**: Markdown files in `docs/development/plan/piano_[task-slug].md` for human readability
+**Model-Specific Templates**:
+- **GLM-4.6**: `templates/implementation-plan-glm46.md` (execution-focused, micro-task breakdown, syntax precision)
+- **Sonnet 4.5**: `templates/implementation-plan-sonnet45.md` (architectural, ADRs, component-level, subagent delegation)
+- **Handoff Prompt**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
+**Strategic Choice Gate**: Interactive model selection at Step 5 (APPROVAL) with automatic plan generation
+**Hook Integration**: `implementation_plan_generator.py` automates plan creation at Step 4 (PLANNING)
 
 ### Environment Configuration (.env.devstream)
 ```bash
@@ -736,11 +772,17 @@ DEVSTREAM_LOG_PATH=~/.claude/logs/devstream/
 
 ---
 
-**Document Version**: 2.1.0 (Prescriptive Rules + Auto-Delegation)
-**Last Updated**: 2025-10-01
-**Status**: ✅ Production Ready - Phase 3 Complete (Agent Auto-Delegation System)
+**Document Version**: 2.2.0 (Protocol v2.2.0 - Strategic Choice Gate + Implementation Plans)
+**Last Updated**: 2025-10-09
+**Status**: ✅ Production Ready - Protocol v2.2.0 Complete
+**Key Changes**:
+- ✅ Task creation moved to Step 1 (DISCUSSION) - prevents data loss
+- ✅ Implementation plans with model-specific templates (GLM-4.6 vs Sonnet 4.5)
+- ✅ Strategic Choice Gate at Step 5 (APPROVAL) - cost optimization via hybrid workflow
+- ✅ GLM-4.6 handoff workflow for Sonnet→GLM session switching
+- ✅ Dual storage pattern (DB + filesystem) for plans
 **Methodology**: Research-Driven Development with Context7
-**Enforcement**: Automatic via Hook System + MCP Integration + Auto-Delegation
+**Enforcement**: Automatic via Hook System + MCP Integration + Auto-Delegation + Strategic Choice Gate
 
 ---
 

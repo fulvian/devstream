@@ -21,6 +21,7 @@ import { DevStreamDatabase } from './database.js';
 import { TaskTools } from './tools/tasks.js';
 import { PlanTools } from './tools/plans.js';
 import { MemoryTools } from './tools/memory.js';
+import { ImplementationPlanTools } from './tools/implementation-plans.js';
 import { initializeOllamaClient } from './ollama-client.js';
 import { AutoSaveService } from './services/auto-save.js';
 
@@ -33,6 +34,7 @@ class DevStreamMcpServer {
   private taskTools: TaskTools;
   private planTools: PlanTools;
   private memoryTools: MemoryTools;
+  private implementationPlanTools: ImplementationPlanTools;
   private autoSaveService: AutoSaveService;
   private heartbeatInterval?: NodeJS.Timeout;
 
@@ -57,6 +59,7 @@ class DevStreamMcpServer {
     this.taskTools = new TaskTools(this.database);
     this.planTools = new PlanTools(this.database);
     this.memoryTools = new MemoryTools(this.database);
+    this.implementationPlanTools = new ImplementationPlanTools(this.database);
 
     // Initialize auto-save background service
     this.autoSaveService = new AutoSaveService(this.database, {
@@ -180,6 +183,126 @@ class DevStreamMcpServer {
           }
         },
 
+        // Implementation plan management tools (Protocol v2.2.0)
+        {
+          name: 'devstream_create_implementation_plan',
+          description: 'Create a new implementation plan with model-specific template (GLM-4.6 or Sonnet 4.5) for DevStream Protocol v2.2.0',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              task_id: {
+                type: 'string',
+                description: 'Task ID to create plan for'
+              },
+              model_type: {
+                type: 'string',
+                enum: ['glm-4.6', 'sonnet-4.5'],
+                description: 'Model type for implementation (glm-4.6: cost-optimized, sonnet-4.5: quality-first)'
+              },
+              plan_content: {
+                type: 'string',
+                description: 'Full markdown plan content'
+              },
+              plan_file_path: {
+                type: 'string',
+                description: 'File system path for markdown file (e.g., docs/development/plan/piano_xxx.md)'
+              },
+              handoff_prompt: {
+                type: 'string',
+                description: 'Pre-generated handoff prompt for GLM-4.6 workflow (optional)'
+              },
+              metadata: {
+                type: 'object',
+                properties: {
+                  complexity: {
+                    type: 'number',
+                    description: 'Task complexity score (0-1)'
+                  },
+                  estimated_duration: {
+                    type: 'number',
+                    description: 'Estimated duration in minutes'
+                  },
+                  context7_libraries: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Libraries researched via Context7'
+                  },
+                  research_findings: {
+                    type: 'string',
+                    description: 'Summary of research findings'
+                  }
+                }
+              }
+            },
+            required: ['task_id', 'model_type', 'plan_content'],
+            additionalProperties: false
+          }
+        },
+        {
+          name: 'devstream_get_implementation_plan',
+          description: 'Get implementation plan by task ID',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              task_id: {
+                type: 'string',
+                description: 'Task ID to retrieve plan for'
+              }
+            },
+            required: ['task_id'],
+            additionalProperties: false
+          }
+        },
+        {
+          name: 'devstream_update_implementation_plan',
+          description: 'Update existing implementation plan',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              task_id: {
+                type: 'string',
+                description: 'Task ID to update plan for'
+              },
+              plan_content: {
+                type: 'string',
+                description: 'Updated plan content (optional)'
+              },
+              handoff_prompt: {
+                type: 'string',
+                description: 'Updated handoff prompt (optional)'
+              },
+              metadata: {
+                type: 'object',
+                description: 'Updated metadata (optional)'
+              }
+            },
+            required: ['task_id'],
+            additionalProperties: false
+          }
+        },
+        {
+          name: 'devstream_list_implementation_plans',
+          description: 'List implementation plans with optional filtering by model type',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              model_type: {
+                type: 'string',
+                enum: ['glm-4.6', 'sonnet-4.5'],
+                description: 'Filter by model type (optional)'
+              },
+              limit: {
+                type: 'number',
+                minimum: 1,
+                maximum: 100,
+                default: 20,
+                description: 'Maximum number of results'
+              }
+            },
+            additionalProperties: false
+          }
+        },
+
         // Memory management tools
         {
           name: 'devstream_store_memory',
@@ -278,6 +401,16 @@ class DevStreamMcpServer {
           // Plan tools
           case 'devstream_list_plans':
             return await this.planTools.listPlans(args);
+
+          // Implementation plan tools (Protocol v2.2.0)
+          case 'devstream_create_implementation_plan':
+            return await this.implementationPlanTools.createPlan(args);
+          case 'devstream_get_implementation_plan':
+            return await this.implementationPlanTools.getPlan(args);
+          case 'devstream_update_implementation_plan':
+            return await this.implementationPlanTools.updatePlan(args);
+          case 'devstream_list_implementation_plans':
+            return await this.implementationPlanTools.listPlans(args);
 
           // Memory tools
           case 'devstream_store_memory':

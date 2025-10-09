@@ -326,3 +326,19 @@ export interface SemanticMemory {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * Implementation Plan interface for DevStream Protocol v2.2.0
+ * Stores model-specific implementation plans with dual storage pattern (DB + file system)
+ */
+export interface ImplementationPlan {
+  id: string;
+  task_id: string;
+  model_type: 'glm-4.6' | 'sonnet-4.5';
+  plan_content: string;
+  plan_file_path: string | null;
+  handoff_prompt: string | null;
+  metadata: string; // JSON string
+  created_at: string;
+  updated_at: string;
+}
