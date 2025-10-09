@@ -1,3 +1,8 @@
+---
+name: DevStream Agent System Overview
+description: Complete overview of the DevStream multi-stack agent system architecture and usage
+---
+
 # DevStream Multi-Stack Agent System
 
 ## Overview

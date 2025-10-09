@@ -53,6 +53,7 @@ from cchooks import safe_create_context, SessionEndContext
 from devstream_base import DevStreamHookBase
 from mcp_client import get_mcp_client
 from ollama_client import OllamaEmbeddingClient
+from session_coordinator import get_session_coordinator
 
 # Import session components
 from session_data_extractor import SessionDataExtractor
@@ -84,9 +85,12 @@ class SessionEndHook:
         self.session_manager = WorkSessionManager()
         self.ollama_client = OllamaEmbeddingClient()
 
+        # Session coordinator for multi-session management
+        self.coordinator = get_session_coordinator()
+
         # Database path
         project_root = Path(__file__).parent.parent.parent.parent.parent
-        self.db_path = str(project_root / 'data' / 'devstream.db')
+        self.db_path = str(project_root / 'data.noindex' / 'devstream.db')
 
     def cleanup_ollama_models(self) -> bool:
         """
@@ -404,6 +408,17 @@ class SessionEndHook:
                 self.base.debug_log("Ollama cleanup complete - models unloaded")
             else:
                 self.base.debug_log("Ollama cleanup failed (non-critical, session end continues)")
+
+            # Step 8: Unregister session from coordinator
+            self.base.debug_log("Step 8: Unregistering session from coordinator...")
+
+            if self.coordinator.unregister_session(session_id):
+                active_count = self.coordinator.get_session_count()
+                self.base.debug_log(
+                    f"Session unregistered from coordinator (active sessions: {active_count})"
+                )
+            else:
+                self.base.debug_log("Session unregister failed (non-critical)")
 
             # Success feedback
             self.base.success_feedback(

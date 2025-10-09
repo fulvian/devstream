@@ -29,10 +29,12 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / 'utils'))
 from common import DevStreamHookBase, get_project_context
 from logger import get_devstream_logger
+from session_coordinator import get_session_coordinator
 
-# Import WorkSessionManager
+# Import WorkSessionManager and cleanup utilities
 sys.path.append(str(Path(__file__).parent))
 from work_session_manager import WorkSessionManager
+from session_cleanup_utils import SessionCleanupManager
 
 
 class SessionStartHook:
@@ -51,6 +53,12 @@ class SessionStartHook:
         self.structured_logger = get_devstream_logger('session_start')
         self.logger = self.structured_logger.logger  # Compatibility
         self.session_manager = WorkSessionManager()
+
+        # Session coordinator for multi-session management
+        self.coordinator = get_session_coordinator()
+
+        # Enhanced cleanup manager for zombie session handling
+        self.cleanup_manager = SessionCleanupManager(self.coordinator)
 
     def get_session_id(self) -> str:
         """
@@ -88,6 +96,52 @@ class SessionStartHook:
         }
 
         try:
+            # Proactive cleanup of zombie sessions before checking limits
+            self.logger.info("Performing proactive session cleanup...")
+            cleanup_stats = self.cleanup_manager.aggressive_cleanup()
+
+            if cleanup_stats.zombie_sessions_cleaned > 0 or cleanup_stats.stale_sessions_cleaned > 0:
+                self.logger.info(
+                    f"Proactive cleanup removed {cleanup_stats.zombie_sessions_cleaned} zombie "
+                    f"and {cleanup_stats.stale_sessions_cleaned} stale sessions"
+                )
+
+            # Validate registry integrity
+            if not self.cleanup_manager.validate_and_fix_registry():
+                self.logger.warning("Registry validation failed, attempting emergency repair")
+                if not self.cleanup_manager.force_cleanup_all_sessions():
+                    raise RuntimeError("Failed to repair session registry")
+
+            # Check session limits via coordinator (after cleanup)
+            if self.coordinator.is_session_limit_reached():
+                # Emergency override if still at limit after cleanup
+                if self.cleanup_manager.EMERGENCY_OVERRIDE:
+                    self.logger.warning(
+                        f"Session limit still reached after cleanup, using emergency override"
+                    )
+                    # Force cleanup of all sessions as last resort
+                    if not self.cleanup_manager.force_cleanup_all_sessions():
+                        raise RuntimeError(
+                            f"Session limit reached ({self.coordinator.MAX_SESSIONS} sessions) "
+                            f"and emergency cleanup failed. "
+                            f"Please manually delete {self.coordinator.registry_path}"
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Session limit reached ({self.coordinator.MAX_SESSIONS} sessions). "
+                        f"Please close an existing session before starting a new one."
+                    )
+
+            # Register session with coordinator
+            db_path = self.session_manager.db_path
+            if not self.coordinator.register_session(session_id, db_path):
+                raise RuntimeError("Failed to register session with coordinator")
+
+            self.logger.info(
+                f"Session registered with coordinator: {session_id}",
+                extra={"active_sessions": self.coordinator.get_session_count()}
+            )
+
             # Resume or create session
             self.logger.info(f"Initializing session: {session_id}")
             session = await self.session_manager.resume_session(session_id)

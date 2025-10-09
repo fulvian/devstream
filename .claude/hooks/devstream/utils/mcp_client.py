@@ -53,7 +53,7 @@ class DevStreamMCPClient:
         # Get path from parameter, environment, or default
         raw_path = db_path or os.getenv(
             'DEVSTREAM_DB_PATH',
-            'data/devstream.db'  # Changed to relative path (project-root relative)
+            'data.noindex/devstream.db'  # Changed to relative path (project-root relative)
         )
         
         # SECURITY: Validate database path

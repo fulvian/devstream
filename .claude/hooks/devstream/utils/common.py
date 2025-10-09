@@ -54,7 +54,7 @@ class DevStreamHookBase:
         # Get path from environment or default
         raw_path = os.getenv(
             'DEVSTREAM_DB_PATH',
-            'data/devstream.db'  # Relative path (project-root relative)
+            'data.noindex/devstream.db'  # Relative path (project-root relative)
         )
         
         # SECURITY: Validate database path

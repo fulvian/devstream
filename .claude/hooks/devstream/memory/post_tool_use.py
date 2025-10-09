@@ -1,17 +1,4 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#     "cchooks>=0.1.4",
-#     "aiohttp>=3.8.0",
-#     "structlog>=23.0.0",
-#     "python-dotenv>=1.0.0",
-#     "ollama>=0.1.0",
-#     "sqlite-vec>=0.1.0",
-#     "aiolimiter>=1.0.0",
-# ]
-# ///
-
+#!/usr/bin/env .devstream/bin/python
 """
 DevStream PostToolUse Hook - Memory Storage after Write/Edit with Embeddings
 
@@ -1083,11 +1070,17 @@ class PostToolUseHook:
 
             # Try to get current active session
             import sqlite3
-            # Database configuration
-            project_root = Path(__file__).parent.parent.parent.parent.parent
-            db_path = str(project_root / 'data' / 'devstream.db')
+            import sys
+            sys.path.append(str(Path(__file__).parent.parent / 'utils'))
+            from connection_manager import get_connection_manager
 
-            conn = sqlite3.connect(db_path)
+            # Database configuration (updated to use data.noindex for Spotlight exclusion)
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            db_path = str(project_root / 'data.noindex' / 'devstream.db')
+
+            # Use connection manager for WAL mode enforcement
+            manager = get_connection_manager(db_path)
+            conn = manager._get_thread_connection()
             cursor = conn.cursor()
 
             cursor.execute('SELECT id, started_at FROM work_sessions WHERE status="active" ORDER BY started_at DESC LIMIT 1')
@@ -1117,8 +1110,8 @@ class PostToolUseHook:
 
                     # Fallback: Store directly in database
                     try:
-                        # Use synchronous SQLite for fallback mode
-                        conn_sync = sqlite3.connect(db_path)
+                        # Use ConnectionManager for fallback mode (WAL mode enforced)
+                        conn_sync = manager._get_thread_connection()
                         cursor_sync = conn_sync.cursor()
 
                         cursor_sync.execute(

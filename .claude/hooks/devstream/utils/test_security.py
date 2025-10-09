@@ -28,13 +28,13 @@ def test_security_scenarios():
     scenarios = [
         {
             "name": "Legitimate Relative Path",
-            "path": "data/devstream.db",
+            "path": "data.noindex/devstream.db",
             "should_pass": True,
             "threat_level": "🟢 SAFE"
         },
         {
             "name": "Legitimate Absolute Path",
-            "path": str(project_root / "data" / "devstream.db"),
+            "path": str(project_root / "data.noindex" / "devstream.db"),
             "should_pass": True,
             "threat_level": "🟢 SAFE"
         },

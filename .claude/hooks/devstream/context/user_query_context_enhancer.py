@@ -43,6 +43,7 @@ try:
     from protocol_state_manager import ProtocolStateManager, ProtocolStep
     from enforcement_gate import EnforcementGate
     from task_first_handler import TaskFirstHandler
+    from interactive_step_validator import InteractiveStepValidator
     PROTOCOL_ENFORCEMENT_AVAILABLE = True
 except ImportError as e:
     PROTOCOL_ENFORCEMENT_AVAILABLE = False
@@ -63,20 +64,22 @@ class UserPromptSubmitHook:
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher = None
 
-        # Protocol Enforcement components (FASE 2 Integration)
+        # Protocol Enforcement components (FASE 3 Integration)
         self.protocol_manager = None
         self.enforcement_gate = None
         self.task_handler = None
+        self.step_validator = None
 
         if PROTOCOL_ENFORCEMENT_AVAILABLE:
             try:
                 self.protocol_manager = ProtocolStateManager()
                 self.enforcement_gate = EnforcementGate()
                 self.task_handler = TaskFirstHandler()
-                self.base.debug_log("Protocol enforcement components initialized")
+                self.step_validator = InteractiveStepValidator(self.mcp_client)
+                self.base.debug_log("FASE 3 protocol enforcement components initialized")
             except Exception as e:
                 self.base.user_feedback(
-                    f"Protocol enforcement initialization failed: {e}",
+                    f"FASE 3 protocol enforcement initialization failed: {e}",
                     FeedbackLevel.MINIMAL
                 )
         self.agent_router = None
@@ -499,9 +502,551 @@ This query appears to be related to task management. Consider using TodoWrite fo
         assembled = "\n\n---\n\n".join(context_parts)
         return f"# Enhanced Context for Query\n\n{assembled}"
 
+    # FASE 3: Enhanced Protocol Enforcement Methods
+
+    async def _enhanced_protocol_enforcement(
+        self,
+        user_input: str,
+        complexity: Dict[str, Any],
+        current_state
+    ) -> Dict[str, Any]:
+        """
+        Enhanced protocol enforcement with full interactive UI.
+
+        Args:
+            user_input: User's input prompt
+            complexity: Complexity analysis result
+            current_state: Current protocol state
+
+        Returns:
+            Dict with enforcement result and action
+        """
+        try:
+            # Check if we need to enforce task creation first (Step 0)
+            if current_state.protocol_step == ProtocolStep.IDLE:
+                self.base.debug_log("Starting new protocol session - enforcing task creation")
+
+                task_result = await self.task_handler.enforce_task_creation(user_input)
+
+                if task_result[0] and task_result[1]:  # Success and task_id provided
+                    # Update current state with new task
+                    current_state = await self.protocol_manager.advance_step(
+                        current_state,
+                        ProtocolStep.DISCUSSION,
+                        task_id=task_result[1]
+                    )
+                    self.base.success_feedback(
+                        f"✅ Task created: {task_result[1]} → Step 1: DISCUSSION"
+                    )
+                elif not task_result[0]:  # User cancelled
+                    return {"action": "cancel", "reason": "Task creation cancelled"}
+                else:  # Task creation overridden or not needed
+                    current_state = await self.protocol_manager.advance_step(
+                        current_state,
+                        ProtocolStep.DISCUSSION
+                    )
+
+            # Build enforcement context for interactive UI
+            from enforcement_gate import EnforcementContext
+            from datetime import datetime, timezone
+            import uuid
+
+            enforcement_context = EnforcementContext(
+                task_description=user_input[:200],
+                estimated_duration=max(15, complexity["complexity_score"] * 30),
+                complexity_score=complexity["complexity_score"] / 5.0,  # Normalize to 0.0-1.0
+                involves_code="code_implementation_required" in complexity["triggers"],
+                involves_architecture="architectural_decisions_required" in complexity["triggers"],
+                requires_context7="context7_research_required" in complexity["triggers"],
+                trigger_reasons=complexity["triggers"],
+                session_id=current_state.session_id,
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
+
+            # Show enhanced enforcement gate with full UI
+            decision = await self.enforcement_gate.show_enforcement_gate(
+                enforcement_context,
+                self.mcp_client
+            )
+
+            return {
+                "action": decision.value,
+                "enforcement_context": enforcement_context,
+                "current_state": current_state,
+                "decision_timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            self.base.debug_log(f"Enhanced enforcement error: {e}")
+            # Fallback to simple processing
+            return {"action": "fallback", "reason": str(e)}
+
+    async def _handle_protocol_override(
+        self,
+        user_input: str,
+        complexity: Dict[str, Any],
+        enforcement_result: Dict[str, Any]
+    ) -> None:
+        """
+        Handle protocol override with risk acknowledgment.
+
+        Args:
+            user_input: User's input prompt
+            complexity: Complexity analysis result
+            enforcement_result: Result from enforcement gate
+        """
+        try:
+            # Log override decision with full risk acknowledgment
+            override_content = (
+                f"PROTOCOL OVERRIDE - RISKS ACKNOWLEDGED\n"
+                f"User Input: {user_input[:200]}\n"
+                f"Complexity Triggers: {', '.join(complexity['triggers'])}\n"
+                f"Session ID: {enforcement_result['current_state'].session_id}\n"
+                f"Override Timestamp: {enforcement_result['decision_timestamp']}\n\n"
+                f"RISKS ACCEPTED:\n"
+                f"❌ No Context7 research (potential outdated/incorrect patterns)\n"
+                f"❌ No @code-reviewer validation (OWASP Top 10 security gaps)\n"
+                f"❌ No testing requirements (95%+ coverage waived)\n"
+                f"❌ No approval workflow (decisions undocumented)\n"
+                f"❌ No step-by-step validation (quality assurance bypassed)"
+            )
+
+            await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_store_memory",
+                {
+                    "content": override_content,
+                    "content_type": "decision",
+                    "keywords": [
+                        "protocol-override",
+                        "risk-acknowledgment",
+                        "quality-bypass",
+                        enforcement_result['current_state'].session_id
+                    ]
+                }
+            )
+
+            self.base.user_feedback(
+                "⚠️ Protocol override logged - quality assurance disabled",
+                FeedbackLevel.MINIMAL
+            )
+
+        except Exception as e:
+            self.base.debug_log(f"Override handling error: {e}")
+
+    async def _handle_protocol_workflow(
+        self,
+        user_input: str,
+        current_state,
+        enforcement_result: Dict[str, Any]
+    ) -> str:
+        """
+        Handle full protocol workflow with interactive step validation.
+
+        Args:
+            user_input: User's input prompt
+            current_state: Current protocol state
+            enforcement_result: Result from enforcement gate
+
+        Returns:
+            Enhanced user input with protocol instructions
+        """
+        try:
+            self.base.success_feedback(
+                f"🎯 Protocol workflow started - Current: {current_state.protocol_step}"
+            )
+
+            # ENHANCED: Interactive step validation and progression
+            workflow_result = await self._interactive_step_validation(
+                user_input, current_state
+            )
+
+            if workflow_result["step_validated"]:
+                # Build enhanced user input with protocol instructions
+                protocol_instructions = self._build_protocol_instructions(
+                    current_state.protocol_step,
+                    workflow_result
+                )
+
+                enhanced_input = f"{user_input}\n\n{protocol_instructions}"
+
+                self.base.success_feedback(
+                    f"✅ Step {current_state.protocol_step.value} validated - Protocol active"
+                )
+
+                return enhanced_input
+            else:
+                # Step validation failed - show blocking message
+                self.base.user_feedback(
+                    f"⚠️ Step {current_state.protocol_step.value} requires completion before proceeding",
+                    FeedbackLevel.MINIMAL
+                )
+                return user_input
+
+        except Exception as e:
+            self.base.debug_log(f"Protocol workflow handling error: {e}")
+            return user_input
+
+    async def _interactive_step_validation(
+        self,
+        user_input: str,
+        current_state
+    ) -> Dict[str, Any]:
+        """
+        FASE 3 Enhanced: Interactive step validation with comprehensive summaries.
+
+        Args:
+            user_input: User's input prompt
+            current_state: Current protocol state
+
+        Returns:
+            Dict with validation result
+        """
+        try:
+            current_step = current_state.protocol_step
+
+            # Use the enhanced InteractiveStepValidator
+            if self.step_validator:
+                validation_result = await self.step_validator.validate_step_completion(
+                    current_step, user_input, {"session_id": current_state.session_id}
+                )
+
+                # Handle step transition with user confirmation
+                transition_approved, transition_data = await self.step_validator.handle_step_transition(
+                    validation_result, current_state.session_id
+                )
+
+                if transition_approved and transition_data:
+                    # Update protocol state to next step
+                    next_state = await self.protocol_manager.advance_step(
+                        current_state,
+                        transition_data.to_step,
+                        metadata_updates={
+                            "step_completed_at": transition_data.timestamp,
+                            "transition_notes": transition_data.notes
+                        }
+                    )
+
+                    return {
+                        "step_validated": True,
+                        "validation_result": validation_result,
+                        "next_step_ready": True,
+                        "advanced_to_step": transition_data.to_step,
+                        "new_state": next_state
+                    }
+                else:
+                    # Step validation failed or user declined progression
+                    return {
+                        "step_validated": False,
+                        "reason": "Step transition not approved",
+                        "validation_result": validation_result,
+                        "requires_more_work": True
+                    }
+            else:
+                # Fallback to basic validation
+                validation_result = await self._validate_current_step_completion(
+                    current_step, user_input
+                )
+
+                if validation_result["completed"]:
+                    return {
+                        "step_validated": True,
+                        "validation_result": validation_result,
+                        "next_step_ready": True
+                    }
+                else:
+                    return {
+                        "step_validated": False,
+                        "reason": validation_result.get("missing_requirements", []),
+                        "requires_more_work": True
+                    }
+
+        except Exception as e:
+            self.base.debug_log(f"FASE 3 interactive step validation error: {e}")
+            return {"step_validated": False, "reason": str(e)}
+
+    async def _validate_current_step_completion(
+        self,
+        step: ProtocolStep,
+        user_input: str
+    ) -> Dict[str, Any]:
+        """
+        Validate completion of current protocol step.
+
+        Args:
+            step: Current protocol step
+            user_input: User's input prompt
+
+        Returns:
+            Dict with validation result
+        """
+        # Step-specific validation logic
+        if step == ProtocolStep.DISCUSSION:
+            return await self._validate_discussion_step(user_input)
+        elif step == ProtocolStep.ANALYSIS:
+            return await self._validate_analysis_step(user_input)
+        elif step == ProtocolStep.RESEARCH:
+            return await self._validate_research_step(user_input)
+        elif step == ProtocolStep.PLANNING:
+            return await self._validate_planning_step(user_input)
+        elif step == ProtocolStep.APPROVAL:
+            return await self._validate_approval_step(user_input)
+        elif step == ProtocolStep.IMPLEMENTATION:
+            return await self._validate_implementation_step(user_input)
+        elif step == ProtocolStep.VERIFICATION:
+            return await self._validate_verification_step(user_input)
+        else:
+            return {"completed": False, "reason": "Unknown step"}
+
+    async def _validate_discussion_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate DISCUSSION step completion."""
+        # Check for discussion indicators in user input
+        discussion_indicators = [
+            "discuss", "let's talk about", "consider", "trade-offs",
+            "pros and cons", "alternatives", "approach", "strategy"
+        ]
+
+        has_discussion = any(indicator in user_input.lower() for indicator in discussion_indicators)
+        sufficient_length = len(user_input) > 100  # Minimum meaningful discussion
+
+        completed = has_discussion and sufficient_length
+
+        return {
+            "completed": completed,
+            "has_discussion": has_discussion,
+            "sufficient_length": sufficient_length,
+            "missing_requirements": [] if completed else [
+                "Meaningful discussion of the problem/objective",
+                "Consideration of trade-offs and alternatives"
+            ]
+        }
+
+    async def _validate_analysis_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate ANALYSIS step completion."""
+        analysis_indicators = [
+            "analyze", "examine", "break down", "components",
+            "requirements", "constraints", "dependencies", "impact"
+        ]
+
+        has_analysis = any(indicator in user_input.lower() for indicator in analysis_indicators)
+
+        return {
+            "completed": has_analysis,
+            "has_analysis": has_analysis,
+            "missing_requirements": [] if has_analysis else [
+                "Analysis of codebase for similar patterns",
+                "Identification of files to modify",
+                "Complexity estimation and constraints"
+            ]
+        }
+
+    async def _validate_research_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate RESEARCH step completion."""
+        # Check for Context7 usage or research indicators
+        research_indicators = [
+            "research", "best practices", "documentation", "library",
+            "framework", "context7", "study", "investigate"
+        ]
+
+        has_research = any(indicator in user_input.lower() for indicator in research_indicators)
+
+        # Also check if Context7 was triggered in this session
+        context7_triggered = await self.detect_context7_trigger(user_input)
+
+        completed = has_research or context7_triggered
+
+        return {
+            "completed": completed,
+            "has_research": has_research,
+            "context7_triggered": context7_triggered,
+            "missing_requirements": [] if completed else [
+                "Context7 research for best practices",
+                "Documentation of findings",
+                "Validation of approach with research"
+            ]
+        }
+
+    async def _validate_planning_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate PLANNING step completion."""
+        planning_indicators = [
+            "plan", "todo", "steps", "implementation", "breakdown",
+            "micro-tasks", "milestones", "acceptance criteria"
+        ]
+
+        has_planning = any(indicator in user_input.lower() for indicator in planning_indicators)
+
+        return {
+            "completed": has_planning,
+            "has_planning": has_planning,
+            "missing_requirements": [] if has_planning else [
+                "TodoWrite list creation for implementation",
+                "Micro-task breakdown (10-15 min tasks)",
+                "Definition of completion criteria"
+            ]
+        }
+
+    async def _validate_approval_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate APPROVAL step completion."""
+        approval_indicators = [
+            "approve", "approved", "confirm", "proceed", "ok", "agreed",
+            "accept", "go ahead", "move forward"
+        ]
+
+        has_approval = any(indicator in user_input.lower() for indicator in approval_indicators)
+
+        return {
+            "completed": has_approval,
+            "has_approval": has_approval,
+            "missing_requirements": [] if has_approval else [
+                "Explicit approval of the implementation plan",
+                "Confirmation of approach and timeline"
+            ]
+        }
+
+    async def _validate_implementation_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate IMPLEMENTATION step completion."""
+        implementation_indicators = [
+            "implement", "code", "write", "create", "build", "develop",
+            "complete", "finished", "done", "implemented"
+        ]
+
+        has_implementation = any(indicator in user_input.lower() for indicator in implementation_indicators)
+
+        return {
+            "completed": has_implementation,
+            "has_implementation": has_implementation,
+            "missing_requirements": [] if has_implementation else [
+                "Actual implementation of the planned features",
+                "Code completion and testing"
+            ]
+        }
+
+    async def _validate_verification_step(self, user_input: str) -> Dict[str, Any]:
+        """Validate VERIFICATION step completion."""
+        verification_indicators = [
+            "test", "verify", "validate", "check", "confirm working",
+            "quality assurance", "review", "passes", "successful"
+        ]
+
+        has_verification = any(indicator in user_input.lower() for indicator in verification_indicators)
+
+        return {
+            "completed": has_verification,
+            "has_verification": has_verification,
+            "missing_requirements": [] if has_verification else [
+                "Testing of implemented features",
+                "Quality assurance validation",
+                "Confirmation that requirements are met"
+            ]
+        }
+
+    async def _show_step_completion_summary(
+        self,
+        step: ProtocolStep,
+        validation_result: Dict[str, Any]
+    ) -> None:
+        """Show step completion summary to user."""
+        print(f"\n✅ STEP {step.value} COMPLETED: {step}")
+        print("=" * 60)
+        print(f"Step {step.value} has been successfully validated.")
+        print("Ready to proceed to next step.")
+        print("=" * 60)
+
+    async def _show_step_incompletion_details(
+        self,
+        step: ProtocolStep,
+        validation_result: Dict[str, Any]
+    ) -> None:
+        """Show step incompletion details to user."""
+        print(f"\n⚠️ STEP {step.value} INCOMPLETE: {step}")
+        print("=" * 60)
+        print("This step requires completion before proceeding:")
+
+        missing = validation_result.get("missing_requirements", [])
+        for i, requirement in enumerate(missing, 1):
+            print(f"  {i}. {requirement}")
+
+        print("=" * 60)
+
+    async def _prompt_step_progression(
+        self,
+        step: ProtocolStep,
+        validation_result: Dict[str, Any]
+    ) -> bool:
+        """
+        Prompt user for step progression confirmation.
+
+        Args:
+            step: Current protocol step
+            validation_result: Validation result
+
+        Returns:
+            True if user confirms progression, False otherwise
+        """
+        try:
+            # Try to use PyInquirer if available
+            try:
+                from PyInquirer import prompt
+
+                questions = [{
+                    'type': 'confirm',
+                    'name': 'proceed',
+                    'message': f'Step {step.value} completed. Proceed to next step?',
+                    'default': True
+                }]
+
+                answers = prompt(questions)
+                return answers.get('proceed', False)
+
+            except ImportError:
+                # Fallback to simple input
+                response = input(f"\nStep {step.value} completed. Proceed to next step? (y/N): ").lower()
+                return response.startswith('y')
+
+        except Exception as e:
+            self.base.debug_log(f"Step progression prompt error: {e}")
+            return True  # Default to proceeding on error
+
+    def _build_protocol_instructions(
+        self,
+        step: ProtocolStep,
+        workflow_result: Dict[str, Any]
+    ) -> str:
+        """
+        Build protocol instructions for enhanced user input.
+
+        Args:
+            step: Current protocol step
+            workflow_result: Result from workflow validation
+
+        Returns:
+            Protocol instructions string
+        """
+        instructions = [
+            "🎯 DevStream 7-Step Protocol Active",
+            f"Current Step: {step.value} - {step}",
+            "",
+            "Protocol Workflow:",
+            "DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION",
+            "",
+            "Quality Requirements:",
+            "• Context7 research for best practices",
+            "• @code-reviewer validation (OWASP Top 10)",
+            "• 95%+ test coverage",
+            "• Full documentation with examples",
+            "• Performance validation",
+            "",
+            f"Status: ✅ Step {step.value} validated - Ready for execution"
+        ]
+
+        return "\n".join(instructions)
+
     async def process(self, context: UserPromptSubmitContext) -> None:
         """
-        Main hook processing logic with Protocol Enforcement integration (FASE 2).
+        Main hook processing logic with FASE 3 Enhanced Protocol Enforcement.
+
+        Integrates full enforcement gate UI, interactive step validation, and complete
+        workflow enforcement from TASK_CREATION through VERIFICATION.
 
         Args:
             context: UserPromptSubmit context from cchooks
@@ -520,64 +1065,46 @@ This query appears to be related to task management. Consider using TodoWrite fo
             context.output.exit_success()
             return
 
-        # FASE 2: Protocol Enforcement Integration
+        # FASE 3: Enhanced Protocol Enforcement with Full Interactive UI
         if PROTOCOL_ENFORCEMENT_AVAILABLE and self.protocol_manager:
             try:
                 # Get current protocol state
                 current_state = await self.protocol_manager.get_current_state()
 
                 # Analyze task complexity for protocol enforcement
-                complexity = await self.estimate_task_complexity(user_input)
+                complexity = self.estimate_task_complexity(user_input)
 
                 if complexity["enforce_protocol"]:
                     self.base.debug_log(
-                        f"Protocol enforcement triggered: {complexity['triggers']} (score: {complexity['complexity_score']})"
+                        f"FASE 3 enforcement triggered: {complexity['triggers']} (score: {complexity['complexity_score']})"
                     )
 
-                    # Check if we need to enforce task creation first (Step 0)
-                    if current_state.protocol_step == ProtocolStep.IDLE:
-                        task_id = await self.task_handler.enforce_task_creation(user_input)
-                        if task_id:
-                            # Advance to DISCUSSION step with task created
-                            current_state = await self.protocol_manager.advance_step(
-                                current_state,
-                                ProtocolStep.DISCUSSION,
-                                task_id=task_id
-                            )
-                            self.base.debug_log(
-                                f"Task creation enforced: {task_id} → {current_state.protocol_step}"
-                            )
-
-                    # Show enforcement gate and handle user response
-                    enforcement_result = await self.enforcement_gate.show_enforcement_gate(
-                        user_input,
-                        complexity,
-                        current_state
+                    # ENHANCED: Full enforcement gate with interactive UI
+                    enforcement_result = await self._enhanced_protocol_enforcement(
+                        user_input, complexity, current_state
                     )
 
-                    if enforcement_result["decision"] == "cancel":
+                    if enforcement_result["action"] == "cancel":
                         self.base.debug_log("User cancelled protocol enforcement")
                         context.output.exit_success()
                         return
-                    elif enforcement_result["decision"] == "override":
-                        await self.enforcement_gate.log_override_decision(
-                            user_input,
-                            complexity,
-                            enforcement_result["risks_acknowledged"]
-                        )
-                        self.base.user_feedback(
-                            "⚠️ Protocol override chosen - quality gates disabled",
-                            FeedbackLevel.MINIMAL
+                    elif enforcement_result["action"] == "override":
+                        await self._handle_protocol_override(
+                            user_input, complexity, enforcement_result
                         )
                         # Continue with normal processing but with gates disabled
-                    else:  # protocol
-                        self.base.debug_log("Protocol enforcement approved")
-                        # Add protocol instructions to user input
-                        user_input = f"{user_input}\n\n{enforcement_result['protocol_instructions']}"
+                    elif enforcement_result["action"] == "protocol":
+                        # ENHANCED: Interactive step validation and progression
+                        user_input = await self._handle_protocol_workflow(
+                            user_input, current_state, enforcement_result
+                        )
+                    else:
+                        # Fallback: continue with normal processing
+                        self.base.debug_log("Using fallback processing mode")
 
             except Exception as e:
                 self.base.user_feedback(
-                    f"Protocol enforcement error: {e}",
+                    f"FASE 3 protocol enforcement error: {e}",
                     FeedbackLevel.MINIMAL
                 )
                 # Continue with normal processing on error

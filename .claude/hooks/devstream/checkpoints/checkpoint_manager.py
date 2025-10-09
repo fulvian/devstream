@@ -9,9 +9,14 @@ Implements commit d6ef593 functionality:
 
 import sqlite3
 import json
+import sys
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pathlib import Path
+
+# Import connection manager
+sys.path.append(str(Path(__file__).parent.parent / 'utils'))
+from connection_manager import get_connection_manager
 
 
 class CheckpointManager:
@@ -25,7 +30,7 @@ class CheckpointManager:
     - Query checkpoint history
     """
 
-    def __init__(self, db_path: str = "data/devstream_checkpoints.db"):
+    def __init__(self, db_path: str = "data.noindex/devstream_checkpoints.db"):
         """
         Initialize checkpoint manager.
 
@@ -33,66 +38,92 @@ class CheckpointManager:
             db_path: Path to SQLite database (use :memory: for testing)
         """
         self.db_path = db_path
+        # Get connection manager for WAL mode enforcement
+        if db_path != ":memory:":
+            self.conn_manager = get_connection_manager(db_path)
+        else:
+            self.conn_manager = None
         self._init_database()
 
     def _init_database(self) -> None:
-        """Initialize checkpoint database schema."""
+        """Initialize checkpoint database schema via ConnectionManager."""
         # Ensure directory exists
         if self.db_path != ":memory:":
             db_dir = Path(self.db_path).parent
             if not db_dir.exists():
                 db_dir.mkdir(parents=True, exist_ok=True)
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        if self.conn_manager:
+            # Use connection manager (automatic WAL mode)
+            with self.conn_manager.get_connection() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        description TEXT,
+                        context TEXT,
+                        created_at TEXT NOT NULL,
+                        git_commit TEXT,
+                        active_task TEXT
+                    )
+                """)
+                # Commit handled by context manager
+        else:
+            # Memory database (testing)
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS checkpoints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        description TEXT,
+                        context TEXT,
+                        created_at TEXT NOT NULL,
+                        git_commit TEXT,
+                        active_task TEXT
+                    )
+                """)
+                conn.commit()
+            finally:
+                conn.close()
 
-        try:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS checkpoints (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    type TEXT NOT NULL,
-                    description TEXT,
-                    context TEXT,
-                    created_at TEXT NOT NULL,
-                    git_commit TEXT,
-                    active_task TEXT
-                )
-            """)
-
-            conn.commit()
-        finally:
-            conn.close()
-
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self):
         """
-        Get database connection with table initialized.
+        Get database connection via ConnectionManager.
 
         Returns:
-            SQLite connection
+            Context manager for database connection (WAL mode enforced)
 
         Note:
-            This ensures table exists before operations.
-            For :memory: databases, table is created in-connection.
+            For :memory: databases, returns direct connection.
         """
-        conn = sqlite3.connect(self.db_path)
-
-        # Ensure table exists for this connection
-        # (Required for :memory: databases)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS checkpoints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL,
-                description TEXT,
-                context TEXT,
-                created_at TEXT NOT NULL,
-                git_commit TEXT,
-                active_task TEXT
-            )
-        """)
-        conn.commit()
-
-        return conn
+        if self.conn_manager:
+            # Production: Use connection manager (WAL mode + pooling)
+            return self.conn_manager.get_connection()
+        else:
+            # Testing: Memory database (no ConnectionManager needed)
+            class MemoryConnectionContext:
+                def __init__(self, db_path):
+                    self.db_path = db_path
+                    self.conn = None
+                def __enter__(self):
+                    self.conn = sqlite3.connect(self.db_path)
+                    self.conn.execute("""
+                        CREATE TABLE IF NOT EXISTS checkpoints (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            description TEXT,
+                            context TEXT,
+                            created_at TEXT NOT NULL,
+                            git_commit TEXT,
+                            active_task TEXT
+                        )
+                    """)
+                    return self.conn
+                def __exit__(self, *args):
+                    if self.conn:
+                        self.conn.close()
+            return MemoryConnectionContext(self.db_path)
 
     async def create_checkpoint(
         self,
