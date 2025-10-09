@@ -22,7 +22,7 @@ DevStream combines: (1) Task Lifecycle Management, (2) Semantic Memory System, (
 
 ```
 Level 1: ORCHESTRATOR (@tech-lead) - Task decomposition, multi-agent coordination, architectural decisions
-         └── AUTO-DELEGATION SYSTEM (Phase 3 ✅) - Pattern-based intelligent agent routing
+         └── TIER-BASED DELEGATION (Protocol v2.2.0 ✅) - Complexity-based intelligent routing
 Level 2: DOMAIN SPECIALISTS (6 agents ✅)
   @python-specialist     - Python 3.11+, FastAPI, Django, async, pytest, type-safe
   @typescript-specialist - TypeScript, React, Next.js, Server Components, hooks, optimization
@@ -89,185 +89,6 @@ Level 4: QUALITY ASSURANCE - @code-reviewer (OWASP Top 10, performance, architec
 **Problem Solved**: JavaScript heap exhaustion during agent execution
 **Fix**: `node --max-old-space-size=8192 --expose-gc start-production.js` (8GB heap, explicit GC, memory cleanup)
 **Status**: Production stable ✅
-
-### Agent Auto-Delegation System (Phase 3 ✅ - ALWAYS-ON)
-
-**Purpose**: Intelligent, automatic agent selection based on file patterns and task context.
-
-**STATUS**: ALWAYS-ON - Delegation analysis runs for EVERY user request automatically.
-
-#### Default Ownership Model
-
-**@tech-lead** owns ALL user requests by default and decides delegation strategy via automatic pattern analysis:
-
-```
-User Request
-    ↓
-@tech-lead (Default Owner)
-    ↓
-Pattern Matcher Analysis
-    ↓
-┌─────────────────────────────────────────────────────────┐
-│ AUTOMATIC DELEGATION     │ AUTHORIZATION REQUIRED        │
-├──────────────────────────┼───────────────────────────────┤
-│ Confidence ≥ 0.95        │ Confidence < 0.95             │
-│ Single-language task     │ Multi-stack coordination      │
-│ Clear file patterns      │ Architectural decisions       │
-│ Domain specialist match  │ Strategic planning            │
-└──────────────────────────┴───────────────────────────────┘
-    ↓                              ↓
-Direct Delegation           @tech-lead Coordination
-(e.g., @python-specialist)  (Multi-agent orchestration)
-```
-
-#### Pattern Matcher Logic
-
-**File Pattern → Agent Mapping**:
-
-| File Pattern | Agent | Confidence | Auto-Approve |
-|--------------|-------|------------|--------------|
-| `**/*.py` | @python-specialist | 0.95 | ✅ YES |
-| `**/*.ts`, `**/*.tsx` | @typescript-specialist | 0.95 | ✅ YES |
-| `**/*.rs` | @rust-specialist | 0.95 | ✅ YES |
-| `**/*.go` | @go-specialist | 0.95 | ✅ YES |
-| `**/schema.sql`, `**/migrations/*.sql` | @database-specialist | 0.90 | ✅ YES |
-| `**/Dockerfile`, `**/*.yaml` (CI/CD) | @devops-specialist | 0.90 | ✅ YES |
-| Mixed patterns | @tech-lead | 0.70 | ❌ AUTHORIZATION REQUIRED |
-
-**Confidence Thresholds**:
-- **≥ 0.95**: AUTOMATIC delegation (single language, clear context)
-- **0.85 - 0.94**: ADVISORY delegation (suggest agent, request approval)
-- **< 0.85**: AUTHORIZATION REQUIRED (@tech-lead coordination)
-
-#### Quality Gate Enforcement (MANDATORY)
-
-**Pre-Commit Trigger**: EVERY `git commit` command triggers automatic @code-reviewer delegation.
-
-```bash
-# User attempts commit
-git commit -m "Add user authentication"
-    ↓
-Auto-Delegation Hook Detects Commit Intent
-    ↓
-MANDATORY @code-reviewer Invocation
-    ↓
-Quality Gate Validation:
-  ✅ OWASP Top 10 security checks
-  ✅ Performance analysis
-  ✅ Architecture review
-  ✅ Test coverage validation
-    ↓
-┌─────────────────┬─────────────────────┐
-│ ✅ PASS         │ ❌ FAIL             │
-├─────────────────┼─────────────────────┤
-│ Commit proceeds │ Commit blocked      │
-│                 │ Issues reported     │
-│                 │ Fix required        │
-└─────────────────┴─────────────────────┘
-```
-
-**Bypass FORBIDDEN**: Cannot skip @code-reviewer for commits (enforced by hook system).
-
-#### Usage Examples
-
-**Example 1: Python File Auto-Delegation**
-```bash
-# User request
-"Update src/api/users.py to add email validation"
-
-# Auto-Delegation Process
-@tech-lead (receives request)
-  → Pattern Matcher: src/api/users.py → *.py pattern
-  → Confidence: 0.95 (single Python file)
-  → Decision: AUTOMATIC delegation
-  → Task(@python-specialist): "Update src/api/users.py to add email validation"
-
-# Result: Direct specialist execution, no manual approval needed
-```
-
-**Example 2: Quality Gate Enforcement**
-```bash
-# User request
-"Commit the authentication implementation"
-
-# Auto-Delegation Process
-@tech-lead (receives request)
-  → Detects: git commit intent
-  → Mandatory Quality Gate: Invoke @code-reviewer
-  → Task(@code-reviewer): "Review authentication implementation in src/auth/"
-  → @code-reviewer validates:
-    ✅ JWT secret not hardcoded
-    ✅ Password hashing uses bcrypt
-    ✅ Rate limiting implemented
-    ⚠️  Warning: Missing session timeout configuration
-  → Reports findings to @tech-lead
-  → @tech-lead decides: Proceed with commit + create follow-up task for session timeout
-
-# Result: Commit allowed with actionable security feedback
-```
-
-**Example 3: Multi-Stack Task (Authorization Required)**
-```bash
-# User request
-"Build full-stack user dashboard with Python backend and React frontend"
-
-# Auto-Delegation Process
-@tech-lead (receives request)
-  → Pattern Matcher: Detects multiple languages (*.py + *.tsx)
-  → Confidence: 0.70 (multi-stack coordination required)
-  → Decision: AUTHORIZATION REQUIRED
-  → @tech-lead analyzes:
-    - Backend: User API endpoints (Python/FastAPI)
-    - Frontend: Dashboard UI (TypeScript/React)
-    - Integration: API client + state management
-  → Orchestration Plan:
-    1. Task(@python-specialist): "Implement backend user API"
-    2. Task(@typescript-specialist): "Build React dashboard consuming /api/users"
-    3. Task(@code-reviewer): "Review full-stack integration"
-
-# Result: Coordinated multi-agent workflow with sequential delegation
-```
-
-#### Configuration Flags (.env.devstream)
-
-```bash
-# Auto-Delegation System (Phase 3)
-DEVSTREAM_AUTO_DELEGATION_ENABLED=true          # Enable/disable auto-delegation
-DEVSTREAM_AUTO_DELEGATION_MIN_CONFIDENCE=0.85   # Minimum confidence for suggestions
-DEVSTREAM_AUTO_DELEGATION_AUTO_APPROVE=0.95     # Threshold for automatic approval
-DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer for commits
-```
-
-**Flag Descriptions**:
-- `ENABLED`: Master switch for auto-delegation system
-- `MIN_CONFIDENCE`: Minimum confidence to suggest agent (below this → @tech-lead coordination)
-- `AUTO_APPROVE`: Confidence threshold for automatic delegation (no approval needed)
-- `QUALITY_GATE`: Enforce mandatory @code-reviewer before commits (RECOMMENDED: true)
-
-#### Advisory vs Automatic Delegation (ALWAYS-ON)
-
-**CRITICAL**: Delegation analysis runs for EVERY user request via UserPromptSubmit + PreToolUse hooks.
-
-**AUTOMATIC** (Confidence ≥ 0.95):
-- ✅ Single file, clear language pattern
-- ✅ Direct specialist match
-- ✅ No architectural decisions required
-- ✅ Execution: Immediate delegation, no approval
-- 🤖 **Always checked**: UserPromptSubmit hook analyzes BEFORE user works
-
-**ADVISORY** (0.85 ≤ Confidence < 0.95):
-- 🔔 Multiple related files, same language
-- 🔔 Clear primary specialist, minor coordination
-- 🔔 Execution: Suggest agent, request approval
-- 🔔 User confirms: "Use @python-specialist" → Proceed
-- 🤖 **Always checked**: Advisory shown in context injection
-
-**AUTHORIZATION REQUIRED** (Confidence < 0.85):
-- ⚠️ Multi-stack coordination
-- ⚠️ Architectural decisions
-- ⚠️ Strategic planning
-- ⚠️ Execution: @tech-lead full analysis + orchestration
-- 🤖 **Always checked**: Coordination advisory provided
 
 ### Tier-Based Delegation Policy (Protocol v2.2.0 - Token Optimization)
 
@@ -978,11 +799,11 @@ DEVSTREAM_CONTEXT_INJECTION_ENABLED=true
 DEVSTREAM_CONTEXT_MAX_TOKENS=2000
 DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5
 
-# Auto-Delegation System (Phase 3 - MANDATORY)
-DEVSTREAM_AUTO_DELEGATION_ENABLED=true          # Enable intelligent agent routing
-DEVSTREAM_AUTO_DELEGATION_MIN_CONFIDENCE=0.85   # Minimum confidence for delegation suggestions
-DEVSTREAM_AUTO_DELEGATION_AUTO_APPROVE=0.95     # Auto-approve threshold (≥0.95 = automatic)
-DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true     # Enforce @code-reviewer before commits (RECOMMENDED)
+# Tier-Based Delegation (Protocol v2.2.0 - MANDATORY)
+DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true   # Monolithic first (default)
+DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95 # Single specialist confidence
+DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70 # Multi-agent coordination
+DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true    # Mandatory @code-reviewer
 
 # Database (MANDATORY)
 DEVSTREAM_DB_PATH=data/devstream.db

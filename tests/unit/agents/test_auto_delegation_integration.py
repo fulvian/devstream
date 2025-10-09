@@ -1,5 +1,16 @@
 """
-Unit tests for Agent Auto-Delegation System (Fix A2).
+⚠️ DEPRECATED (2025-10-09) - Archived for historical reference only
+
+This test suite tests the DEPRECATED Agent Auto-Delegation System (Phase 3),
+which has been SUPERSEDED by Tier-Based Delegation Policy (Protocol v2.2.0).
+
+Replacement: See CLAUDE.md Tier-Based Delegation section
+Reason: Token optimization (-70% overhead reduction)
+Status: Archived (tests may fail as implementation was not deployed)
+
+---
+
+Unit tests for Agent Auto-Delegation System (Fix A2) - DEPRECATED.
 
 Tests:
 - Python file pattern (confidence ≥ 0.95)

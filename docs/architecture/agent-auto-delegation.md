@@ -1,8 +1,21 @@
 # DevStream Agent Auto-Delegation System
 
+> ⚠️ **DEPRECATED (2025-10-09) - DO NOT USE**
+>
+> This system has been **SUPERSEDED** by **Tier-Based Delegation Policy (Protocol v2.2.0)**.
+>
+> **Replacement**: See [Tier-Based Delegation](../../CLAUDE.md#tier-based-delegation-policy-protocol-v220---token-optimization) in CLAUDE.md
+>
+> **Status**: Archived for historical reference only
+> **Reason for deprecation**: Token overhead optimization (-70% reduction with Tier-Based approach)
+> **Migration**: All config flags disabled in `.env.devstream` (see lines 46-67)
+
+---
+
 **Version**: 0.1.0-beta (Phase 3 Complete)
-**Status**: Production Ready
+**Status**: ❌ DEPRECATED - Replaced by Tier-Based Delegation
 **Last Updated**: 2025-10-02
+**Deprecated**: 2025-10-09
 
 ---
 
