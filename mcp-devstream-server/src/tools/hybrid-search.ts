@@ -159,7 +159,10 @@ export class HybridSearchEngine {
       const embeddingFloat32 = new Float32Array(queryEmbedding);
       const embeddingBuffer = Buffer.from(embeddingFloat32.buffer);
 
-      // Context7 pattern: RRF hybrid search with CTEs
+      // Context7 pattern: RRF hybrid search with CTEs using UNION ALL (SQLite-compatible)
+      // Reference: https://github.com/asg017/sqlite-vec/blob/main/examples/nbc-headlines/3_search.ipynb
+      // Note: Using UNION ALL instead of FULL OUTER JOIN for SQLite compatibility
+      // The pattern simulates FULL OUTER JOIN by combining FTS and vector results separately
       const sql = `
         WITH vec_matches AS (
           SELECT
@@ -180,25 +183,43 @@ export class HybridSearchEngine {
           LIMIT ?
         ),
         combined AS (
+          -- FTS results
           SELECT
-            semantic_memory.id as memory_id,
-            semantic_memory.content,
-            semantic_memory.content_type,
-            semantic_memory.created_at,
-            vec_matches.rank_number as vec_rank,
-            fts_matches.rank_number as fts_rank,
-            (
-              COALESCE(1.0 / (? + fts_matches.rank_number), 0.0) * ?
-              + COALESCE(1.0 / (? + vec_matches.rank_number), 0.0) * ?
-            ) as combined_rank,
-            vec_matches.distance as vec_distance,
-            fts_matches.score as fts_score
+            memory_id,
+            NULL as vec_rank,
+            rank_number as fts_rank,
+            NULL as vec_distance,
+            score as fts_score
           FROM fts_matches
-          FULL OUTER JOIN vec_matches ON vec_matches.memory_id = fts_matches.memory_id
-          JOIN semantic_memory ON semantic_memory.id = COALESCE(fts_matches.memory_id, vec_matches.memory_id)
-          ORDER BY combined_rank DESC
+
+          UNION ALL
+
+          -- Vector results
+          SELECT
+            memory_id,
+            rank_number as vec_rank,
+            NULL as fts_rank,
+            distance as vec_distance,
+            NULL as fts_score
+          FROM vec_matches
         )
-        SELECT * FROM combined
+        SELECT
+          semantic_memory.id as memory_id,
+          semantic_memory.content,
+          semantic_memory.content_type,
+          semantic_memory.created_at,
+          MAX(combined.vec_rank) as vec_rank,
+          MAX(combined.fts_rank) as fts_rank,
+          (
+            COALESCE(1.0 / (? + MAX(combined.fts_rank)), 0.0) * ?
+            + COALESCE(1.0 / (? + MAX(combined.vec_rank)), 0.0) * ?
+          ) as combined_rank,
+          MAX(combined.vec_distance) as vec_distance,
+          MAX(combined.fts_score) as fts_score
+        FROM combined
+        JOIN semantic_memory ON semantic_memory.id = combined.memory_id
+        GROUP BY semantic_memory.id
+        ORDER BY combined_rank DESC
       `;
 
       // Context7 best practice: Sanitize FTS5 query to prevent special character parsing errors

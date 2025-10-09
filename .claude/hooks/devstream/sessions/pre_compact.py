@@ -51,6 +51,7 @@ from mcp_client import get_mcp_client
 from session_data_extractor import SessionDataExtractor
 from session_summary_generator import SessionSummaryGenerator
 from atomic_file_writer import write_atomic
+from ollama_client import OllamaEmbeddingClient
 
 
 class PreCompactHook:
@@ -68,6 +69,7 @@ class PreCompactHook:
         """Initialize PreCompact hook with required components."""
         self.base = DevStreamHookBase("pre_compact")
         self.mcp_client = get_mcp_client()
+        self.ollama_client = OllamaEmbeddingClient()
 
         # Initialize components (reuse from session_end)
         self.data_extractor = SessionDataExtractor()
@@ -115,12 +117,12 @@ class PreCompactHook:
             self.base.debug_log(f"Failed to get active session: {e}")
             return None
 
-    async def generate_and_store_summary(self, session_id: str) -> Optional[str]:
+    async def generate_summary_only(self, session_id: str) -> Optional[str]:
         """
-        Generate session summary and store in DevStream memory.
+        Generate session summary WITHOUT MCP storage.
 
-        Orchestrates data extraction, summary generation, and storage.
-        Reuses existing components from session_end hook.
+        Extracts session data and generates summary markdown.
+        Does NOT store in DevStream memory (decoupled from MCP).
 
         Args:
             session_id: Session identifier
@@ -129,7 +131,8 @@ class PreCompactHook:
             Summary markdown text if successful, None otherwise
 
         Note:
-            Graceful degradation - returns None on any error
+            Reuses SessionDataExtractor and SessionSummaryGenerator
+            from session_end.py pattern (Context7 compliant).
         """
         try:
             self.base.debug_log(f"Generating summary for session: {session_id[:8]}...")
@@ -195,35 +198,103 @@ class PreCompactHook:
                 f"Summary generated: {len(summary_markdown)} chars"
             )
 
-            # Step 5: Store summary in memory with embedding
-            self.base.debug_log("Step 5: Storing summary in memory...")
-
-            # Store via MCP (reuses pattern from session_end.py lines 178-261)
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_store_memory",
-                {
-                    "content": summary_markdown,
-                    "content_type": "context",
-                    "keywords": [
-                        "session",
-                        "summary",
-                        session_id,
-                        "pre-compact"
-                    ]
-                }
-            )
-
-            if result:
-                self.base.debug_log("Summary stored in memory successfully")
-            else:
-                self.base.debug_log("Summary storage failed (non-blocking)")
-
-            return summary_markdown
+            return summary_markdown  # Return WITHOUT MCP storage
 
         except Exception as e:
-            self.base.debug_log(f"Failed to generate/store summary: {e}")
+            self.base.debug_log(f"Summary generation failed: {e}")
             return None
+
+    async def store_summary_direct_db(
+        self,
+        summary: str,
+        session_id: str
+    ) -> bool:
+        """
+        Store summary directly in semantic_memory bypassing MCP.
+
+        Uses Context7 patterns:
+        - aiosqlite async context manager (transaction safety)
+        - OllamaEmbeddingClient with graceful degradation
+        - Explicit commit (no auto-commit)
+
+        Args:
+            summary: Summary markdown text
+            session_id: Session identifier
+
+        Returns:
+            True if successful, False otherwise (non-blocking)
+
+        Note:
+            Stores WITHOUT embedding if Ollama unavailable (graceful degradation).
+            SQL trigger auto-generates vec_semantic_memory if embedding present.
+
+        Pattern Reference:
+            session_summary_manager.py:491-528 (store_summary method)
+        """
+        try:
+            import json
+            import hashlib
+            from datetime import datetime
+
+            # Step 1: Generate embedding (graceful degradation)
+            self.base.debug_log("Generating embedding for summary...")
+            embedding = self.ollama_client.generate_embedding(summary)
+
+            if not embedding:
+                self.base.debug_log(
+                    "Embedding generation failed - storing without embedding"
+                )
+                embedding_json = None
+                embedding_model = None
+                embedding_dim = None
+            else:
+                embedding_json = json.dumps(embedding)
+                embedding_model = self.ollama_client.model
+                embedding_dim = len(embedding)
+                self.base.debug_log(
+                    f"Embedding generated: {embedding_dim} dimensions"
+                )
+
+            # Step 2: Generate memory ID (SHA256 hash)
+            timestamp_str = datetime.now().isoformat()
+            memory_id = hashlib.sha256(
+                f"pre-compact-{session_id}-{timestamp_str}".encode()
+            ).hexdigest()[:32]
+
+            # Step 3: Direct DB write (Context7 aiosqlite pattern)
+            self.base.debug_log(f"Writing to semantic_memory: {memory_id[:8]}...")
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO semantic_memory (
+                        id, content, content_type, keywords,
+                        embedding, embedding_model, embedding_dimension,
+                        session_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        memory_id,
+                        summary,
+                        "context",
+                        json.dumps(["session", "summary", session_id, "pre-compact"]),
+                        embedding_json,
+                        embedding_model,
+                        embedding_dim,
+                        session_id
+                    )
+                )
+                await db.commit()  # Explicit commit (Context7 pattern)
+
+            self.base.debug_log(
+                f"✅ Summary stored in DB: {memory_id[:8]}... "
+                f"(embedding: {'yes' if embedding_json else 'no'})"
+            )
+            return True
+
+        except Exception as e:
+            self.base.debug_log(f"Direct DB storage failed: {e}")
+            return False  # Non-blocking (graceful degradation)
 
     async def write_marker_file(self, summary: str) -> bool:
         """
@@ -293,26 +364,34 @@ class PreCompactHook:
                     context.output.exit_success()
                 return
 
-            # Generate and store summary
-            summary = await self.generate_and_store_summary(session_id)
+            # Generate summary ONLY (no MCP dependency)
+            summary = await self.generate_summary_only(session_id)
 
             if not summary:
-                self.base.debug_log("Summary generation failed (non-blocking)")
+                self.base.debug_log("Summary generation failed")
                 if context:
-                    context.output.exit_non_block("Summary generation failed")
-                    # Still allow compaction to proceed
                     context.output.exit_success()
                 return
 
-            # Write marker file
+            # ALWAYS write marker file (CRITICAL PATH)
             marker_written = await self.write_marker_file(summary)
 
             if marker_written:
+                self.base.debug_log("✅ Marker file written successfully")
+            else:
+                self.base.debug_log("⚠️  Marker file write failed")
+
+            # BEST-EFFORT: Store in DB (non-blocking)
+            db_written = await self.store_summary_direct_db(summary, session_id)
+
+            if db_written:
                 self.base.success_feedback(
-                    "Session summary preserved before compaction"
+                    "Session summary preserved (marker file + DB)"
                 )
             else:
-                self.base.debug_log("Marker file write failed (non-blocking)")
+                self.base.debug_log(
+                    "DB storage failed (marker file OK - SessionStart will work)"
+                )
 
             # Always allow compaction to proceed
             if context:
