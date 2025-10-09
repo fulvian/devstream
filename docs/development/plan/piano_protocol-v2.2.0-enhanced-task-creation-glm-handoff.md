@@ -569,6 +569,154 @@ async def enhance_context(user_prompt: str) -> Dict[str, Any]:
 
 ---
 
+### Task 15: Phase Checkpoint Hook with Auto-Push (1 hour)
+**File**: `.claude/hooks/devstream/phases/phase_checkpoint.py`
+**Action**: Automate checkpoint creation and git commit/push at phase completion
+
+**Workflow**:
+1. Detect phase completion via TodoWrite monitoring (all tasks in phase = "completed")
+2. Create checkpoint via CheckpointManager with metadata
+3. Extract phase info (phase number, description, completed tasks)
+4. git add . && git commit -m "PHASE X/Y - <description> COMPLETE"
+5. Automatic git push origin <branch> (DEVSTREAM_PHASE_AUTO_PUSH=true)
+6. Store phase completion metadata in DevStream memory
+7. Log phase checkpoint audit trail
+
+**Configuration (.env.devstream)**:
+```bash
+DEVSTREAM_PHASE_CHECKPOINT_ENABLED=true
+DEVSTREAM_PHASE_AUTO_PUSH=true           # Auto-push automatico
+DEVSTREAM_PHASE_AUTO_COMMIT=true
+DEVSTREAM_PHASE_COMMIT_PREFIX="PHASE"
+```
+
+**Acceptance Criteria**:
+- [ ] Phase detection accurate (100% detection rate via TodoWrite parsing)
+- [ ] Checkpoint created with full metadata (git commit hash, task list, timestamps)
+- [ ] Git commit with descriptive message following GitOps best practices
+- [ ] Auto-push executed successfully (with error handling + retry logic)
+- [ ] Phase metadata stored in DevStream memory
+- [ ] Graceful degradation if git operations fail (log warning, continue execution)
+- [ ] Tests written (unit + integration)
+
+**Test File**: `tests/integration/test_phase_checkpoint.py`
+
+**Integration Points**:
+- PostToolUse hook triggers phase detection after TodoWrite updates
+- CheckpointManager provides atomic savepoint functionality
+- Git operations use subprocess with proper error handling
+- Memory storage for phase completion audit trail
+
+**Commit Message Template**:
+```
+PHASE {phase_number}/{phase_total} - {phase_description} COMPLETE
+
+Tasks Completed:
+{task_list}
+
+Checkpoint ID: {checkpoint_id}
+Duration: {duration} minutes
+Files Modified: {file_count}
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+---
+
+### Task 16: Agent Delegation Policy with Token Optimization (45 min)
+**File**: `CLAUDE.md` (Agent Usage Policy section)
+**Action**: Update agent delegation policy with tier-based hybrid approach for 70% token overhead reduction
+
+**Policy Structure**:
+
+**TIER 1: Monolithic First (60% of tasks - 0 overhead)**
+- Trigger: Single file, <50K tokens, <1h duration
+- Agent: NONE (Sonnet 4.5 solo, no delegation)
+- Token Overhead: 0 tokens
+- Examples: Bug fixes, single endpoint implementation, documentation updates
+
+**TIER 2: Single Specialist (30% of tasks - 2K overhead)**
+- Trigger: File pattern match (*.py → @python-specialist)
+- Agent: 1 specialist ONLY (no @tech-lead coordination)
+- Token Overhead: ~2K tokens (Context7 + Memory for 1 specialist)
+- Examples:
+  - `.py` file → @python-specialist
+  - `.ts/.tsx` file → @typescript-specialist
+  - `.sql` schema → @database-specialist
+  - `.md` docs → @documentation-specialist
+  - `.rs` file → @rust-specialist
+  - `.go` file → @go-specialist
+
+**TIER 3: Multi-Agent Orchestration (5% of tasks - 7K overhead)**
+- Trigger: Multi-stack (Python + TypeScript + DB) OR >100K context
+- Agent: @tech-lead → delegates N specialists
+- Token Overhead: ~7K tokens (Context7 5K + Memory 2K)
+- Examples: Full-stack features, system-wide refactoring
+
+**TIER 4: Quality Gate (5% of tasks - MANDATORY - 1K overhead)**
+- Trigger: `git commit` command (automatic detection)
+- Agent: @code-reviewer (ALWAYS, non-negotiable)
+- Token Overhead: ~1K tokens (code analysis only)
+- Examples: EVERY commit, EVERY security-sensitive change
+
+**Auto-Delegation Configuration**:
+```bash
+# .env.devstream
+DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true   # Monolithic first (default)
+DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95 # Single specialist confidence
+DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70 # Multi-agent coordination
+DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true    # Mandatory @code-reviewer
+```
+
+**Pattern Matcher Updates**:
+```python
+# .claude/hooks/devstream/agents/pattern_matcher.py
+
+def get_delegation_tier(context: Dict[str, Any]) -> Tuple[int, str, float]:
+    """
+    Determine delegation tier based on context.
+
+    Returns:
+        (tier_number, agent_name, confidence)
+    """
+    # Tier 1: Monolithic (no delegation)
+    if is_simple_task(context):
+        return (1, None, 1.0)
+
+    # Tier 2: Single specialist
+    if has_clear_file_pattern(context):
+        agent = match_specialist_by_file(context["file_path"])
+        return (2, agent, 0.95)
+
+    # Tier 3: Multi-agent
+    if is_multi_stack(context):
+        return (3, "@tech-lead", 0.70)
+
+    # Tier 4: Quality gate
+    if is_commit_operation(context):
+        return (4, "@code-reviewer", 1.0)
+```
+
+**Acceptance Criteria**:
+- [ ] CLAUDE.md updated with tier-based policy
+- [ ] All 17 agents preserved (no reduction, only usage optimization)
+- [ ] Auto-delegation thresholds configured in .env.devstream
+- [ ] Pattern matcher updated with tier logic
+- [ ] Token overhead reduction validated (-70% average)
+- [ ] Cost analysis examples documented
+- [ ] Examples provided for each tier
+- [ ] Quality gate enforcement maintained (MANDATORY)
+
+**Expected Impact**:
+- **Token Savings**: -5700 tokens per task average (-70% overhead)
+- **Claude Code Max Limit**: 28 tasks/5h → 100 tasks/5h (3.5x improvement)
+- **Quality Maintained**: @code-reviewer mandatory for all commits
+- **Agent Utilization**: All 17 agents available, used strategically
+
+---
+
 ## ✅ QUALITY GATES
 
 ### Testing Requirements
@@ -602,11 +750,13 @@ sqlite3 data/devstream.db "PRAGMA integrity_check;"
 ## 📊 SUCCESS METRICS
 
 **Implementation**:
-- [ ] 14/14 micro-tasks completed
+- [ ] 16/16 micro-tasks completed (14 original + 2 new)
 - [ ] All tests passing (unit + integration)
 - [ ] Type safety: Zero errors
 - [ ] Database migration successful
 - [ ] MCP tools registered and callable
+- [ ] Phase checkpoint automation working
+- [ ] Agent delegation policy optimized
 
 **Functionality**:
 - [ ] Task creation at Step 1 working
@@ -614,6 +764,8 @@ sqlite3 data/devstream.db "PRAGMA integrity_check;"
 - [ ] Plans saved to DB + filesystem
 - [ ] Handoff prompts generated correctly
 - [ ] Protocol v2.2.0 documented
+- [ ] Auto-commit/push at phase completion
+- [ ] Tier-based agent delegation active
 
 **Quality**:
 - [ ] Test coverage ≥ 95%
@@ -621,51 +773,77 @@ sqlite3 data/devstream.db "PRAGMA integrity_check;"
 - [ ] No Python type errors (mypy)
 - [ ] No database integrity issues
 - [ ] Performance targets met
+- [ ] Token overhead reduction validated (-70%)
+
+**Token Optimization Impact**:
+- [ ] Tier 1 (Monolithic): 60% tasks, 0 overhead
+- [ ] Tier 2 (Single Specialist): 30% tasks, 2K overhead
+- [ ] Tier 3 (Multi-Agent): 5% tasks, 7K overhead
+- [ ] Tier 4 (Quality Gate): 5% tasks, 1K overhead
+- [ ] Average savings: -5700 tokens/task
+- [ ] Claude Code Max: 28 → 100 tasks/5h (3.5x improvement)
 
 ---
 
 ## 🚀 DEPLOYMENT STRATEGY
 
-### Phase 1: Database & Core (Tasks 1-4)
+### Phase 1: Database & Core (Tasks 1-4) ✅
 - Database schema migration
 - TypeScript interfaces
 - MCP tools implementation
 - Tool registration
 
-### Phase 2: Templates (Tasks 5-7)
+### Phase 2: Templates (Tasks 5-7) ✅
 - GLM-4.6 template
 - Sonnet 4.5 template
 - Handoff prompt template
 
-### Phase 3: Hooks & Integration (Tasks 8-10)
-- Protocol enforcer hook
-- Plan generator hook
-- UserPromptSubmit enhancement
+### Phase 3: Hooks & Integration (Tasks 8-10) ⚠️
+- Protocol enforcer hook ✅
+- Plan generator hook ❌ (Task 9 - TO IMPLEMENT)
+- UserPromptSubmit enhancement ✅
 
-### Phase 4: Documentation & Testing (Tasks 11-14)
-- CLAUDE.md update
-- Architecture documentation
-- E2E tests
-- Complete workflow validation
+### Phase 4: Documentation & Testing (Tasks 11-14) ⚠️
+- CLAUDE.md update ✅
+- Architecture documentation ✅
+- E2E tests ❌ (Task 13 - TO IMPLEMENT)
+- Complete workflow validation ❌ (Task 14 - TO IMPLEMENT)
+
+### Phase 5: Automation & Optimization (Tasks 15-16) ❌ NEW
+- Phase checkpoint hook with auto-push (Task 15)
+- Agent delegation policy optimization (Task 16)
 
 ---
 
 ## 🎯 NEXT STEPS
 
-1. **APPROVED** ✅ - Plan reviewed and accepted
-2. **BEGIN** Task 1: Database schema migration
-3. **PROCEED** sequentially through micro-tasks
-4. **VALIDATE** after each phase
-5. **COMPLETE** with full workflow validation
+### Current Status (2025-10-09)
+**Phases 1-2 COMPLETE** ✅ (Tasks 1-7: 100%)
+**Phase 3 PARTIAL** ⚠️ (Tasks 8, 10: 100% | Task 9: 0%)
+**Phase 4 PARTIAL** ⚠️ (Tasks 11-12: 100% | Tasks 13-14: 0%)
+**Phase 5 PENDING** ❌ (Tasks 15-16: 0%)
+
+### Implementation Order
+1. **PHASE 3 COMPLETION**: Implement Task 9 (Plan Generator Hook)
+2. **PHASE 4 COMPLETION**: Implement Tasks 13-14 (E2E Tests + Validation)
+3. **PHASE 5 AUTOMATION**: Implement Task 15 (Phase Checkpoint Hook)
+4. **PHASE 5 OPTIMIZATION**: Implement Task 16 (Agent Delegation Policy)
+5. **FINAL VALIDATION**: End-to-end workflow testing with all 16 tasks
+
+### Automation Strategy (NEW)
+- **Auto-commit/push**: After EACH task completion (via Phase Checkpoint Hook)
+- **Agent delegation**: Tier-based approach (monolithic-first, selective delegation)
+- **Token optimization**: -70% overhead via strategic agent usage
 
 ---
 
 **Prepared by**: Claude Sonnet 4.5
-**Research**: Context7 + Web (GLM-4.6, Sonnet 4.5, agentic best practices)
-**Implementation Timeline**: 8 hours (14 micro-tasks)
+**Research**: Context7 + Web (GLM-4.6, Sonnet 4.5, agentic best practices, GitOps 2025)
+**Implementation Timeline**: 10.5 hours (16 micro-tasks: 14 original + 2 new)
 **Priority**: Critical (9/10)
-**Status**: APPROVED - Ready for Implementation
+**Status**: 11/16 COMPLETE (69%) - Phase 3-5 In Progress
+**Updated**: 2025-10-09 (Tasks 15-16 added for automation & optimization)
 
 ---
 
-*This plan incorporates research findings from official documentation, performance benchmarks, and agentic coding best practices to create model-optimized templates and cost-efficient workflows.*
+*This plan incorporates research findings from official documentation, performance benchmarks, agentic coding best practices, and GitOps automation patterns (2025) to create model-optimized templates, cost-efficient workflows, and automated phase checkpoints.*
