@@ -145,3 +145,5 @@ app/
 async_tcp_server/
 test_go_server/
 init-scripts/
+data.noindex/devstream.db.backup-*
+data.noindex/codex_event_samples.jsonl
