@@ -261,10 +261,31 @@ class PreCompactHook:
                 f"pre-compact-{session_id}-{timestamp_str}".encode()
             ).hexdigest()[:32]
 
-            # Step 3: Direct DB write (Context7 aiosqlite pattern)
+            # Step 3: Direct DB write (Context7 aiosqlite pattern + sqlite-vec)
             self.base.debug_log(f"Writing to semantic_memory: {memory_id[:8]}...")
 
             async with aiosqlite.connect(self.db_path) as db:
+                # Load sqlite-vec extension for vec0 support (Context7 pattern)
+                # Note: aiosqlite runs operations in thread pool, so we need to load
+                # the extension via execute() to run in correct thread context
+                try:
+                    import sqlite_vec
+                    import os
+
+                    # Get sqlite-vec shared library path
+                    vec_path = sqlite_vec.loadable_path()
+
+                    # Load extension via SQL (runs in correct thread)
+                    await db.enable_load_extension(True)
+                    await db.execute(f"SELECT load_extension('{vec_path}')")
+                    await db.enable_load_extension(False)
+
+                    self.base.debug_log("sqlite-vec extension loaded successfully")
+                except ImportError:
+                    self.base.debug_log("sqlite-vec not available - storing without vec0 support")
+                except Exception as e:
+                    self.base.debug_log(f"Failed to load sqlite-vec: {e}")
+
                 await db.execute(
                     """
                     INSERT INTO semantic_memory (
