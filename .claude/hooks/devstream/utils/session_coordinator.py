@@ -44,15 +44,21 @@ from path_validator import validate_db_path, PathValidationError
 @dataclass
 class SessionInfo:
     """
-    Session information for tracking.
+    Session information for tracking (Enhanced for multi-session persistence).
 
     Attributes:
         session_id: Unique session identifier
         pid: Process ID
         started_at: Session start timestamp
         last_heartbeat: Last heartbeat timestamp
-        status: Session status (active, stale, zombie)
+        status: Session status (active, compacted, ended, zombie)
         db_path: Database path for this session
+        ended_at: Session end timestamp (None if active)
+        marker_file_path: Path to session-specific marker file
+        compaction_events: List of compaction events
+        summary_displayed: Whether session summary has been displayed
+        model_type: AI model type (sonnet-4.5, glm-4.6, unknown)
+        session_name: Optional user-friendly session name
     """
     session_id: str
     pid: int
@@ -60,6 +66,18 @@ class SessionInfo:
     last_heartbeat: float
     status: str = "active"
     db_path: Optional[str] = None
+    # New fields for multi-session persistence (Phase 1)
+    ended_at: Optional[float] = None
+    marker_file_path: Optional[str] = None
+    compaction_events: List[Dict] = None
+    summary_displayed: bool = False
+    model_type: str = "unknown"
+    session_name: Optional[str] = None
+
+    def __post_init__(self):
+        """Initialize mutable default values."""
+        if self.compaction_events is None:
+            self.compaction_events = []
 
     def is_stale(self, timeout_seconds: int = 300) -> bool:
         """
@@ -251,7 +269,11 @@ class SessionCoordinator:
                 pass
 
     def _init_registry(self) -> None:
-        """Initialize session registry file if not exists."""
+        """
+        Initialize session registry file if not exists.
+
+        Also performs automatic schema migration for existing registries.
+        """
         if not os.path.exists(self.registry_path):
             # Create empty registry
             try:
@@ -264,6 +286,13 @@ class SessionCoordinator:
                         self._release_lock()
             except Exception as e:
                 self.logger.error(f"Failed to initialize registry: {e}")
+        else:
+            # Registry exists - perform automatic schema migration
+            try:
+                self.migrate_registry_schema()
+                self.logger.debug("Registry schema migration check completed")
+            except Exception as e:
+                self.logger.warning(f"Schema migration failed: {e}")
 
     def _read_registry(self) -> Dict[str, SessionInfo]:
         """
@@ -555,6 +584,158 @@ class SessionCoordinator:
             "heartbeat_timeout": self.HEARTBEAT_TIMEOUT,
             "cleanup_interval": self.CLEANUP_INTERVAL
         }
+
+    def validate_registry_schema(self, sessions: Dict[str, SessionInfo]) -> bool:
+        """
+        Validate registry schema conforms to enhanced SessionInfo structure.
+
+        Checks that all required fields are present and have correct types.
+
+        Args:
+            sessions: Dictionary of session_id -> SessionInfo
+
+        Returns:
+            True if valid, False otherwise
+        """
+        required_fields = {
+            'session_id': str,
+            'pid': int,
+            'started_at': float,
+            'last_heartbeat': float,
+            'status': str,
+        }
+
+        optional_fields = {
+            'db_path': (str, type(None)),
+            'ended_at': (float, type(None)),
+            'marker_file_path': (str, type(None)),
+            'compaction_events': list,
+            'summary_displayed': bool,
+            'model_type': str,
+            'session_name': (str, type(None)),
+        }
+
+        for session_id, info in sessions.items():
+            info_dict = info.to_dict()
+
+            # Check required fields
+            for field_name, field_type in required_fields.items():
+                if field_name not in info_dict:
+                    self.logger.error(
+                        f"Validation failed: missing required field '{field_name}' "
+                        f"in session {session_id}"
+                    )
+                    return False
+
+                if not isinstance(info_dict[field_name], field_type):
+                    self.logger.error(
+                        f"Validation failed: field '{field_name}' has wrong type "
+                        f"(expected {field_type}, got {type(info_dict[field_name])}) "
+                        f"in session {session_id}"
+                    )
+                    return False
+
+            # Check optional fields (if present)
+            for field_name, field_types in optional_fields.items():
+                if field_name in info_dict:
+                    if not isinstance(field_types, tuple):
+                        field_types = (field_types,)
+
+                    if not isinstance(info_dict[field_name], field_types):
+                        self.logger.error(
+                            f"Validation failed: field '{field_name}' has wrong type "
+                            f"(expected {field_types}, got {type(info_dict[field_name])}) "
+                            f"in session {session_id}"
+                        )
+                        return False
+
+        self.logger.debug(f"Registry schema validation passed for {len(sessions)} sessions")
+        return True
+
+    def migrate_registry_schema(self) -> bool:
+        """
+        Migrate registry to enhanced schema (add missing fields with defaults).
+
+        Adds new fields to existing sessions:
+        - ended_at: None (active sessions)
+        - marker_file_path: None
+        - compaction_events: []
+        - summary_displayed: False
+        - model_type: "unknown"
+        - session_name: None
+
+        Returns:
+            True if migration successful, False otherwise
+        """
+        if not self._acquire_lock():
+            self.logger.error("Failed to acquire lock for schema migration")
+            return False
+
+        try:
+            # Read raw registry data
+            with open(self.registry_path, 'r') as f:
+                data = json.load(f)
+
+            migrated = False
+
+            for session_id, info_dict in data.items():
+                # Check if migration needed
+                needs_migration = False
+
+                # Add missing fields with defaults
+                if 'ended_at' not in info_dict:
+                    info_dict['ended_at'] = None
+                    needs_migration = True
+
+                if 'marker_file_path' not in info_dict:
+                    info_dict['marker_file_path'] = None
+                    needs_migration = True
+
+                if 'compaction_events' not in info_dict:
+                    info_dict['compaction_events'] = []
+                    needs_migration = True
+
+                if 'summary_displayed' not in info_dict:
+                    info_dict['summary_displayed'] = False
+                    needs_migration = True
+
+                if 'model_type' not in info_dict:
+                    info_dict['model_type'] = "unknown"
+                    needs_migration = True
+
+                if 'session_name' not in info_dict:
+                    info_dict['session_name'] = None
+                    needs_migration = True
+
+                if needs_migration:
+                    self.logger.info(f"Migrated session {session_id} to new schema")
+                    migrated = True
+
+            if migrated:
+                # Write migrated registry (atomic write)
+                temp_path = self.registry_path + '.tmp'
+                with open(temp_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+
+                os.replace(temp_path, self.registry_path)
+
+                # Reload cache
+                self._sessions_cache = self._read_registry()
+
+                self.logger.info("Registry schema migration completed")
+            else:
+                self.logger.debug("Registry schema already up to date")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Schema migration failed: {e}")
+            return False
+
+        finally:
+            self._release_lock()
 
 
 # Convenience function for getting coordinator instance
