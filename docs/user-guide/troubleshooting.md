@@ -369,9 +369,196 @@ mcp__devstream__devstream_store_memory:
   keywords: ["test"]
 ```
 
-### Issue: Memory Search Returns No Results
+### Issue: Vector Search Returns No Results
 
-**Symptom**: Memory exists but search returns empty
+**Symptom**: Memory storage works (embeddings generated, IDs created) but search returns 0 results for all queries
+
+**Root Causes**:
+
+**1. MCP Configuration Path Mismatch**
+
+MCP server using wrong database path (common after updates/reinstall).
+
+**Diagnosis**:
+```bash
+# Check MCP config path
+cat .claude/mcp_servers.json | grep DEVSTREAM_DB_PATH
+
+# Check which DB MCP server is using
+lsof -c node | grep devstream.db
+
+# Check both DBs exist
+ls -lh data/devstream.db data.noindex/devstream.db
+```
+
+**Fix**:
+```bash
+# 1. Backup MCP config
+cp .claude/mcp_servers.json .claude/mcp_servers.json.backup-$(date +%Y%m%d)
+
+# 2. Edit config to use correct path
+# Change: "data.noindex/devstream.db" → "data/devstream.db"
+# In .claude/mcp_servers.json line with DEVSTREAM_DB_PATH
+
+# 3. Kill wrong-path instance
+ps aux | grep mcp-devstream-server | grep -v grep
+kill <PID>
+
+# 4. Restart MCP server
+./start-devstream.sh
+
+# 5. Verify correct DB in use
+lsof -c node | grep devstream.db
+# Expected: data/devstream.db (NOT data.noindex/)
+```
+
+**2. Missing Embeddings (Bulk Storage Gap)**
+
+Records exist but lack embedding vectors for semantic search.
+
+**Diagnosis**:
+```bash
+# Check embedding coverage
+sqlite3 data/devstream.db "
+SELECT
+  COUNT(*) as total,
+  SUM(CASE WHEN embedding IS NOT NULL AND embedding != '' THEN 1 ELSE 0 END) as with_emb,
+  ROUND(100.0 * SUM(CASE WHEN embedding IS NOT NULL AND embedding != '' THEN 1 ELSE 0 END) / COUNT(*), 1) as coverage_pct
+FROM semantic_memory;
+"
+
+# Expected: coverage_pct >= 95.0
+# If < 95%, run backfill
+```
+
+**Fix**:
+```bash
+# Run backfill script (generates embeddings for all records)
+.devstream/bin/python scripts/backfill_embeddings_production.py
+
+# Monitor progress
+tail -f ~/.claude/logs/devstream/backfill_embeddings.log
+
+# Verify coverage after completion
+sqlite3 data/devstream.db "SELECT COUNT(*) FROM semantic_memory WHERE embedding IS NOT NULL;"
+```
+
+**3. Ollama Service Down**
+
+Embedding generation fails if Ollama not running.
+
+**Diagnosis**:
+```bash
+# Test Ollama API
+curl -s http://localhost:11434/api/embed -d '{
+  "model": "embeddinggemma:300m",
+  "input": "test query"
+}'
+
+# Expected: JSON with "embeddings" array
+# If error: Ollama not running or model not installed
+```
+
+**Fix**:
+```bash
+# Start Ollama service
+ollama serve &
+
+# Verify model installed
+ollama list | grep embeddinggemma
+
+# If model missing, pull it
+ollama pull embeddinggemma:300m
+
+# Test again
+curl -s http://localhost:11434/api/embed -d '{
+  "model": "embeddinggemma:300m",
+  "input": "test"
+}' | head -c 200
+```
+
+**4. Database Trigger Disabled (After Backfill)**
+
+Vector sync trigger may be disabled during backfill operations.
+
+**Diagnosis**:
+```bash
+# Check if sync trigger exists
+sqlite3 data/devstream.db "
+SELECT name FROM sqlite_master
+WHERE type='trigger' AND name LIKE '%sync%';
+"
+
+# Expected: sync_embedding_update
+# If missing: Trigger was dropped
+```
+
+**Fix**:
+```bash
+# Re-enable trigger (run sync script)
+node scripts/sync_vec_semantic_memory.js
+
+# Or manually recreate trigger
+sqlite3 data/devstream.db < mcp-devstream-server/src/migrations/create_vec_sync_trigger.sql
+
+# Verify trigger active
+sqlite3 data/devstream.db ".schema sync_embedding_update"
+```
+
+**5. Database Issues (Corruption/Lock)**
+
+Database index may be corrupted or locked.
+
+**Diagnosis**:
+```bash
+# Check database integrity
+sqlite3 data/devstream.db "PRAGMA integrity_check;"
+# Expected: ok
+
+# Check for locks
+lsof data/devstream.db
+
+# Check WAL mode enabled
+sqlite3 data/devstream.db "PRAGMA journal_mode;"
+# Expected: wal
+```
+
+**Fix**:
+```bash
+# 1. Checkpoint WAL (merge to main DB)
+sqlite3 data/devstream.db "PRAGMA wal_checkpoint(FULL);"
+
+# 2. Rebuild indexes
+sqlite3 data/devstream.db "REINDEX; ANALYZE;"
+
+# 3. If corrupted, restore from backup
+cp data.noindex/devstream.db data/devstream.db.corrupted
+cp data.noindex/devstream.db data/devstream.db
+```
+
+**Prevention**:
+
+1. **Monitor embedding coverage** via health check:
+   ```bash
+   curl http://localhost:9090/health | jq '.metrics.embedding_coverage_percent'
+   # Should be >= 95.0
+   ```
+
+2. **Enable retry logic** in PostToolUse hook (automatic, already implemented)
+
+3. **Regular backfill** for gap recovery:
+   ```bash
+   # Weekly cron job
+   0 2 * * 0 cd /path/to/devstream && .devstream/bin/python scripts/backfill_embeddings_production.py
+   ```
+
+4. **Database path validation** in startup script (prevents config mismatch)
+
+---
+
+### Issue: Memory Search Returns No Results (Legacy FTS5 Issue)
+
+**Symptom**: Memory exists but FTS5 keyword search returns empty
 
 **Diagnosis**:
 ```bash
@@ -405,15 +592,7 @@ SELECT COUNT(*) FROM fts_semantic_memory;
 DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.3  # Lower threshold (was 0.5)
 ```
 
-**3. Check embeddings exist**:
-```bash
-# Check if embeddings are NULL
-sqlite3 data/devstream.db \
-  "SELECT COUNT(*) FROM semantic_memory WHERE embedding IS NULL;"
-
-# If many NULL, regenerate embeddings
-.devstream/bin/python .claude/hooks/devstream/memory/backfill_embeddings.py
-```
+**3. Check embeddings exist** (see "Vector Search Returns No Results" above)
 
 ### Issue: Ollama Embeddings Failing
 
