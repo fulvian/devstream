@@ -37,6 +37,16 @@ export class DevStreamDatabase {
 
       console.error(`✅ Connected to DevStream database: ${this.dbPath}`);
 
+      // Configure for multi-session concurrency (CRITICAL for 5+ sessions)
+      this.db.pragma('journal_mode = WAL');       // Write-Ahead Logging for concurrent reads
+      this.db.pragma('busy_timeout = 5000');       // Wait up to 5s for locks
+      this.db.pragma('synchronous = NORMAL');      // Faster commits with WAL
+      this.db.pragma('cache_size = -64000');       // 64MB cache
+      this.db.pragma('temp_store = MEMORY');       // In-memory temp tables
+      this.db.pragma('mmap_size = 30000000000');   // Memory-mapped I/O (30GB)
+
+      console.error('✅ SQLite configured for multi-session concurrency');
+
       // Load sqlite-vec extension using official package
       await this.loadVectorExtension();
 
@@ -88,6 +98,7 @@ export class DevStreamDatabase {
     available: boolean;
     version: string | null;
     error: string | null;
+    database_size_bytes?: number;
   }> {
     if (!this.vectorSearchAvailable) {
       return {
@@ -102,10 +113,14 @@ export class DevStreamDatabase {
 
       const result = this.db.prepare('SELECT vec_version() as version').get() as { version: string };
 
+      // Get database size
+      const sizeResult = this.db.prepare('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()').get() as { size: number };
+
       return {
         available: true,
         version: result.version,
-        error: null
+        error: null,
+        database_size_bytes: sizeResult.size
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -240,6 +255,74 @@ export class DevStreamDatabase {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, tables: [], error: errorMessage };
+    }
+  }
+
+  /**
+   * Get database path (for health monitoring)
+   */
+  getDatabasePath(): string {
+    return this.dbPath;
+  }
+
+  /**
+   * Get memory statistics for health monitoring
+   */
+  async getMemoryStats(): Promise<{
+    total_records: number;
+    records_with_embeddings: number;
+    embedding_coverage_percent: number;
+  } | null> {
+    try {
+      if (!this.db) {
+        return null;
+      }
+
+      // Get total records
+      const totalResult = this.db.prepare('SELECT COUNT(*) as count FROM semantic_memory').get() as { count: number };
+      const totalRecords = totalResult.count;
+
+      // Get records with embeddings
+      const embeddingResult = this.db.prepare(
+        'SELECT COUNT(*) as count FROM semantic_memory WHERE embedding IS NOT NULL AND embedding != ""'
+      ).get() as { count: number };
+      const recordsWithEmbeddings = embeddingResult.count;
+
+      const coveragePercent = totalRecords > 0 ? (recordsWithEmbeddings / totalRecords) * 100 : 0;
+
+      return {
+        total_records: totalRecords,
+        records_with_embeddings: recordsWithEmbeddings,
+        embedding_coverage_percent: Math.round(coveragePercent * 100) / 100,
+      };
+    } catch (error) {
+      console.error('Failed to get memory stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get session statistics for health monitoring
+   */
+  async getSessionStats(): Promise<{
+    active_sessions: number;
+  } | null> {
+    try {
+      if (!this.db) {
+        return null;
+      }
+
+      // Get active sessions
+      const sessionResult = this.db.prepare(
+        'SELECT COUNT(*) as count FROM work_sessions WHERE status = "active"'
+      ).get() as { count: number };
+
+      return {
+        active_sessions: sessionResult.count,
+      };
+    } catch (error) {
+      console.error('Failed to get session stats:', error);
+      return null;
     }
   }
 }

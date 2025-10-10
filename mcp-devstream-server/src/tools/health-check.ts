@@ -154,7 +154,7 @@ async function checkOllama(baseUrl: string): Promise<OllamaHealth> {
       };
     }
 
-    const data = await response.json();
+    const data = await response.json() as { embeddings?: number[][] };
 
     if (!data.embeddings || !Array.isArray(data.embeddings)) {
       return {
