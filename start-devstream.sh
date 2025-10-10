@@ -4,7 +4,7 @@
 # Starts DevStream MCP Server with Agent Auto-Delegation System
 # Integrated: Context7, Agent Routing, Memory System, Monitoring
 
-set -e
+set -euo pipefail
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -356,9 +356,15 @@ EOF
 
   # Set Context7 environment variables
   export CONTEXT7_ENABLED=true
-  export CONTEXT7_SESSION_ID=$(cat "$PROJECT_ROOT/.config/context7.json" | grep session_id | cut -d'"' -f4)
 
-  if [ -n "${CONTEXT7_API_KEY}" ]; then
+  # Extract session ID with safe pipeline (file must exist at this point)
+  if [ -f "$PROJECT_ROOT/.config/context7.json" ]; then
+    export CONTEXT7_SESSION_ID=$(cat "$PROJECT_ROOT/.config/context7.json" | grep session_id | cut -d'"' -f4)
+  else
+    export CONTEXT7_SESSION_ID="devstream-default"
+  fi
+
+  if [ -n "${CONTEXT7_API_KEY:-}" ]; then
     print_status "✅ Context7 initialized (Session: $CONTEXT7_SESSION_ID)"
   else
     print_warning "⚠️  CONTEXT7_API_KEY not set in environment"
@@ -474,6 +480,85 @@ start_mcp_server() {
   print_error "Server failed to start within 30 seconds"
   print_info "Check logs: tail -f $PROJECT_ROOT/devstream-server.log"
   exit 1
+}
+
+# Function to validate database path and configuration
+validate_database_config() {
+  print_status "Validating database configuration..."
+
+  local db_path="$PROJECT_ROOT/data/devstream.db"
+  local config_file="$HOME/.claude/config.json"
+  local validation_passed=true
+
+  # Check if database exists
+  if [ ! -f "$db_path" ]; then
+    print_error "Database not found: $db_path"
+    validation_passed=false
+  else
+    print_info "Database found: $db_path"
+  fi
+
+  # Check database accessibility
+  if [ "$validation_passed" = true ]; then
+    local db_test=$("$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+try:
+    db = sqlite3.connect('$db_path')
+    cursor = db.execute('SELECT COUNT(*) FROM semantic_memory')
+    count = cursor.fetchone()[0]
+    print(f'OK:{count}')
+    db.close()
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)
+
+    if [[ "$db_test" == OK:* ]]; then
+      local record_count=${db_test#*:}
+      print_info "Database accessible: $record_count records"
+    else
+      print_error "Database access failed: ${db_test#ERROR:}"
+      validation_passed=false
+    fi
+  fi
+
+  # Check MCP configuration consistency
+  if [ -f "$config_file" ]; then
+    local mcp_db_path=$(grep -A 5 '"devstream"' "$config_file" | grep "DEVSTREAM_DB_PATH" | cut -d'"' -f4 2>/dev/null || echo "")
+
+    if [ -n "$mcp_db_path" ]; then
+      # Expand variables if present
+      local expanded_path="${mcp_db_path//\${CLAUDE_PROJECT_DIR}/$PROJECT_ROOT}"
+      expanded_path="${expanded_path//\$CLAUDE_PROJECT_DIR/$PROJECT_ROOT}"
+
+      if [ "$expanded_path" != "$db_path" ]; then
+        print_warning "MCP configuration mismatch:"
+        print_warning "  Expected: $db_path"
+        print_warning "  Configured: $expanded_path"
+        print_info "  Run: ./start-devstream.sh restart to fix configuration"
+      else
+        print_info "MCP configuration: Path matches database location"
+      fi
+    else
+      print_warning "MCP configuration not found in ~/.claude/config.json"
+    fi
+  fi
+
+  # Check for wrong database paths (data.noindex)
+  if [ -d "$PROJECT_ROOT/data.noindex" ] && [ -f "$PROJECT_ROOT/data.noindex/devstream.db" ]; then
+    print_warning "Legacy database found at data.noindex/devstream.db"
+    print_info "  Current database: data/devstream.db"
+    print_info "  Consider archiving data.noindex/ directory"
+  fi
+
+  if [ "$validation_passed" = false ]; then
+    print_error "Database validation failed"
+    return 1
+  fi
+
+  print_status "✅ Database configuration validated"
+  return 0
 }
 
 # Function to setup Claude Code MCP configuration
@@ -756,6 +841,14 @@ main() {
 
       # Check prerequisites
       check_prerequisites
+
+      # Validate database configuration
+      if validate_database_config; then
+        print_status "✅ Database configuration validated"
+      else
+        print_error "Database validation failed"
+        exit 1
+      fi
 
       # Verify Agent Auto-Delegation System
       if verify_agent_delegation; then

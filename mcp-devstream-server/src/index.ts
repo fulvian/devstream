@@ -24,6 +24,7 @@ import { MemoryTools } from './tools/memory.js';
 import { ImplementationPlanTools } from './tools/implementation-plans.js';
 import { initializeOllamaClient } from './ollama-client.js';
 import { AutoSaveService } from './services/auto-save.js';
+import { HealthServer } from './health-server.js';
 
 /**
  * Main MCP Server class for DevStream integration
@@ -36,6 +37,7 @@ class DevStreamMcpServer {
   private memoryTools: MemoryTools;
   private implementationPlanTools: ImplementationPlanTools;
   private autoSaveService: AutoSaveService;
+  private healthServer: HealthServer;
   private heartbeatInterval?: NodeJS.Timeout;
 
   constructor(dbPath: string) {
@@ -66,6 +68,9 @@ class DevStreamMcpServer {
       intervalMs: 300000, // 5 minutes
       enabled: true
     });
+
+    // Initialize health server
+    this.healthServer = new HealthServer(this.database);
 
     this.setupHandlers();
   }
@@ -528,13 +533,23 @@ class DevStreamMcpServer {
       console.error(`💓 MCP server heartbeat (uptime: ${uptimeMinutes} min, PID: ${process.pid})`);
     }, 5 * 60 * 1000); // 5 minutes
 
-    // Start auto-save background service
+    // Start auto-save background service (non-blocking to prevent startup delay)
+    // Context7 Pattern: Background task initialization should not block server readiness
+    this.autoSaveService.start()
+      .then(() => {
+        console.error('✅ Auto-save service started successfully');
+      })
+      .catch((error) => {
+        console.error('⚠️ Failed to start auto-save service:', error instanceof Error ? error.message : 'Unknown error');
+        console.error('⚠️ Continuing without auto-save - manual checkpoints still available');
+      });
+
+    // Start health server
     try {
-      await this.autoSaveService.start();
-      console.error('✅ Auto-save service started successfully');
+      await this.healthServer.start();
     } catch (error) {
-      console.error('⚠️ Failed to start auto-save service:', error instanceof Error ? error.message : 'Unknown error');
-      console.error('⚠️ Continuing without auto-save - manual checkpoints still available');
+      console.error('⚠️ Failed to start health server:', error instanceof Error ? error.message : 'Unknown error');
+      console.error('⚠️ Continuing without health endpoint - MCP functionality unaffected');
     }
   }
 
@@ -569,6 +584,15 @@ class DevStreamMcpServer {
         console.error('  ✅ Auto-save service stopped');
       } catch (error) {
         console.error('  ⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      // Step 2.5: Stop health server
+      console.error('  └─ Stopping health server...');
+      try {
+        await this.healthServer.stop();
+        console.error('  ✅ Health server stopped');
+      } catch (error) {
+        console.error('  ⚠️ Error stopping health server:', error instanceof Error ? error.message : 'Unknown error');
       }
 
       // Step 3: Close database connection

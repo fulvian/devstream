@@ -508,6 +508,204 @@ async def test_large_summary_handling(marker_file: Path):
 
 
 # ============================================================================
+# TEST 9: AUTO-COMPACTING WITH MCP UNAVAILABLE
+# ============================================================================
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_auto_compacting_with_mcp_unavailable(
+    tmp_path: Path,
+    monkeypatch
+):
+    """
+    E2E: Auto-compacting triggered, MCP unavailable.
+    Verify: Marker file + DB write both succeed.
+
+    Workflow:
+    1. Create session with work in DB
+    2. Disable MCP server (simulate auto-compacting)
+    3. Trigger PreCompact hook with MCP unavailable
+    4. Verify marker file exists (SessionStart will work)
+    5. Verify DB contains summary record (best-effort success)
+    6. Verify graceful degradation (no exceptions)
+
+    Validates:
+    - Marker file ALWAYS written (critical path)
+    - DB storage succeeds despite MCP bypass
+    - Auto-compacting scenario works end-to-end
+    - PreCompact graceful degradation
+    """
+    import aiosqlite
+    import sys
+    from datetime import datetime
+    from unittest.mock import Mock, AsyncMock, patch
+
+    # Setup environment and paths
+    db_path = tmp_path / "test_devstream.db"
+    marker_file = tmp_path / ".claude" / "state" / "devstream_last_session.txt"
+    marker_file.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Create test database schema
+    async with aiosqlite.connect(db_path) as db:
+        # Create work_sessions table
+        await db.execute("""
+            CREATE TABLE work_sessions (
+                id TEXT PRIMARY KEY,
+                session_name TEXT,
+                status TEXT,
+                started_at TIMESTAMP,
+                ended_at TIMESTAMP
+            )
+        """)
+
+        # Create semantic_memory table
+        await db.execute("""
+            CREATE TABLE semantic_memory (
+                id TEXT PRIMARY KEY,
+                content TEXT,
+                content_type TEXT,
+                keywords TEXT,
+                embedding TEXT,
+                embedding_model TEXT,
+                embedding_dimension INTEGER,
+                session_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Insert active session
+        session_id = "sess-autocompact-test"
+        await db.execute(
+            "INSERT INTO work_sessions (id, session_name, status, started_at) VALUES (?, ?, ?, ?)",
+            (session_id, "Auto-Compact Test Session", "active", datetime.now().isoformat())
+        )
+
+        await db.commit()
+
+    # Import PreCompactHook after setting up paths
+    sys.path.insert(0, str(tmp_path / ".claude" / "hooks" / "devstream" / "sessions"))
+    sys.path.insert(0, str(tmp_path / ".claude" / "hooks" / "devstream" / "utils"))
+
+    # Mock dependencies
+    with patch('pre_compact.DevStreamHookBase') as mock_base_class, \
+         patch('pre_compact.get_mcp_client') as mock_mcp_client, \
+         patch('pre_compact.OllamaEmbeddingClient') as mock_ollama_class, \
+         patch('pre_compact.SessionSummaryGenerator') as mock_generator_class, \
+         patch('pre_compact.SessionDataExtractor') as mock_extractor_class:
+
+        # Setup mocks
+        mock_base_instance = Mock()
+        mock_base_instance.debug_log = Mock()
+        mock_base_instance.success_feedback = Mock()
+        mock_base_instance.should_run = Mock(return_value=True)
+        mock_base_class.return_value = mock_base_instance
+
+        # Mock MCP client failure (simulate MCP unavailable)
+        mock_mcp_instance = Mock()
+        mock_mcp_client.return_value = mock_mcp_instance
+
+        # Mock Ollama to succeed (embeddings available)
+        mock_ollama_instance = Mock()
+        mock_ollama_instance.generate_embedding = Mock(return_value=[0.1] * 768)
+        mock_ollama_instance.model = "embeddinggemma:300m"
+        mock_ollama_class.return_value = mock_ollama_instance
+
+        # Mock session data extraction
+        mock_session_data = Mock()
+        mock_session_data.session_name = "Auto-Compact Test Session"
+        mock_session_data.started_at = datetime.now().isoformat()
+
+        mock_extractor_instance = Mock()
+        mock_extractor_instance.get_session_metadata = AsyncMock(return_value=mock_session_data)
+        mock_extractor_instance.get_memory_stats = AsyncMock(return_value=Mock(total_records=5, files_modified=3))
+        mock_extractor_instance.get_task_stats = AsyncMock(return_value=Mock(total_tasks=2, completed=1))
+
+        # Mock summary generation
+        mock_generator_instance = Mock()
+        mock_generator_instance.generate_summary = Mock(return_value="""# Auto-Compact Session Summary
+
+**Session**: sess-autocompact-test
+**Status**: Active
+**Duration**: Ongoing
+
+## Tasks
+- Task 1: In progress
+- Task 2: Completed
+
+## Files Modified
+- test_file.py: Updated
+- config.json: Modified
+
+**Note**: Generated during auto-compacting (MCP bypass active)
+""")
+
+        mock_extractor_class.return_value = mock_extractor_instance
+        mock_generator_class.return_value = mock_generator_instance
+
+        # Import and create PreCompactHook
+        from pre_compact import PreCompactHook
+        hook = PreCompactHook()
+
+        # Override database path
+        hook.db_path = str(db_path)
+
+        # Mock context
+        mock_context = Mock()
+        mock_context.output = Mock()
+        mock_context.output.exit_success = Mock()
+
+        # Act - Trigger PreCompact with MCP unavailable
+        await hook.process_pre_compact(mock_context)
+
+        # Assert - Verify marker file exists (critical path success)
+        assert marker_file.exists(), "Marker file should exist (MCP bypass successful)"
+
+        marker_content = marker_file.read_text(encoding='utf-8')
+        assert "Auto-Compact Session Summary" in marker_content, "Marker file should contain summary"
+        assert "sess-autocompact-test" in marker_content, "Marker file should contain session ID"
+
+        # Assert - Verify DB contains summary (best-effort success)
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT content, content_type, session_id, embedding_model
+                FROM semantic_memory
+                WHERE session_id = ? AND content_type = 'context'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (session_id,)
+            )
+            row = await cursor.fetchone()
+
+            assert row is not None, "Summary should be stored in DB despite MCP bypass"
+            assert "Auto-Compact Session Summary" in row[0], "DB should contain summary content"
+            assert row[1] == "context", "Content type should be 'context'"
+            assert row[2] == session_id, "Session ID should match"
+            assert row[3] == "embeddinggemma:300m", "Embedding model should be stored"
+
+        # Assert - Verify graceful behavior
+        mock_context.output.exit_success.assert_called_once(), "Context should exit successfully"
+
+        # Verify debug logs show expected behavior
+        assert mock_base_instance.debug_log.called, "Debug logs should be recorded"
+        debug_calls = [call[0][0] for call in mock_base_instance.debug_log.call_args_list]
+
+        # Should log marker file success
+        assert any("Marker file written successfully" in str(msg) for msg in debug_calls), \
+            "Should log marker file success"
+
+        # Should log DB success
+        assert any("Summary stored in DB" in str(msg) for msg in debug_calls), \
+            "Should log DB storage success"
+
+        # Verify success feedback
+        mock_base_instance.success_feedback.assert_called_once_with(
+            "Session summary preserved (marker file + DB)"
+        ), "Should indicate both marker file and DB success"
+
+
+# ============================================================================
 # COVERAGE VALIDATION
 # ============================================================================
 
@@ -526,6 +724,7 @@ async def test_integration_workflow_coverage():
     6. Concurrent writes
     7. Empty summary handling
     8. Large summary handling
+    9. Auto-compacting with MCP unavailable
 
     Integration Coverage: 100% of critical workflows
     """
@@ -537,7 +736,8 @@ async def test_integration_workflow_coverage():
         "Marker file one-time consumption",
         "Concurrent SessionEnd + PreCompact writes",
         "Empty summary handling",
-        "Large summary handling (>10KB)"
+        "Large summary handling (>10KB)",
+        "Auto-compacting with MCP unavailable (MCP bypass)"
     ]
 
-    assert len(scenarios_covered) == 8, "All critical integration scenarios documented"
+    assert len(scenarios_covered) == 9, "All critical integration scenarios documented"

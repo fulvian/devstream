@@ -1,5 +1,16 @@
 """
-Integration tests for Agent Auto-Delegation Workflow.
+⚠️ DEPRECATED (2025-10-09) - Archived for historical reference only
+
+This test suite tests the DEPRECATED Agent Auto-Delegation System (Phase 3),
+which has been SUPERSEDED by Tier-Based Delegation Policy (Protocol v2.2.0).
+
+Replacement: See CLAUDE.md Tier-Based Delegation section
+Reason: Token optimization (-70% overhead reduction)
+Status: Archived (tests may fail as implementation was not deployed)
+
+---
+
+Integration tests for Agent Auto-Delegation Workflow (DEPRECATED).
 
 Tests end-to-end delegation flow from PreToolUse hook through pattern matching,
 task assessment, and decision logging.

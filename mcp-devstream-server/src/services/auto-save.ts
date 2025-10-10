@@ -96,10 +96,13 @@ export class AutoSaveService {
 
     console.error(`🔄 Auto-save service started (interval: ${this.config.intervalMs / 1000}s)`);
 
-    // Run initial checkpoint immediately
-    await this.executeCheckpointCycle().catch(error => {
-      console.error('⚠️  Initial checkpoint failed:', error instanceof Error ? error.message : 'Unknown error');
-    });
+    // DISABLED: Initial checkpoint blocks server startup for 30+ seconds with many active tasks
+    // Context7 Pattern: Defer first checkpoint until interval fires (5 min delay acceptable)
+    // Rationale: Server responsiveness > immediate checkpoint (checkpoints run every 5 min anyway)
+    //
+    // await this.executeCheckpointCycle().catch(error => {
+    //   console.error('⚠️  Initial checkpoint failed:', error instanceof Error ? error.message : 'Unknown error');
+    // });
 
     // Schedule periodic checkpoints
     this.intervalId = setInterval(async () => {

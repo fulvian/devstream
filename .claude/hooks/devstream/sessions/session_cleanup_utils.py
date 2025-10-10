@@ -25,6 +25,8 @@ import time
 import signal
 import errno
 import threading
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
 from datetime import datetime, timedelta
@@ -109,9 +111,6 @@ class SessionCleanupManager:
                 # Other errors (shouldn't happen often)
                 self.logger.warning(f"Unexpected error checking PID {pid}: {e}")
                 return False
-        except Exception as e:
-            self.logger.warning(f"Error validating PID {pid} with signal: {e}")
-            return False
 
     def _validate_pid_robust(self, pid: int) -> bool:
         """
@@ -159,10 +158,17 @@ class SessionCleanupManager:
                             self.logger.debug(f"PID {pid} exists but not a Claude process (proc check)")
                             return False
                 else:
-                    # /proc not available (macOS), assume it's valid if signal passed
-                    # and it's in a reasonable PID range
-                    if 1 <= pid <= 999999:
-                        return True
+                    # /proc not available (macOS), use ps command for better validation
+                    try:
+                        result = subprocess.run(['ps', '-p', str(pid), '-o', 'command='],
+                                              capture_output=True, text=True, timeout=5)
+                        if result.returncode == 0 and 'claude' in result.stdout.lower():
+                            return True
+                        return False
+                    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+                        # Fallback to basic PID range check if ps command fails
+                        if 1 <= pid <= 999999:
+                            return True
             except Exception:
                 pass
             return True
@@ -224,7 +230,7 @@ class SessionCleanupManager:
             # Create backup
             if os.path.exists(registry_path):
                 backup_path = f"{registry_path}.backup.{int(time.time())}"
-                os.rename(registry_path, backup_path)
+                shutil.move(registry_path, backup_path)
                 self.logger.info(f"Created emergency registry backup: {backup_path}")
 
             # Create new empty registry
@@ -244,7 +250,18 @@ class SessionCleanupManager:
 
         Returns:
             CleanupStats with operation results
+
+        Raises:
+            ValueError: If session coordinator is not initialized
+            RuntimeError: If registry file cannot be accessed
         """
+        # Input validation according to Context7 best practices
+        if not self.coordinator:
+            raise ValueError("Session coordinator not initialized")
+
+        if not hasattr(self.coordinator, 'registry_path'):
+            raise RuntimeError("Session coordinator missing registry_path attribute")
+
         start_time = time.time()
         stats = CleanupStats()
 
@@ -329,12 +346,20 @@ class SessionCleanupManager:
 
         Returns:
             True if cleanup successful, False otherwise
+
+        Raises:
+            ValueError: If session coordinator is not initialized
+            RuntimeError: If lock acquisition fails
         """
+        # Input validation
+        if not self.coordinator:
+            raise ValueError("Session coordinator not initialized")
+
         self.logger.warning("Force cleanup all sessions - EMERGENCY MEASURE")
 
         try:
             if not self.coordinator._acquire_lock(timeout=10):
-                return False
+                raise RuntimeError("Failed to acquire lock for force cleanup")
 
             try:
                 # Clear registry completely
@@ -357,7 +382,18 @@ class SessionCleanupManager:
 
         Returns:
             True if registry is valid or was fixed, False otherwise
+
+        Raises:
+            ValueError: If session coordinator is not initialized
+            OSError: If registry file permissions prevent access
         """
+        # Input validation
+        if not self.coordinator:
+            raise ValueError("Session coordinator not initialized")
+
+        if not hasattr(self.coordinator, 'registry_path'):
+            raise ValueError("Session coordinator missing registry_path attribute")
+
         try:
             # Check if registry file exists and is readable
             if not os.path.exists(self.coordinator.registry_path):

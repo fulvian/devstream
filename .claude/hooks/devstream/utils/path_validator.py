@@ -81,8 +81,8 @@ def validate_db_path(
         
     Examples:
         >>> # VALID: Path within project
-        >>> validate_db_path("data.noindex/devstream.db", "/project")
-        '/project/data.noindex/devstream.db'
+        >>> validate_db_path("data/devstream.db", "/project")
+        '/project/data/devstream.db'
 
         >>> # INVALID: Path traversal attempt
         >>> validate_db_path("../../etc/passwd", "/project")
@@ -93,8 +93,8 @@ def validate_db_path(
         PathValidationError: Path outside project directory: /tmp/evil.db
 
         >>> # INVALID: Wrong extension
-        >>> validate_db_path("data.noindex/file.txt", "/project")
-        PathValidationError: Invalid file extension: data.noindex/file.txt (expected .db)
+        >>> validate_db_path("data/file.txt", "/project")
+        PathValidationError: Invalid file extension: data/file.txt (expected .db)
         
     Security Notes:
         - ALWAYS validate paths from environment variables (DEVSTREAM_DB_PATH)
@@ -118,7 +118,7 @@ def validate_db_path(
         raise PathValidationError(
             f"Path traversal detected: {path}. "
             f"Database paths must not contain '..' sequences. "
-            f"Valid example: data.noindex/devstream.db or /absolute/path/to/devstream.db"
+            f"Valid example: data/devstream.db or /absolute/path/to/devstream.db"
         )
     
     # SECURITY CHECK 2: Canonicalize path (resolve symlinks, relative paths)
@@ -177,7 +177,7 @@ def validate_db_path(
 
 def get_validated_db_path(
     env_var: str = "DEVSTREAM_DB_PATH",
-    default_path: str = "data.noindex/devstream.db",
+    default_path: str = "data/devstream.db",
     project_root: Optional[str] = None
 ) -> str:
     """
@@ -190,7 +190,7 @@ def get_validated_db_path(
     
     Args:
         env_var: Environment variable name (default: DEVSTREAM_DB_PATH)
-        default_path: Default relative path (default: data.noindex/devstream.db)
+        default_path: Default relative path (default: data/devstream.db)
         project_root: Project root directory (default: current working directory)
 
     Returns:
@@ -201,14 +201,14 @@ def get_validated_db_path(
 
     Examples:
         >>> # With environment variable
-        >>> os.environ["DEVSTREAM_DB_PATH"] = "data.noindex/devstream.db"
+        >>> os.environ["DEVSTREAM_DB_PATH"] = "data/devstream.db"
         >>> get_validated_db_path()
-        '/project/data.noindex/devstream.db'
+        '/project/data/devstream.db'
 
         >>> # With default
         >>> del os.environ["DEVSTREAM_DB_PATH"]
         >>> get_validated_db_path()
-        '/project/data.noindex/devstream.db'
+        '/project/data/devstream.db'
         
         >>> # Attack attempt blocked
         >>> os.environ["DEVSTREAM_DB_PATH"] = "../../etc/passwd"
@@ -236,8 +236,8 @@ def test_path_validator():
     
     test_cases = [
         # (path, should_pass, description)
-        ("data.noindex/devstream.db", True, "Legitimate relative path"),
-        (f"{project_root}/data.noindex/devstream.db", True, "Legitimate absolute path"),
+        ("data/devstream.db", True, "Legitimate relative path"),
+        (f"{project_root}/data/devstream.db", True, "Legitimate absolute path"),
         ("../../etc/passwd", False, "Path traversal attack"),
         ("/tmp/evil.db", False, "Arbitrary write outside project"),
         ("data/../../../etc/passwd", False, "Directory traversal via canonicalization"),
