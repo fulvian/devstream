@@ -54,6 +54,7 @@ from session_data_extractor import SessionDataExtractor
 from session_summary_generator import SessionSummaryGenerator
 from atomic_file_writer import write_atomic
 from ollama_client import OllamaEmbeddingClient
+from session_coordinator import get_session_coordinator
 
 
 class PreCompactHook:
@@ -76,6 +77,9 @@ class PreCompactHook:
         # Initialize components (reuse from session_end)
         self.data_extractor = SessionDataExtractor()
         self.summary_generator = SessionSummaryGenerator()
+
+        # Session coordinator for registry updates (Phase 2)
+        self.coordinator = get_session_coordinator()
 
         # Database path (official location)
         project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -433,6 +437,165 @@ class PreCompactHook:
 
         return write_success
 
+    async def write_marker_file_session_specific(
+        self,
+        summary: str,
+        session_id: str
+    ) -> bool:
+        """
+        Write summary to SESSION-SPECIFIC marker file (Phase 2).
+
+        Creates ~/.claude/state/devstream_session_{session_id}.txt
+
+        Args:
+            summary: Summary markdown text
+            session_id: Session identifier
+
+        Returns:
+            True if successful, False otherwise
+
+        Note:
+            Session-specific files prevent collision in multi-session environments.
+            Updates registry with compaction event after writing.
+        """
+        # Generate session-specific path
+        marker_file = (
+            Path.home() / ".claude" / "state" /
+            f"devstream_session_{session_id}.txt"
+        )
+
+        # Ensure parent directory exists
+        marker_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write
+        write_success = await write_atomic(marker_file, summary)
+
+        if write_success:
+            self.base.debug_log(
+                f"✅ Session-specific marker file written: {marker_file.name} "
+                f"(session_id={session_id}, size={len(summary)} chars)"
+            )
+
+            # Update registry with compaction event
+            await self.update_registry_compaction_event(
+                session_id=session_id,
+                event={
+                    "timestamp": time.time(),
+                    "trigger": "manual",  # TODO: Detect auto vs manual
+                    "marker_file_written": True,
+                    "db_stored": True,  # Assume True (will be updated if DB fails)
+                    "summary_length": len(summary)
+                }
+            )
+
+            self.log_operation("marker_file_write_session_specific", "success",
+                               {"session_id": session_id,
+                                "marker_file": marker_file.name,
+                                "size": len(summary)})
+        else:
+            self.base.debug_log(
+                f"❌ Session-specific marker file write failed: {marker_file.name}"
+            )
+            self.log_operation("marker_file_write_session_specific", "failed",
+                               {"session_id": session_id,
+                                "marker_file": marker_file.name})
+
+        return write_success
+
+    async def update_registry_compaction_event(
+        self,
+        session_id: str,
+        event: dict
+    ) -> bool:
+        """
+        Update session registry with compaction event (Phase 2).
+
+        Thread-safe update using SessionCoordinator.
+
+        Args:
+            session_id: Session identifier
+            event: Compaction event dict with keys:
+                   - timestamp (float)
+                   - trigger (str): "manual", "auto", "clear-devstream"
+                   - marker_file_written (bool)
+                   - db_stored (bool)
+                   - summary_length (int)
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        try:
+            import fcntl
+
+            registry_path = Path(self.coordinator.registry_path)
+
+            if not registry_path.exists():
+                self.base.debug_log(
+                    "Registry file not found - cannot update compaction event"
+                )
+                return False
+
+            # Acquire lock and update registry
+            if not self.coordinator._acquire_lock():
+                self.base.debug_log("Failed to acquire lock for registry update")
+                return False
+
+            try:
+                # Read current registry
+                sessions = self.coordinator._read_registry()
+
+                if session_id not in sessions:
+                    self.base.debug_log(
+                        f"Session {session_id} not found in registry"
+                    )
+                    return False
+
+                session_info = sessions[session_id]
+
+                # Append compaction event
+                if not hasattr(session_info, 'compaction_events') or session_info.compaction_events is None:
+                    session_info.compaction_events = []
+
+                session_info.compaction_events.append(event)
+
+                # Update status
+                session_info.status = "compacted"
+
+                # Update marker file path
+                session_info.marker_file_path = str(
+                    Path.home() / ".claude" / "state" /
+                    f"devstream_session_{session_id}.txt"
+                )
+
+                # Reset summary_displayed flag
+                session_info.summary_displayed = False
+
+                # Write updated registry
+                self.coordinator._write_registry(sessions)
+
+                # Update cache
+                self.coordinator._sessions_cache = sessions
+
+                self.base.debug_log(
+                    f"✅ Registry updated with compaction event: {session_id}"
+                )
+
+                self.log_operation("update_registry_compaction_event", "success",
+                                   {"session_id": session_id,
+                                    "event": event})
+
+                return True
+
+            finally:
+                self.coordinator._release_lock()
+
+        except Exception as e:
+            self.base.debug_log(f"Failed to update registry: {e}")
+            self.log_operation("update_registry_compaction_event", "failed",
+                               {"session_id": session_id,
+                                "error": str(e)})
+            return False
+
     async def store_summary_with_fallbacks(self, summary: str, session_id: str) -> bool:
         """
         Store summary using multi-layer fallback strategy.
@@ -602,10 +765,10 @@ class PreCompactHook:
                                {"message": f"Summary generated successfully: {len(summary)} chars",
                                 "summary_length": len(summary)})
 
-            # CRITICAL PATH: ALWAYS write marker file (final fallback)
+            # CRITICAL PATH: ALWAYS write session-specific marker file (Phase 2)
             self.log_operation("marker_file_write", "started",
-                               {"message": "Writing marker file (critical path)"})
-            marker_written = await self.write_marker_file(summary)
+                               {"message": "Writing session-specific marker file (critical path)"})
+            marker_written = await self.write_marker_file_session_specific(summary, session_id)
 
             if marker_written:
                 self.log_operation("marker_file_write", "success",
