@@ -42,7 +42,7 @@
     "default": "GLM46,zai-org/GLM-4.6",
     "background": "GLM46,zai-org/GLM-4.6",
     "think": "GLM46,zai-org/GLM-4.6",
-    "longContext": "GLM46,zai-org/GLM-4.6",
+    "longContext": "",
     "longContextThreshold": 150000,
     "webSearch": "",
     "image": ""
