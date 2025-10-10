@@ -582,7 +582,7 @@ if __name__ == "__main__":
 
     # Register test session
     session_id = f"test-sess-{os.getpid()}"
-    success = coordinator.register_session(session_id, "data.noindex/devstream.db")
+    success = coordinator.register_session(session_id, "data/devstream.db")
     print(f"✅ Session registered: {success}")
 
     # Get active sessions

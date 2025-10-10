@@ -14,6 +14,7 @@ import asyncio
 import sqlite3
 import json
 import re
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -53,6 +54,7 @@ class PostToolUseHook:
     embeddings using Ollama for semantic search.
 
     Phase 2 Enhancement: Inline embedding generation with graceful degradation.
+    FASE 4.4: Retry logic for temporary failures.
     """
 
     def __init__(self):
@@ -73,6 +75,11 @@ class PostToolUseHook:
         self.protocol_manager = None
         self.task_sync = None
 
+        # FASE 4.4: Retry configuration
+        self.max_retries = 3
+        self.retry_delay = 1.0  # Initial delay in seconds
+        self.retry_backoff = 2.0  # Backoff multiplier
+
         if PROTOCOL_SYNC_AVAILABLE:
             try:
                 self.protocol_manager = ProtocolStateManager()
@@ -83,6 +90,80 @@ class PostToolUseHook:
                     f"Protocol sync initialization failed: {e}",
                     FeedbackLevel.MINIMAL
                 )
+
+    async def retry_with_backoff(
+        self,
+        operation_name: str,
+        operation_func,
+        *args,
+        **kwargs
+    ) -> Optional[Any]:
+        """
+        Execute operation with exponential backoff retry logic.
+
+        FASE 4.4: Retry logic for temporary failures (MCP, Ollama, DB).
+
+        Args:
+            operation_name: Name of the operation for logging
+            operation_func: Async function to execute
+            *args: Function arguments
+            **kwargs: Function keyword arguments
+
+        Returns:
+            Operation result if successful, None otherwise
+
+        Note:
+            - Max 3 retries with exponential backoff (1s, 2s, 4s)
+            - Only retries temporary failures (connection, timeout, rate limit)
+            - Permanent failures (validation, auth) fail immediately
+        """
+        last_exception = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = await operation_func(*args, **kwargs)
+
+                if attempt > 0:
+                    self.base.debug_log(
+                        f"✓ {operation_name} succeeded on attempt {attempt + 1}"
+                    )
+
+                return result
+
+            except Exception as e:
+                last_exception = e
+                error_msg = str(e).lower()
+
+                # Check if this is a retryable error
+                is_retryable = any(keyword in error_msg for keyword in [
+                    'connection', 'timeout', 'rate limit', 'temporary',
+                    'network', 'unavailable', 'overloaded', '503', '502',
+                    'connection reset', 'connection refused'
+                ])
+
+                # Don't retry permanent failures
+                if not is_retryable:
+                    self.base.debug_log(
+                        f"❌ {operation_name} permanent failure: {e}"
+                    )
+                    return None
+
+                if attempt < self.max_retries:
+                    # Calculate delay with exponential backoff
+                    delay = self.retry_delay * (self.retry_backoff ** attempt)
+
+                    self.base.debug_log(
+                        f"⚠️ {operation_name} failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}"
+                        f" - retrying in {delay:.1f}s"
+                    )
+
+                    await asyncio.sleep(delay)
+                else:
+                    self.base.debug_log(
+                        f"❌ {operation_name} failed after {self.max_retries + 1} attempts: {e}"
+                    )
+
+        return None
 
     def extract_content_preview(self, content: str, max_length: int = 300) -> str:
         """
@@ -228,6 +309,7 @@ class PostToolUseHook:
         will automatically sync to vec_semantic_memory virtual table.
 
         Context7 Pattern: Uses sqlite_vec_helper for proper extension loading.
+        FASE 4.4: Enhanced with connection retry logic.
 
         Args:
             memory_id: Memory record ID
@@ -236,37 +318,75 @@ class PostToolUseHook:
         Returns:
             True if update successful, False otherwise
         """
-        try:
-            # Convert embedding to JSON string for SQLite storage
-            embedding_json = json.dumps(embedding)
+        # FASE 4.4: Synchronous retry for database operations
+        last_exception = None
 
-            # Context7 Pattern: Use helper for proper vec0 loading
-            conn = get_db_connection_with_vec(self.db_path)
-            cursor = conn.cursor()
+        for attempt in range(self.max_retries + 1):
+            try:
+                # Convert embedding to JSON string for SQLite storage
+                embedding_json = json.dumps(embedding)
 
-            # Update embedding in semantic_memory
-            cursor.execute(
-                "UPDATE semantic_memory SET embedding = ? WHERE id = ?",
-                (embedding_json, memory_id)
-            )
+                # Context7 Pattern: Use helper for proper vec0 loading
+                conn = get_db_connection_with_vec(self.db_path)
+                cursor = conn.cursor()
 
-            conn.commit()
-            rows_updated = cursor.rowcount
-            conn.close()
-
-            if rows_updated > 0:
-                self.base.debug_log(
-                    f"Embedding updated: {memory_id[:8]}... "
-                    f"({len(embedding)} dimensions)"
+                # Update embedding in semantic_memory
+                cursor.execute(
+                    "UPDATE semantic_memory SET embedding = ? WHERE id = ?",
+                    (embedding_json, memory_id)
                 )
-                return True
-            else:
-                self.base.debug_log(f"No record found to update: {memory_id}")
-                return False
 
-        except Exception as e:
-            self.base.debug_log(f"Embedding update error: {e}")
-            return False
+                conn.commit()
+                rows_updated = cursor.rowcount
+                conn.close()
+
+                if rows_updated > 0:
+                    if attempt > 0:
+                        self.base.debug_log(
+                            f"✓ Embedding update succeeded on attempt {attempt + 1}: {memory_id[:8]}..."
+                        )
+
+                    self.base.debug_log(
+                        f"Embedding updated: {memory_id[:8]}... "
+                        f"({len(embedding)} dimensions)"
+                    )
+                    return True
+                else:
+                    self.base.debug_log(f"No record found to update: {memory_id}")
+                    return False
+
+            except Exception as e:
+                last_exception = e
+                error_msg = str(e).lower()
+
+                # Check if this is a retryable database error
+                is_retryable = any(keyword in error_msg for keyword in [
+                    'connection', 'timeout', 'locked', 'busy', 'database is locked',
+                    'disk i/o error', 'protocol error', 'connection refused'
+                ])
+
+                # Don't retry permanent database failures
+                if not is_retryable:
+                    self.base.debug_log(f"❌ Embedding update permanent failure: {e}")
+                    return False
+
+                if attempt < self.max_retries:
+                    # Calculate delay with exponential backoff (synchronous)
+                    delay = self.retry_delay * (self.retry_backoff ** attempt)
+
+                    self.base.debug_log(
+                        f"⚠️ Embedding update failed (attempt {attempt + 1}/{self.max_retries + 1}): {e}"
+                        f" - retrying in {delay:.1f}s"
+                    )
+
+                    # Synchronous sleep for database retry
+                    time.sleep(delay)
+                else:
+                    self.base.debug_log(
+                        f"❌ Embedding update failed after {self.max_retries + 1} attempts: {e}"
+                    )
+
+        return False
 
     async def store_in_memory(
         self,
@@ -282,6 +402,7 @@ class PostToolUseHook:
 
         Phase 2 Enhancement: Now generates embedding and stores it inline.
         FASE 3 Enhancement: Includes topics, entities, and content_type.
+        FASE 4.4: Enhanced with retry logic for temporary failures.
 
         Args:
             file_path: Path to modified file
@@ -327,19 +448,25 @@ class PostToolUseHook:
                 f"({len(topics)} topics, {len(entities)} entities)"
             )
 
-            # Store via MCP (without embedding initially)
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_store_memory",
-                {
-                    "content": memory_content,
-                    "content_type": content_type,
-                    "keywords": keywords
-                }
+            # FASE 4.4: Wrap MCP call with retry logic
+            async def _store_via_mcp():
+                return await self.base.safe_mcp_call(
+                    self.mcp_client,
+                    "devstream_store_memory",
+                    {
+                        "content": memory_content,
+                        "content_type": content_type,
+                        "keywords": keywords
+                    }
+                )
+
+            result = await self.retry_with_backoff(
+                f"MCP memory storage ({Path(file_path).name})",
+                _store_via_mcp
             )
 
             if not result:
-                self.base.debug_log("Memory storage returned no result")
+                self.base.debug_log("Memory storage returned no result after retries")
                 return None
 
             # Extract memory_id from MCP result
@@ -354,23 +481,37 @@ class PostToolUseHook:
 
             self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
 
-            # Phase 2: Generate and store embedding (graceful degradation)
+            # Phase 2: Generate and store embedding (with retry logic)
             try:
                 self.base.debug_log("Generating embedding via Ollama...")
 
-                # Generate embedding for full content (not just preview)
-                embedding = self.ollama_client.generate_embedding(content)
+                # FASE 4.4: Wrap embedding generation with retry logic
+                async def _generate_embedding():
+                    return self.ollama_client.generate_embedding(content)
+
+                embedding = await self.retry_with_backoff(
+                    f"Ollama embedding ({Path(file_path).name})",
+                    _generate_embedding
+                )
 
                 if embedding:
-                    # Update memory record with embedding
-                    if self.update_memory_embedding(memory_id, embedding):
+                    # FASE 4.4: Wrap embedding update with retry logic
+                    async def _update_embedding():
+                        return self.update_memory_embedding(memory_id, embedding)
+
+                    embedding_updated = await self.retry_with_backoff(
+                        f"Embedding update ({Path(file_path).name})",
+                        _update_embedding
+                    )
+
+                    if embedding_updated:
                         self.base.debug_log(
                             f"✓ Embedding stored: {len(embedding)}D"
                         )
                     else:
-                        self.base.debug_log("Embedding update failed")
+                        self.base.debug_log("Embedding update failed after retries")
                 else:
-                    self.base.debug_log("Embedding generation returned None")
+                    self.base.debug_log("Embedding generation returned None after retries")
 
             except Exception as embed_error:
                 # Graceful degradation - log but don't fail
@@ -1070,13 +1211,12 @@ class PostToolUseHook:
 
             # Try to get current active session
             import sqlite3
-            import sys
             sys.path.append(str(Path(__file__).parent.parent / 'utils'))
             from connection_manager import get_connection_manager
 
-            # Database configuration (updated to use data.noindex for Spotlight exclusion)
+            # Database configuration (use data/ as corrected in implementation)
             project_root = Path(__file__).parent.parent.parent.parent.parent
-            db_path = str(project_root / 'data.noindex' / 'devstream.db')
+            db_path = str(project_root / 'data' / 'devstream.db')
 
             # Use connection manager for WAL mode enforcement
             manager = get_connection_manager(db_path)

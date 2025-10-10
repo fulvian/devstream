@@ -34,7 +34,7 @@ async function testHybridSearch(query) {
   
   const embeddingBuffer = Buffer.from(new Float32Array(embedding).buffer);
   
-  // Context7 RRF Pattern
+  // Context7 RRF Pattern (SQLite-compatible with UNION ALL)
   const sql = `
     WITH vec_matches AS (
       SELECT
@@ -55,24 +55,42 @@ async function testHybridSearch(query) {
       LIMIT 10
     ),
     combined AS (
+      -- FTS results
       SELECT
-        semantic_memory.id,
-        semantic_memory.content,
-        semantic_memory.content_type,
-        vec_matches.rank_number as vec_rank,
-        fts_matches.rank_number as fts_rank,
-        (
-          COALESCE(1.0 / (60 + fts_matches.rank_number), 0.0) * 1.0
-          + COALESCE(1.0 / (60 + vec_matches.rank_number), 0.0) * 1.0
-        ) as combined_rank,
-        vec_matches.distance as vec_distance,
-        fts_matches.score as fts_score
+        memory_id,
+        NULL as vec_rank,
+        rank_number as fts_rank,
+        NULL as vec_distance,
+        score as fts_score
       FROM fts_matches
-      FULL OUTER JOIN vec_matches ON vec_matches.memory_id = fts_matches.memory_id
-      JOIN semantic_memory ON semantic_memory.id = COALESCE(fts_matches.memory_id, vec_matches.memory_id)
-      ORDER BY combined_rank DESC
+
+      UNION ALL
+
+      -- Vector results
+      SELECT
+        memory_id,
+        rank_number as vec_rank,
+        NULL as fts_rank,
+        distance as vec_distance,
+        NULL as fts_score
+      FROM vec_matches
     )
-    SELECT * FROM combined
+    SELECT
+      semantic_memory.id,
+      semantic_memory.content,
+      semantic_memory.content_type,
+      MAX(combined.vec_rank) as vec_rank,
+      MAX(combined.fts_rank) as fts_rank,
+      (
+        COALESCE(1.0 / (60 + MAX(combined.fts_rank)), 0.0) * 1.0
+        + COALESCE(1.0 / (60 + MAX(combined.vec_rank)), 0.0) * 1.0
+      ) as combined_rank,
+      MAX(combined.vec_distance) as vec_distance,
+      MAX(combined.fts_score) as fts_score
+    FROM combined
+    JOIN semantic_memory ON semantic_memory.id = combined.memory_id
+    GROUP BY semantic_memory.id
+    ORDER BY combined_rank DESC
   `;
   
   const results = db.prepare(sql).all(embeddingBuffer, query);

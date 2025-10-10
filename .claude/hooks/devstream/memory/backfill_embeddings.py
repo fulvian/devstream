@@ -371,7 +371,7 @@ async def main():
         '--db-path',
         type=str,
         default=None,
-        help="Path to DevStream database (default: data.noindex/devstream.db)"
+        help="Path to DevStream database (default: data/devstream.db)"
     )
 
     args = parser.parse_args()
@@ -381,7 +381,7 @@ async def main():
         db_path = args.db_path
     else:
         project_root = Path(__file__).parent.parent.parent.parent.parent
-        db_path = str(project_root / 'data.noindex' / 'devstream.db')
+        db_path = str(project_root / 'data' / 'devstream.db')
 
     # Create service
     service = EmbeddingBackfillService(

@@ -30,7 +30,7 @@ class CheckpointManager:
     - Query checkpoint history
     """
 
-    def __init__(self, db_path: str = "data.noindex/devstream_checkpoints.db"):
+    def __init__(self, db_path: str = "data/devstream_checkpoints.db"):
         """
         Initialize checkpoint manager.
 

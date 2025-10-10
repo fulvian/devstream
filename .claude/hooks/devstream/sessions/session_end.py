@@ -88,9 +88,9 @@ class SessionEndHook:
         # Session coordinator for multi-session management
         self.coordinator = get_session_coordinator()
 
-        # Database path
+        # Database path (official location)
         project_root = Path(__file__).parent.parent.parent.parent.parent
-        self.db_path = str(project_root / 'data.noindex' / 'devstream.db')
+        self.db_path = str(project_root / 'data' / 'devstream.db')
 
     def cleanup_ollama_models(self) -> bool:
         """

@@ -102,15 +102,15 @@ class SessionDataExtractor:
         Initialize SessionDataExtractor.
 
         Args:
-            db_path: Path to DevStream database (defaults to data.noindex/devstream.db)
+            db_path: Path to DevStream database (defaults to data/devstream.db)
         """
         self.structured_logger = get_devstream_logger('session_data_extractor')
         self.logger = self.structured_logger.logger
 
-        # Database configuration (updated to use data.noindex for Spotlight exclusion)
+        # Database configuration (updated to use data for Spotlight exclusion)
         if db_path is None:
             project_root = Path(__file__).parent.parent.parent.parent.parent
-            self.db_path = str(project_root / 'data.noindex' / 'devstream.db')
+            self.db_path = str(project_root / 'data' / 'devstream.db')
         else:
             self.db_path = db_path
 

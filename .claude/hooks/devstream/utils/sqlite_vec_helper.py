@@ -38,7 +38,7 @@ def get_db_connection_with_vec(db_path: Optional[str] = None) -> sqlite3.Connect
     WAL mode and safety pragmas are automatically set by ConnectionManager.
 
     Args:
-        db_path: Path to database file (default: data.noindex/devstream.db)
+        db_path: Path to database file (default: data/devstream.db)
 
     Returns:
         sqlite3.Connection with sqlite-vec extension loaded and WAL mode enabled
@@ -99,7 +99,7 @@ def get_devstream_db() -> sqlite3.Connection:
     Convenience wrapper for get_db_connection_with_vec() with default path.
 
     Returns:
-        sqlite3.Connection to data.noindex/devstream.db with sqlite-vec loaded
+        sqlite3.Connection to data/devstream.db with sqlite-vec loaded
     """
     return get_db_connection_with_vec()
 

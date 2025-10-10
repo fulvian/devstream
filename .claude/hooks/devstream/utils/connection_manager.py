@@ -78,7 +78,7 @@ class ConnectionManager:
         # Validate database path
         if db_path is None:
             import os
-            raw_path = os.getenv('DEVSTREAM_DB_PATH', 'data.noindex/devstream.db')
+            raw_path = os.getenv('DEVSTREAM_DB_PATH', 'data/devstream.db')
         else:
             raw_path = db_path
 
