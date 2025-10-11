@@ -29,7 +29,8 @@ jobs:
     - name: Check for common project files
       run: |
         echo "🔍 Checking for project files..."
-        [ -f "package.json" ] && echo "✅ Node.js project detected"
-        [ -f "requirements.txt" ] && echo "✅ Python project detected"
-        [ -f "Cargo.toml" ] && echo "✅ Rust project detected"
-        [ -f "go.mod" ] && echo "✅ Go project detected"
+        [ -f "package.json" ] && echo "✅ Node.js project detected" || true
+        [ -f "requirements.txt" ] && echo "✅ Python project detected" || true
+        [ -f "Cargo.toml" ] && echo "✅ Rust project detected" || true
+        [ -f "go.mod" ] && echo "✅ Go project detected" || true
+        echo "✅ Project files check completed"
