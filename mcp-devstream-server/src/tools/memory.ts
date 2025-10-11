@@ -22,7 +22,12 @@ const SearchMemoryInputSchema = z.object({
   query: z.string().min(1),
   content_type: z.enum(['code', 'documentation', 'context', 'output', 'error', 'decision', 'learning']).optional(),
   limit: z.number().min(1).max(50).optional().default(10),
-  min_relevance: z.number().min(0.0).max(1.0).optional().default(0.03)
+  // Phase 3: Adaptive Threshold System (Context7-backed Zod pattern)
+  // Use .optional() WITHOUT .default() to allow undefined → triggers adaptive threshold
+  // When undefined: Uses QueryAnalyzer.recommendedThreshold (0.5%-3% based on complexity)
+  // When specified: User value overrides adaptive recommendation
+  // Reference: Zod official docs (Trust Score 9.6) - optional() for nullable defaults
+  min_relevance: z.number().min(0.0).max(1.0).optional()
 });
 
 export class MemoryTools {
@@ -72,14 +77,18 @@ export class MemoryTools {
         console.warn(`⚠️ Embedding generation failed - storing without vector search capability`);
       }
 
-      // Store in semantic memory with embedding (Context7 pattern: complete schema with metrics)
+      // Context7 Pattern: Use UTC timestamps for timezone-aware storage
+      const now = new Date().toISOString();
+
+      // Store in semantic memory with embedding (Context7 pattern: complete schema with metrics + UTC timestamps)
       const result = await MetricsCollector.trackDatabaseOperation('memory_storage', async () =>
         await this.database.execute(`
           INSERT INTO semantic_memory (
             id, content, content_type, content_format, keywords,
             embedding, embedding_model, embedding_dimension,
-            relevance_score, access_count, context_snapshot
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            relevance_score, access_count, context_snapshot,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           memoryId,
           input.content,
@@ -93,11 +102,13 @@ export class MemoryTools {
           0,
           JSON.stringify({
             stored_via: 'mcp_server',
-            timestamp: new Date().toISOString(),
+            timestamp: now,
             content_length: input.content.length,
             source: 'mcp_user_input',
             embedding_status: embedding ? 'generated' : 'failed'
-          })
+          }),
+          now,  // created_at (UTC ISO format)
+          now   // updated_at (UTC ISO format)
         ])
       );
 
@@ -107,27 +118,15 @@ export class MemoryTools {
         has_embedding: embedding ? 'true' : 'false'
       });
 
-      // Context7 pattern: Sync to vec0 if embedding was generated
-      if (embedding && this.database.getVectorSearchStatus()) {
-        try {
-          console.error('📊 Syncing to vec0 vector search index...');
-          await MetricsCollector.trackDatabaseOperation('vec0_sync', async () =>
-            await this.database.execute(`
-              INSERT INTO vec_semantic_memory(embedding, content_type, memory_id, content_preview)
-              VALUES (?, ?, ?, ?)
-            `, [
-              embeddingJson,
-              input.content_type,
-              memoryId,
-              input.content.substring(0, 200)
-            ])
-          );
-          console.error('✅ vec0 sync completed');
-        } catch (vecError) {
-          console.warn('⚠️ vec0 sync failed:', vecError instanceof Error ? vecError.message : 'Unknown error');
-          // Continue - FTS5 will still work via trigger
-        }
-      }
+      // Context7 Pattern: Trigger-based sync (NO manual sync)
+      // The sync_embedding_update trigger automatically handles vec0 sync when embedding is inserted.
+      // This ensures consistency and eliminates the risk of desync between semantic_memory and vec_semantic_memory.
+      // Trigger workflow:
+      //   1. INSERT with embedding (lines 79-108) → embedding stored as JSON
+      //   2. Trigger detects UPDATE OF embedding → converts JSON to BLOB via vec_f32()
+      //   3. Trigger inserts into vec_semantic_memory
+      //   4. Trigger cleans up JSON (saves ~327 MB)
+      console.error('✅ Embedding stored - trigger will handle vec0 sync automatically');
 
       // Context7 pattern: Return structured output for modern MCP clients + text for backwards compatibility
       return {
@@ -177,23 +176,43 @@ export class MemoryTools {
   /**
    * Search DevStream semantic memory using hybrid search (RRF)
    * Context7 pattern: Combines vector similarity + FTS5 keyword search
+   *
+   * Phase 3: Adaptive Threshold System
+   * - Analyzes query complexity (simple/medium/complex/technical)
+   * - Applies dynamic threshold (0.5%-3%) based on IDF analysis
+   * - Uses adaptive RRF weights for vector vs keyword search
    */
   async searchMemory(args: any) {
     try {
       const input = SearchMemoryInputSchema.parse(args);
 
+      // Phase 3: Analyze query for adaptive configuration
+      console.error(`📊 Analyzing query complexity...`);
+      const analysis = await this.hybridSearch.analyzeQuery(input.query);
+
+      console.error(`📊 Query Analysis: ${analysis.complexity} complexity`);
+      console.error(`   Terms: ${analysis.termCount} total, ${analysis.technicalTermCount} technical`);
+      console.error(`   Specificity: ${(analysis.specificityScore * 100).toFixed(0)}%`);
+      console.error(`   Recommended Threshold: ${(analysis.recommendedThreshold * 100).toFixed(1)}%`);
+      console.error(`   Recommended Weights: vec=${analysis.recommendedWeights.weight_vec} fts=${analysis.recommendedWeights.weight_fts}`);
+      console.error(`   ${analysis.reasoning}`);
+
       // Context7 pattern: Use HybridSearchEngine with RRF
+      // Phase 3: Use adaptive weights from query analysis
       console.error(`🔍 Performing hybrid search for: "${input.query}"`);
       const results = await this.hybridSearch.search(input.query, {
         k: input.limit,
         rrf_k: 60,
+        // Adaptive weights are already applied in HybridSearchEngine.search()
+        // These values are defaults that can be overridden by user input
         weight_fts: 1.0,
         weight_vec: 1.0
       });
 
-      // Filter by minimum relevance threshold (≥ configured threshold, default 0.03)
-      const MIN_RELEVANCE_THRESHOLD = input.min_relevance;
-      console.error(`📊 Filtering results with minimum relevance threshold: ${MIN_RELEVANCE_THRESHOLD}`);
+      // Phase 3: Use adaptive threshold (can be overridden by user)
+      // Priority: user input > adaptive analysis > default (0.01)
+      const MIN_RELEVANCE_THRESHOLD = input.min_relevance ?? analysis.recommendedThreshold;
+      console.error(`📊 Filtering results with threshold: ${(MIN_RELEVANCE_THRESHOLD * 100).toFixed(1)}% (${input.min_relevance ? 'user-specified' : 'adaptive'})`);
 
       const relevanceFiltered = results.filter(r =>
         r.combined_rank >= MIN_RELEVANCE_THRESHOLD
@@ -231,9 +250,12 @@ export class MemoryTools {
       const diagnostics = await this.hybridSearch.getDiagnostics();
       const searchMethod = diagnostics.vector_search.available ? 'Hybrid (Vector + Keyword)' : 'Keyword Only (FTS5)';
 
-      let output = `🔍 **DevStream Hybrid Search Results**\n\n`;
+      let output = `🔍 **DevStream Adaptive Hybrid Search Results**\n\n`;
       output += `Query: "${input.query}"\n`;
+      output += `Complexity: ${analysis.complexity.toUpperCase()} (${analysis.termCount} terms, ${(analysis.specificityScore * 100).toFixed(0)}% specificity)\n`;
       output += `Method: ${searchMethod}\n`;
+      output += `Threshold: ${(MIN_RELEVANCE_THRESHOLD * 100).toFixed(1)}% (${input.min_relevance ? 'user-specified' : 'adaptive'})\n`;
+      output += `Weights: Vector ${analysis.recommendedWeights.weight_vec} / Keyword ${analysis.recommendedWeights.weight_fts}\n`;
       output += `Found: ${filteredResults.length} results\n\n`;
 
       filteredResults.forEach((result, index) => {

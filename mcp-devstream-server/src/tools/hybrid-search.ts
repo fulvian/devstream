@@ -17,6 +17,7 @@ import { DevStreamDatabase } from '../database.js';
 import { DevStreamOllamaClient } from '../ollama-client.js';
 import { MetricsCollector } from '../monitoring/metrics.js';
 import { QualityMetricsCollector, globalQueryTracker } from '../monitoring/quality-metrics.js';
+import { QueryAnalyzer, type QueryAnalysis } from './query-analyzer.js';
 
 /**
  * Hybrid search result with combined ranking
@@ -119,24 +120,73 @@ export const DEFAULT_HYBRID_CONFIG: HybridSearchConfig = {
 /**
  * Hybrid Search Engine
  * Context7-compliant implementation using RRF algorithm
+ *
+ * Phase 3 Enhancement: Adaptive Threshold System
+ * - Query complexity analysis with IDF-based term specificity
+ * - Dynamic threshold selection (0.5% - 3% based on complexity)
+ * - Adaptive RRF weights for vector vs keyword search
  */
 export class HybridSearchEngine {
+  private queryAnalyzer: QueryAnalyzer | null = null;
+
   constructor(
     private database: DevStreamDatabase,
     private ollamaClient: DevStreamOllamaClient
   ) {}
 
   /**
+   * Get or create QueryAnalyzer instance (lazy initialization)
+   */
+  private async getQueryAnalyzer(): Promise<QueryAnalyzer> {
+    if (!this.queryAnalyzer) {
+      this.queryAnalyzer = new QueryAnalyzer(this.database);
+      await this.queryAnalyzer.initialize();
+    }
+    return this.queryAnalyzer;
+  }
+
+  /**
+   * Analyze query complexity and get adaptive recommendations
+   * Phase 3: Public API for memory.ts to access adaptive thresholds
+   *
+   * @param query - Search query to analyze
+   * @returns Query analysis with recommended threshold and weights
+   */
+  async analyzeQuery(query: string): Promise<QueryAnalysis> {
+    const analyzer = await this.getQueryAnalyzer();
+    return await analyzer.analyze(query);
+  }
+
+  /**
    * Perform hybrid search combining vector and keyword search with RRF
    * Context7 pattern: Based on sqlite-vec NBC headlines example
    * With performance metrics collection and memory optimization
+   *
+   * Phase 3: Adaptive threshold and weights based on query complexity
    */
   async search(
     query: string,
     config: Partial<HybridSearchConfig> = {}
   ): Promise<HybridSearchResult[]> {
     return await MetricsCollector.trackQuery('hybrid', async () => {
-      const searchConfig = { ...DEFAULT_HYBRID_CONFIG, ...config };
+      // Phase 3: Analyze query for adaptive configuration
+      const analyzer = await this.getQueryAnalyzer();
+      const analysis = await analyzer.analyze(query);
+
+      // Log query analysis for observability
+      console.error(`📊 Query Analysis: ${analysis.complexity} complexity`);
+      console.error(`   Terms: ${analysis.termCount} total, ${analysis.technicalTermCount} technical`);
+      console.error(`   Specificity: ${(analysis.specificityScore * 100).toFixed(0)}%`);
+      console.error(`   Threshold: ${(analysis.recommendedThreshold * 100).toFixed(1)}%`);
+      console.error(`   Weights: vec=${analysis.recommendedWeights.weight_vec} fts=${analysis.recommendedWeights.weight_fts}`);
+      console.error(`   Reasoning: ${analysis.reasoning}`);
+
+      // Apply adaptive weights (can be overridden by user config)
+      const searchConfig: HybridSearchConfig = {
+        ...DEFAULT_HYBRID_CONFIG,
+        ...analysis.recommendedWeights,  // Apply adaptive weights first
+        ...config                        // User config takes precedence
+      };
 
       // Check if vector search is available
       const vectorAvailable = this.database.getVectorSearchStatus();
@@ -274,6 +324,10 @@ export class HybridSearchEngine {
       }
 
       // LEGACY: Original float32 search (fallback or pre-Phase 3)
+      // ⚠️ CRITICAL: DO NOT CHANGE 'AND k = ?' SYNTAX
+      // better-sqlite3 REQUIRES 'AND k = ?' for vec0 KNN queries
+      // Using 'LIMIT ?' will cause silent failure and fallback to FTS5-only
+      // See: docs/verification/vector-search-fix-final-report.md
       const sql = `
         WITH vec_matches AS (
           SELECT
@@ -282,7 +336,8 @@ export class HybridSearchEngine {
             distance
           FROM vec_semantic_memory
           WHERE embedding MATCH ?
-            AND k = ?
+            AND k = ?  -- REQUIRED: Do NOT replace with LIMIT ?
+          ORDER BY distance
         ),
         fts_matches AS (
           SELECT
@@ -467,6 +522,9 @@ export class HybridSearchEngine {
   /**
    * Vector-only search (for testing or when FTS5 unavailable)
    * With performance metrics
+   *
+   * ⚠️ CRITICAL: Uses 'AND k = ?' syntax required by better-sqlite3
+   * DO NOT change to 'LIMIT ?' - will cause query to fail
    */
   async vectorSearch(
     queryEmbedding: number[],
@@ -476,6 +534,8 @@ export class HybridSearchEngine {
       const embeddingFloat32 = new Float32Array(queryEmbedding);
       const embeddingBuffer = Buffer.from(embeddingFloat32.buffer);
 
+      // ⚠️ CRITICAL: 'AND k = ?' is REQUIRED for better-sqlite3
+      // Python sqlite3 accepts 'LIMIT ?' but better-sqlite3 does NOT
       const sql = `
         SELECT
           semantic_memory.id as memory_id,
@@ -490,7 +550,7 @@ export class HybridSearchEngine {
         FROM vec_semantic_memory
         JOIN semantic_memory ON semantic_memory.id = vec_semantic_memory.memory_id
         WHERE embedding MATCH ?
-          AND k = ?
+          AND k = ?  -- REQUIRED: Do NOT replace with LIMIT ?
         ORDER BY distance
       `;
 
