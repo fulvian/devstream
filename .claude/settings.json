@@ -14,6 +14,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "mcp__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/concurrency_guard.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
@@ -58,6 +68,16 @@
             "timeout": 45
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/sessions/session_end_v2.py",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -72,5 +92,29 @@
       }
     ],
     "Notification": []
+  },
+  "permissions": {
+    "allow": [
+      "Read(**/*)",
+      "Write(**/*)",
+      "Edit(**/*)",
+      "Bash",
+      "TodoWrite",
+      "mcp__*",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "deny": [],
+    "defaultMode": "acceptEdits"
+  },
+  "env": {
+    "DEVSTREAM_CONCURRENCY_LIMIT": "1",
+    "DEVSTREAM_TIMEOUT": "30000",
+    "DEVSTREAM_RETRY_ATTEMPTS": "3",
+    "DEVSTREAM_CIRCUIT_BREAKER_THRESHOLD": "5",
+    "CONTEXT7_CONCURRENCY_LIMIT": "1",
+    "CONTEXT7_TIMEOUT": "15000",
+    "CONTEXT7_RETRY_ATTEMPTS": "2",
+    "CONTEXT7_TOKEN_BUDGET": "5000"
   }
 }

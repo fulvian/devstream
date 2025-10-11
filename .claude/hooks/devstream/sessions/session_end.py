@@ -41,6 +41,7 @@ Context7 Patterns:
 import sys
 import asyncio
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -269,6 +270,152 @@ class SessionEndHook:
             self.base.debug_log(f"Failed to store summary in memory: {e}")
             return None
 
+    async def write_marker_file_session_specific(
+        self,
+        summary: str,
+        session_id: str
+    ) -> bool:
+        """
+        Write summary to SESSION-SPECIFIC marker file (Phase 3).
+
+        Creates ~/.claude/state/devstream_session_{session_id}.txt
+
+        Args:
+            summary: Summary markdown text
+            session_id: Session identifier
+
+        Returns:
+            True if successful, False otherwise
+
+        Note:
+            Session-specific files prevent collision in multi-session environments.
+            Updates registry with session end event after writing.
+        """
+        # Generate session-specific path
+        marker_file = (
+            Path.home() / ".claude" / "state" /
+            f"devstream_session_{session_id}.txt"
+        )
+
+        # Ensure parent directory exists
+        marker_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write
+        write_success = await write_atomic(marker_file, summary)
+
+        if write_success:
+            self.base.debug_log(
+                f"✅ Session-specific marker file written: {marker_file.name} "
+                f"(session_id={session_id}, size={len(summary)} chars)"
+            )
+
+            # Update registry with session end event
+            await self.update_registry_session_end(
+                session_id=session_id,
+                event={
+                    "timestamp": time.time(),
+                    "trigger": "session_end",
+                    "marker_file_written": True,
+                    "summary_length": len(summary)
+                }
+            )
+
+        else:
+            self.base.debug_log(
+                f"❌ Session-specific marker file write failed: {marker_file.name}"
+            )
+
+        return write_success
+
+    async def update_registry_session_end(
+        self,
+        session_id: str,
+        event: dict
+    ) -> bool:
+        """
+        Update session registry with session end event (Phase 3).
+
+        Thread-safe update using SessionCoordinator.
+
+        Args:
+            session_id: Session identifier
+            event: Session end event dict with keys:
+                   - timestamp (float)
+                   - trigger (str): "session_end"
+                   - marker_file_written (bool)
+                   - summary_length (int)
+
+        Returns:
+            True if update successful, False otherwise
+        """
+        try:
+            import fcntl
+            import time
+
+            registry_path = Path(self.coordinator.registry_path)
+
+            if not registry_path.exists():
+                self.base.debug_log(
+                    "Registry file not found - cannot update session end event"
+                )
+                return False
+
+            # Acquire lock and update registry
+            if not self.coordinator._acquire_lock():
+                self.base.debug_log("Failed to acquire lock for registry update")
+                return False
+
+            try:
+                # Read current registry
+                sessions = self.coordinator._read_registry()
+
+                if session_id not in sessions:
+                    self.base.debug_log(
+                        f"Session {session_id} not found in registry"
+                    )
+                    return False
+
+                session_info = sessions[session_id]
+
+                # Append session end event to compaction_events
+                # (reuse compaction_events array for all session events)
+                if not hasattr(session_info, 'compaction_events') or session_info.compaction_events is None:
+                    session_info.compaction_events = []
+
+                session_info.compaction_events.append(event)
+
+                # Update session metadata
+                session_info.status = "ended"
+                session_info.ended_at = time.time()
+
+                # Update marker file path
+                session_info.marker_file_path = str(
+                    Path.home() / ".claude" / "state" /
+                    f"devstream_session_{session_id}.txt"
+                )
+
+                # Reset summary_displayed flag
+                session_info.summary_displayed = False
+
+                # Write updated registry
+                self.coordinator._write_registry(sessions)
+
+                # Update cache
+                self.coordinator._sessions_cache = sessions
+
+                self.base.debug_log(
+                    f"✅ Registry updated with session end event: {session_id}"
+                )
+
+                return True
+
+            finally:
+                self.coordinator._release_lock()
+
+        except Exception as e:
+            self.base.debug_log(f"Failed to update registry: {e}")
+            return False
+
     async def process_session_end(self, session_id: str) -> bool:
         """
         Process session end workflow.
@@ -357,33 +504,21 @@ class SessionEndHook:
             else:
                 self.base.warning_feedback("Summary storage failed (non-blocking)")
 
-            # Step 5.5: Write summary to file for SessionStart hook (ATOMIC)
-            self.base.debug_log("Step 5.5: Writing summary to marker file (atomic)...")
+            # Step 5.5: Write session-specific marker file (Phase 3)
+            self.base.debug_log("Step 5.5: Writing session-specific marker file...")
 
-            summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+            marker_written = await self.write_marker_file_session_specific(
+                summary_markdown,
+                session_id
+            )
 
-            # Ensure parent directory exists
-            summary_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Atomic write with logging
-            write_success = await write_atomic(summary_file, summary_markdown)
-
-            if write_success:
+            if marker_written:
                 self.base.debug_log(
-                    f"✅ Marker file written atomically: {summary_file} "
-                    f"(source=session_end, size={len(summary_markdown)} chars)"
-                )
-
-                # Log marker file creation for telemetry
-                self.base.debug_log(
-                    f"📊 Marker file telemetry: "
-                    f"exists={summary_file.exists()}, "
-                    f"size={summary_file.stat().st_size if summary_file.exists() else 0}, "
-                    f"source=session_end"
+                    "✅ Session-specific marker file written successfully"
                 )
             else:
-                self.base.debug_log(
-                    f"❌ Marker file write failed: {summary_file} (source=session_end)"
+                self.base.warning_feedback(
+                    "Session-specific marker file write failed"
                 )
 
             # Step 6: Update session status to "completed"

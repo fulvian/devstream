@@ -177,37 +177,310 @@ class SessionStartHook:
 
         return results
 
-    async def display_previous_summary(self) -> None:
+    async def display_all_pending_summaries(self) -> int:
         """
-        Display previous session summary if available.
+        Display ALL pending session summaries from session-specific marker files (Phase 4).
 
-        B2 Behavioral Refinement: Shows summary from marker file.
+        Iterates all marker files in ~/.claude/state/devstream_session_*.txt,
+        displays summaries for sessions with summary_displayed=False,
+        updates registry, and deletes marker files.
+
+        Returns:
+            Number of summaries displayed
+
+        Note:
+            Supports multi-session scenarios (Sonnet 4.5 + GLM-4.6 concurrent).
+            Thread-safe registry updates via SessionCoordinator.
         """
-        summary_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+        import glob
+        import time
 
-        if not summary_file.exists():
-            return
+        state_dir = Path.home() / ".claude" / "state"
+        marker_pattern = str(state_dir / "devstream_session_*.txt")
+
+        # Find all session-specific marker files
+        marker_files = glob.glob(marker_pattern)
+
+        if not marker_files:
+            self.logger.debug("No pending session summaries found")
+            return 0
+
+        self.logger.info(f"Found {len(marker_files)} session-specific marker files")
+
+        displayed_count = 0
+
+        for marker_file_path in marker_files:
+            try:
+                marker_file = Path(marker_file_path)
+
+                # Extract session_id from filename: devstream_session_{session_id}.txt
+                filename = marker_file.name
+                if not filename.startswith("devstream_session_"):
+                    continue
+
+                session_id = filename.replace("devstream_session_", "").replace(".txt", "")
+
+                # Check if summary already displayed in registry
+                if not self.coordinator._acquire_lock(timeout=5):
+                    self.logger.warning(f"Failed to acquire lock for {session_id}, skipping")
+                    continue
+
+                try:
+                    sessions = self.coordinator._read_registry()
+
+                    # Check if session exists and summary not displayed
+                    if session_id in sessions:
+                        session_info = sessions[session_id]
+                        if session_info.summary_displayed:
+                            self.logger.debug(f"Summary already displayed for {session_id}, skipping")
+                            # Delete marker file even if already displayed
+                            marker_file.unlink()
+                            continue
+
+                    # Read and display summary
+                    with open(marker_file, "r") as f:
+                        summary = f.read()
+
+                    if summary and len(summary.strip()) > 0:
+                        # Display summary to user
+                        print("\n" + "=" * 70)
+                        print(f"📋 SESSION SUMMARY - {session_id[:12]}...")
+                        print("=" * 70)
+                        print(summary)
+                        print("=" * 70 + "\n")
+
+                        displayed_count += 1
+                        self.logger.info(f"Displayed summary for session {session_id}")
+
+                        # Update registry: mark summary as displayed
+                        if session_id in sessions:
+                            sessions[session_id].summary_displayed = True
+                            self.coordinator._write_registry(sessions)
+                            self.coordinator._sessions_cache = sessions
+
+                        # Delete marker file after display
+                        marker_file.unlink()
+                        self.logger.debug(f"Deleted marker file: {marker_file.name}")
+
+                finally:
+                    self.coordinator._release_lock()
+
+            except Exception as e:
+                self.logger.error(f"Failed to process marker file {marker_file_path}: {e}")
+                continue
+
+        if displayed_count > 0:
+            self.logger.info(f"Displayed {displayed_count} session summaries")
+
+        return displayed_count
+
+    async def cleanup_old_sessions(self, retention_days: int = 7) -> int:
+        """
+        Cleanup old sessions and zombie sessions (Phase 4).
+
+        Removes:
+        - Sessions with status "ended" older than retention_days
+        - Zombie sessions (process PID no longer exists)
+        - Associated marker files
+
+        Args:
+            retention_days: Retention period for ended sessions (default: 7 days)
+
+        Returns:
+            Number of sessions cleaned up
+
+        Note:
+            Uses psutil for PID validation (Context7 pattern).
+            Thread-safe via SessionCoordinator locking.
+        """
+        import time
+        import psutil
+
+        cleanup_count = 0
+        current_time = time.time()
+        retention_seconds = retention_days * 24 * 3600
+
+        if not self.coordinator._acquire_lock(timeout=10):
+            self.logger.error("Failed to acquire lock for session cleanup")
+            return 0
 
         try:
-            with open(summary_file, "r") as f:
+            sessions = self.coordinator._read_registry()
+            sessions_to_remove = []
+
+            for session_id, session_info in sessions.items():
+                should_remove = False
+                reason = ""
+
+                # Check 1: Zombie sessions (PID doesn't exist)
+                if not psutil.pid_exists(session_info.pid):
+                    should_remove = True
+                    reason = f"zombie (PID {session_info.pid} doesn't exist)"
+
+                # Check 2: Old ended sessions (retention period exceeded)
+                elif session_info.status == "ended" and session_info.ended_at:
+                    age_seconds = current_time - session_info.ended_at
+                    if age_seconds > retention_seconds:
+                        should_remove = True
+                        age_days = age_seconds / 86400
+                        reason = f"expired (ended {age_days:.1f} days ago, retention={retention_days} days)"
+
+                if should_remove:
+                    self.logger.info(f"Cleaning up session {session_id}: {reason}")
+                    sessions_to_remove.append(session_id)
+
+                    # Delete associated marker file if exists
+                    if session_info.marker_file_path:
+                        marker_file = Path(session_info.marker_file_path)
+                        if marker_file.exists():
+                            marker_file.unlink()
+                            self.logger.debug(f"Deleted marker file: {marker_file}")
+
+            # Remove sessions from registry
+            for session_id in sessions_to_remove:
+                del sessions[session_id]
+                cleanup_count += 1
+
+            # Write updated registry if changes made
+            if cleanup_count > 0:
+                self.coordinator._write_registry(sessions)
+                self.coordinator._sessions_cache = sessions
+                self.logger.info(f"Cleaned up {cleanup_count} sessions")
+
+        finally:
+            self.coordinator._release_lock()
+
+        return cleanup_count
+
+    async def migrate_legacy_marker_file(self) -> bool:
+        """
+        Migrate legacy devstream_last_session.txt to session-specific format (Phase 4).
+
+        If legacy marker file exists:
+        1. Read summary content
+        2. Create session-specific marker file for a legacy session
+        3. Update registry with legacy session info
+        4. Delete legacy marker file
+
+        Returns:
+            True if migration performed, False if no legacy file
+
+        Note:
+            One-time migration for backward compatibility.
+            Creates synthetic session ID for legacy summary.
+        """
+        import time
+        import hashlib
+
+        legacy_file = Path.home() / ".claude" / "state" / "devstream_last_session.txt"
+
+        if not legacy_file.exists():
+            return False
+
+        try:
+            self.logger.info("Found legacy marker file, migrating to session-specific format")
+
+            # Read legacy summary
+            with open(legacy_file, "r") as f:
                 summary = f.read()
 
-            if summary and len(summary.strip()) > 0:
-                # Display summary to user
-                print("\n" + "=" * 70)
-                print("📋 PREVIOUS SESSION SUMMARY")
-                print("=" * 70)
-                print(summary)
-                print("=" * 70 + "\n")
+            if not summary or len(summary.strip()) == 0:
+                # Empty legacy file, just delete it
+                legacy_file.unlink()
+                self.logger.debug("Deleted empty legacy marker file")
+                return False
 
-                self.logger.info("Displayed previous session summary")
+            # Generate synthetic session ID for legacy summary
+            # Use hash of summary content for deterministic ID
+            summary_hash = hashlib.sha256(summary.encode()).hexdigest()[:16]
+            legacy_session_id = f"sess-legacy-{summary_hash}"
 
-                # Delete marker file after display
-                summary_file.unlink()
-                self.logger.debug("Deleted summary marker file")
+            # Create session-specific marker file
+            marker_file = (
+                Path.home() / ".claude" / "state" /
+                f"devstream_session_{legacy_session_id}.txt"
+            )
+
+            with open(marker_file, "w") as f:
+                f.write(summary)
+
+            self.logger.info(f"Created session-specific marker file: {marker_file.name}")
+
+            # Update registry with legacy session info
+            if not self.coordinator._acquire_lock(timeout=5):
+                self.logger.warning("Failed to acquire lock for legacy migration")
+                # Still delete legacy file even if registry update fails
+                legacy_file.unlink()
+                return True
+
+            try:
+                from session_coordinator import SessionInfo
+
+                sessions = self.coordinator._read_registry()
+
+                # Create synthetic SessionInfo for legacy session
+                legacy_session_info = SessionInfo(
+                    session_id=legacy_session_id,
+                    pid=0,  # Unknown PID
+                    started_at=time.time() - 86400,  # Assume 1 day ago
+                    last_heartbeat=time.time() - 86400,
+                    status="ended",
+                    ended_at=time.time() - 3600,  # Assume ended 1 hour ago
+                    marker_file_path=str(marker_file),
+                    compaction_events=[],
+                    summary_displayed=False,
+                    model_type="unknown",
+                    session_name="Legacy Session"
+                )
+
+                sessions[legacy_session_id] = legacy_session_info
+                self.coordinator._write_registry(sessions)
+                self.coordinator._sessions_cache = sessions
+
+                self.logger.info(f"Registered legacy session in registry: {legacy_session_id}")
+
+            finally:
+                self.coordinator._release_lock()
+
+            # Delete legacy marker file
+            legacy_file.unlink()
+            self.logger.info("Deleted legacy marker file")
+
+            return True
 
         except Exception as e:
-            self.logger.error(f"Failed to display previous summary: {e}")
+            self.logger.error(f"Failed to migrate legacy marker file: {e}")
+            return False
+
+    async def display_previous_summary(self) -> None:
+        """
+        Display previous session summary (Phase 4 - refactored).
+
+        Phase 4 Workflow:
+        1. Migrate legacy marker file (if exists)
+        2. Cleanup old/zombie sessions
+        3. Display ALL pending summaries (session-specific marker files)
+
+        Note:
+            Replaces single-summary display with multi-summary support.
+            Backward compatible with legacy devstream_last_session.txt.
+        """
+        # Step 1: Migrate legacy marker file to session-specific format
+        legacy_migrated = await self.migrate_legacy_marker_file()
+        if legacy_migrated:
+            self.logger.info("Legacy marker file migrated to session-specific format")
+
+        # Step 2: Cleanup old and zombie sessions (proactive maintenance)
+        cleanup_count = await self.cleanup_old_sessions(retention_days=7)
+        if cleanup_count > 0:
+            self.logger.info(f"Cleaned up {cleanup_count} old/zombie sessions")
+
+        # Step 3: Display ALL pending summaries
+        displayed_count = await self.display_all_pending_summaries()
+        if displayed_count > 0:
+            self.logger.info(f"Displayed {displayed_count} pending session summaries")
+        else:
+            self.logger.debug("No pending summaries to display")
 
     async def run_hook(self, hook_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
