@@ -46,14 +46,9 @@ except ImportError as e:
     PROTOCOL_SYNC_AVAILABLE = False
     _SYNC_IMPORT_ERROR = str(e)
 
-# Event Sourcing Session Log imports (Phase 3 Integration)
-try:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from sessions.session_event_log import get_session_log
-    SESSION_EVENT_LOG_AVAILABLE = True
-except ImportError as e:
-    SESSION_EVENT_LOG_AVAILABLE = False
-    _EVENT_LOG_IMPORT_ERROR = str(e)
+# Session tracking removed (2025-10-12)
+# Event Sourcing Session Log imports removed - session tracking system deprecated
+SESSION_EVENT_LOG_AVAILABLE = False
 
 
 class PostToolUseHook:
@@ -738,328 +733,10 @@ class PostToolUseHook:
         self.base.debug_log(f"Extracted entities: {unique_entities}")
         return unique_entities
 
-    async def _get_current_session_id(self) -> Optional[str]:
-        """
-        Get current active session ID from work_sessions table.
-
-        Memory Bank Pattern: Active session tracking for context preservation.
-
-        Returns:
-            Current session ID if found, None otherwise
-
-        Note:
-            Queries for most recent active session (status='active')
-        """
-        try:
-            import aiosqlite
-
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    """
-                    SELECT id FROM work_sessions
-                    WHERE status = 'active'
-                    ORDER BY started_at DESC
-                    LIMIT 1
-                    """
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        session_id = row[0]
-                        self.base.debug_log(f"Active session: {session_id[:8]}...")
-                        return session_id
-
-                    self.base.debug_log("No active session found")
-                    return None
-
-        except Exception as e:
-            self.base.debug_log(f"Failed to get session ID: {e}")
-            return None
-
-    async def _get_active_files(self, session_id: str) -> List[str]:
-        """
-        Get current active_files list from session.
-
-        Context7 Pattern: Read-only helper using aiosqlite async with.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            List of active file paths (empty list if session not found)
-        """
-        try:
-            import aiosqlite
-
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT active_files FROM work_sessions WHERE id = ?",
-                    (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return []
-
-                    # Parse JSON (handle NULL case)
-                    return json.loads(row[0]) if row[0] else []
-
-        except Exception as e:
-            self.base.debug_log(f"Failed to get active files: {e}")
-            return []
-
-    async def _get_active_tasks(self, session_id: str) -> List[str]:
-        """
-        Get current active_tasks list from session.
-
-        Context7 Pattern: Read-only helper using aiosqlite async with.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            List of active task IDs/titles (empty list if session not found)
-        """
-        try:
-            import aiosqlite
-
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT active_tasks FROM work_sessions WHERE id = ?",
-                    (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return []
-
-                    # Parse JSON (handle NULL case)
-                    return json.loads(row[0]) if row[0] else []
-
-        except Exception as e:
-            self.base.debug_log(f"Failed to get active tasks: {e}")
-            return []
-
-    async def _add_active_file(self, session_id: str, file_path: str) -> bool:
-        """
-        Add file to session's active_files list (with deduplication).
-
-        Memory Bank Pattern: Track files ACTIVELY modified during session.
-
-        DEPRECATED: Use update_session_tracking() with WorkSessionManager instead.
-        Kept for backward compatibility only.
-
-        Args:
-            session_id: Session identifier
-            file_path: Path to file being modified
-
-        Returns:
-            True if file added successfully, False otherwise
-
-        Note:
-            Uses atomic JSON update with deduplication.
-            Gracefully handles missing sessions (returns False).
-        """
-        try:
-            import aiosqlite
-
-            async with aiosqlite.connect(self.db_path) as db:
-                # Get current active_files
-                async with db.execute(
-                    "SELECT active_files FROM work_sessions WHERE id = ?",
-                    (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return False
-
-                    # Parse JSON (handle NULL case)
-                    active_files = json.loads(row[0]) if row[0] else []
-
-                    # Add if not already present (deduplication)
-                    if file_path not in active_files:
-                        active_files.append(file_path)
-
-                        # Update with atomic transaction
-                        await db.execute(
-                            "UPDATE work_sessions SET active_files = ? WHERE id = ?",
-                            (json.dumps(active_files), session_id)
-                        )
-                        await db.commit()
-
-                        self.base.debug_log(
-                            f"Added to active_files: {file_path} "
-                            f"(total: {len(active_files)})"
-                        )
-                        return True
-                    else:
-                        self.base.debug_log(f"File already tracked: {file_path}")
-                        return True  # Already tracked is success
-
-        except Exception as e:
-            self.base.debug_log(f"Failed to add active file: {e}")
-            return False
-
-    async def _add_active_task(self, session_id: str, task_id: str) -> bool:
-        """
-        Add task to session's active_tasks list (with deduplication).
-
-        Memory Bank Pattern: Track tasks ACTIVELY worked on during session.
-
-        Args:
-            session_id: Session identifier
-            task_id: Task identifier (from TodoWrite or MCP)
-
-        Returns:
-            True if task added successfully, False otherwise
-
-        Note:
-            Uses atomic JSON update with deduplication.
-            active_tasks column already exists in schema ✅
-        """
-        try:
-            import aiosqlite
-
-            async with aiosqlite.connect(self.db_path) as db:
-                # Get current active_tasks
-                async with db.execute(
-                    "SELECT active_tasks FROM work_sessions WHERE id = ?",
-                    (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return False
-
-                    # Parse JSON (handle NULL case)
-                    active_tasks = json.loads(row[0]) if row[0] else []
-
-                    # Add if not already present (deduplication)
-                    if task_id not in active_tasks:
-                        active_tasks.append(task_id)
-
-                        # Update with atomic transaction
-                        await db.execute(
-                            "UPDATE work_sessions SET active_tasks = ? WHERE id = ?",
-                            (json.dumps(active_tasks), session_id)
-                        )
-                        await db.commit()
-
-                        self.base.debug_log(
-                            f"Added to active_tasks: {task_id[:8]}... "
-                            f"(total: {len(active_tasks)})"
-                        )
-                        return True
-                    else:
-                        self.base.debug_log(f"Task already tracked: {task_id[:8]}...")
-                        return True  # Already tracked is success
-
-        except Exception as e:
-            self.base.debug_log(f"Failed to add active task: {e}")
-            return False
-
-    async def update_session_tracking(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any]
-    ) -> None:
-        """
-        Update work_sessions with active files and tasks via WorkSessionManager.
-
-        Context7 Pattern: Delegates to WorkSessionManager.update_session_progress()
-        instead of direct database writes for proper abstraction layer.
-
-        Called after memory storage to track active work in current session.
-        Non-blocking - failures logged but don't affect hook execution.
-
-        Args:
-            tool_name: Name of tool executed
-            tool_input: Tool input parameters
-
-        Note:
-            Tracks via WorkSessionManager:
-            - Write/Edit/MultiEdit → active_files
-            - TodoWrite → active_tasks (from in_progress todos)
-            - MCP devstream_update_task → active_tasks
-        """
-        try:
-            # Get current session ID
-            session_id = await self._get_current_session_id()
-            if not session_id:
-                self.base.debug_log("No active session - skip tracking")
-                return
-
-            # Initialize WorkSessionManager for proper session updates
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).parent.parent / 'sessions'))
-            from work_session_manager import WorkSessionManager
-
-            session_manager = WorkSessionManager()
-
-            # Track active files (Write/Edit/MultiEdit)
-            if tool_name in ["Write", "Edit", "MultiEdit"]:
-                file_path = tool_input.get("file_path")
-                if file_path:
-                    # Get current active_files
-                    current_files = await self._get_active_files(session_id)
-
-                    # Add new file if not already tracked
-                    if file_path not in current_files:
-                        current_files.append(file_path)
-
-                        # Update session with active_files via WorkSessionManager
-                        await session_manager.update_session_progress(
-                            session_id=session_id,
-                            active_files=current_files
-                        )
-
-                        self.base.debug_log(
-                            f"Updated active_files via WorkSessionManager: {file_path} "
-                            f"(total: {len(current_files)})"
-                        )
-
-            # Track active tasks (TodoWrite)
-            elif tool_name == "TodoWrite":
-                todos = tool_input.get("todos", [])
-
-                # Get current active_tasks
-                current_tasks = await self._get_active_tasks(session_id)
-
-                tasks_updated = False
-                for todo in todos:
-                    # Track in_progress todos (actively being worked on)
-                    if todo.get("status") == "in_progress":
-                        task_content = todo.get("content", "")
-
-                        # Add if not already tracked
-                        if task_content and task_content not in current_tasks:
-                            current_tasks.append(task_content)
-                            tasks_updated = True
-
-                # Update session with active_tasks via WorkSessionManager
-                if tasks_updated:
-                    await session_manager.update_session_progress(
-                        session_id=session_id,
-                        active_tasks=current_tasks
-                    )
-
-                    self.base.debug_log(
-                        f"Updated active_tasks via WorkSessionManager: "
-                        f"{len(current_tasks)} tasks"
-                    )
-
-            # Track MCP task operations (devstream_update_task, devstream_create_task)
-            # Note: These are called via MCP, not directly as tool_name
-            # For now, TodoWrite is primary tracking mechanism
-
-        except Exception as e:
-            # Non-blocking - log and continue
-            self.base.debug_log(f"Session tracking failed (non-blocking): {e}")
+    # Session tracking methods removed (2025-10-12)
+    # _get_current_session_id, _get_active_files, _get_active_tasks,
+    # _add_active_file, _add_active_task, update_session_tracking
+    # All removed - session tracking system deprecated
 
     def log_capture_audit(
         self,
@@ -1104,103 +781,8 @@ class PostToolUseHook:
         # with open(audit_file, "a") as f:
         #     f.write(json.dumps(audit_entry) + "\n")
 
-    async def capture_session_event(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_response: Dict[str, Any]
-    ) -> None:
-        """
-        Capture session events for Event Sourcing session summary.
-
-        Phase 3 Integration: Capture events in append-only log for session_end_v2.py.
-        Non-blocking - failures logged but don't affect hook execution.
-
-        Args:
-            tool_name: Name of the tool executed
-            tool_input: Tool input parameters
-            tool_response: Tool execution response
-        """
-        self.base.debug_log(f"🎯 capture_session_event called: tool={tool_name}, SESSION_EVENT_LOG_AVAILABLE={SESSION_EVENT_LOG_AVAILABLE}")
-
-        if not SESSION_EVENT_LOG_AVAILABLE:
-            # Event log not available - skip silently
-            self.base.debug_log("❌ SESSION_EVENT_LOG_AVAILABLE=False, skipping event capture")
-            return
-
-        try:
-            # Get session ID from environment or tool input
-            session_id = os.environ.get("CLAUDE_SESSION_ID")
-            if not session_id:
-                # Try to extract from tool input if available
-                session_id = tool_input.get("session_id", "sess-unknown")
-
-            self.base.debug_log(f"🎯 Event capture: session_id={session_id}")
-
-            # Get session event log
-            event_log = await get_session_log(session_id)
-            self.base.debug_log(f"🎯 Event log retrieved: {event_log.session_id}, events={len(event_log.events)}")
-
-            # Capture events based on tool type
-            if tool_name in ["Write", "Edit", "MultiEdit"]:
-                # File modification events
-                file_path = tool_input.get("file_path", "")
-                content = tool_input.get("content", "") or tool_input.get("new_string", "")
-
-                if file_path and content:
-                    self.base.debug_log(f"🎯 Recording file_modified event: {file_path}")
-                    await event_log.record_event("file_modified", {
-                        "path": str(file_path),
-                        "tool": tool_name,
-                        "size_bytes": len(content),
-                        "session_id": session_id
-                    })
-                    self.base.debug_log(f"✅ file_modified event recorded, total events: {len(event_log.events)}")
-
-            elif tool_name == "TodoWrite":
-                # Task events - check for task completion
-                todos = tool_input.get("todos", [])
-
-                for todo in todos:
-                    todo_content = todo.get("content", "")
-                    todo_status = todo.get("status", "")
-
-                    if todo_content:
-                        if todo_status == "completed":
-                            await event_log.record_event("task_completed", {
-                                "task_id": f"todo-{hash(todo_content) % 10000}",
-                                "title": todo_content[:100],  # Limit title length
-                                "session_id": session_id
-                            })
-                        elif todo_status == "in_progress":
-                            await event_log.record_event("task_started", {
-                                "task_id": f"todo-{hash(todo_content) % 10000}",
-                                "title": todo_content[:100],
-                                "session_id": session_id
-                            })
-
-            elif tool_name == "Bash":
-                # Error events for failed commands
-                if not tool_response.get("success", True):
-                    command = tool_input.get("command", "")
-                    error_output = tool_response.get("error", "") or tool_response.get("output", "")
-
-                    if command:
-                        await event_log.record_event("error", {
-                            "error_type": "bash_command",
-                            "message": f"Command failed: {command[:100]}",
-                            "command": command[:200],
-                            "output": error_output[:200] if error_output else "",
-                            "session_id": session_id
-                        })
-
-            # TODO: Add more event types as needed
-            # - Decision events (could be extracted from comments)
-            # - Learning events (could be extracted from documentation)
-
-        except Exception as e:
-            # Non-blocking - log but don't fail the hook
-            self.base.debug_log(f"Event capture failed (non-blocking): {e}")
+    # capture_session_event removed (2025-10-12)
+    # Session event capturing deprecated - session tracking system removed
 
     async def process(self, context: PostToolUseContext) -> None:
         """
@@ -1275,9 +857,8 @@ class PostToolUseHook:
 
         self.base.debug_log(f"Processing {tool_name}")
 
-        # Phase 3: Capture session events (Event Sourcing)
-        # Non-blocking - capture events before any other processing
-        await self.capture_session_event(tool_name, tool_input, tool_response)
+        # Session event capturing removed (2025-10-12)
+        # Session tracking system deprecated
 
         # Define critical tools that trigger checkpoints
         critical_tools = ["Write", "Edit", "MultiEdit", "Bash", "TodoWrite"]
@@ -1396,8 +977,8 @@ class PostToolUseHook:
                 capture_decision=capture_decision
             )
 
-            # FASE 2: Update session tracking (Memory Bank activeContext pattern)
-            await self.update_session_tracking(tool_name, tool_input)
+            # Session tracking removed (2025-10-12)
+            # update_session_tracking call removed - session tracking system deprecated
 
             # FASE 1: Trigger real-time capture for critical tool execution
             if is_critical_tool:
@@ -1427,84 +1008,61 @@ class PostToolUseHook:
 
         This mode allows the PostToolUse hook to function during testing
         or when executed directly without full Claude Code integration.
+
+        Session tracking removed (2025-10-12) - simplified to basic memory test.
         """
         print("🔄 PostToolUse hook running in fallback mode")
 
         try:
-            # Get current session information
-            sys.path.insert(0, str(Path(__file__).parent.parent / 'sessions'))
-            from work_session_manager import WorkSessionManager
-            session_manager = WorkSessionManager()
-
-            # Try to get current active session
-            import sqlite3
-            sys.path.append(str(Path(__file__).parent.parent / 'utils'))
-            from connection_manager import get_connection_manager
-
-            # Database configuration (use data/ as corrected in implementation)
+            # Database configuration
             project_root = Path(__file__).parent.parent.parent.parent.parent
             db_path = str(project_root / 'data' / 'devstream.db')
 
-            # Use connection manager for WAL mode enforcement
-            manager = get_connection_manager(db_path)
-            conn = manager._get_thread_connection()
-            cursor = conn.cursor()
+            # Test memory storage via MCP
+            test_content = f"PostToolUse fallback mode test at {datetime.now().isoformat()}"
 
-            cursor.execute('SELECT id, started_at FROM work_sessions WHERE status="active" ORDER BY started_at DESC LIMIT 1')
-            session = cursor.fetchone()
+            result = await self.base.safe_mcp_call(
+                self.mcp_client,
+                "devstream_store_memory",
+                {
+                    "content": test_content,
+                    "content_type": "code",
+                    "keywords": ["post_tool_use", "fallback", "test"]
+                }
+            )
 
-            if session:
-                session_id, started_at = session
-                print(f"📊 Found active session: {session_id}")
-
-                # Store a test record to verify the hook works
-                test_content = f"PostToolUse fallback mode test at {datetime.now().isoformat()}"
-
-                result = await self.base.safe_mcp_call(
-                    self.mcp_client,
-                    "devstream_store_memory",
-                    {
-                        "content": test_content,
-                        "content_type": "code",
-                        "keywords": ["post_tool_use", "fallback", "test", session_id[:8]]
-                    }
-                )
-
-                if result:
-                    print("✅ PostToolUse fallback mode: Memory storage successful")
-                else:
-                    print("⚠️ PostToolUse fallback mode: Memory storage failed (MCP unavailable)")
-
-                    # Fallback: Store directly in database
-                    try:
-                        # Use ConnectionManager for fallback mode (WAL mode enforced)
-                        conn_sync = manager._get_thread_connection()
-                        cursor_sync = conn_sync.cursor()
-
-                        cursor_sync.execute(
-                            """
-                            INSERT INTO semantic_memory
-                            (id, content, content_type, created_at, updated_at, keywords)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                f"fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                                test_content,
-                                "code",
-                                datetime.now().isoformat(),
-                                datetime.now().isoformat(),
-                                json.dumps(["post_tool_use", "fallback", "test"])
-                            )
-                        )
-                        conn_sync.commit()
-                        conn_sync.close()
-
-                        print("✅ PostToolUse fallback mode: Direct database storage successful")
-                    except Exception as e:
-                        print(f"❌ PostToolUse fallback mode: Direct storage failed: {e}")
-
+            if result:
+                print("✅ PostToolUse fallback mode: Memory storage successful")
             else:
-                print("⚠️ No active session found for fallback mode")
+                print("⚠️ PostToolUse fallback mode: Memory storage failed (MCP unavailable)")
+
+                # Fallback: Store directly in database
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+
+                    cursor.execute(
+                        """
+                        INSERT INTO semantic_memory
+                        (id, content, content_type, created_at, updated_at, keywords)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            test_content,
+                            "code",
+                            datetime.now().isoformat(),
+                            datetime.now().isoformat(),
+                            json.dumps(["post_tool_use", "fallback", "test"])
+                        )
+                    )
+                    conn.commit()
+                    conn.close()
+
+                    print("✅ PostToolUse fallback mode: Direct database storage successful")
+                except Exception as e:
+                    print(f"❌ PostToolUse fallback mode: Direct storage failed: {e}")
 
             # FASE 1: Test real-time capture functionality
             try:
@@ -1547,8 +1105,6 @@ class PostToolUseHook:
 
             except Exception as rtc_error:
                 print(f"⚠️ Real-time capture test failed: {rtc_error}")
-
-            conn.close()
 
         except Exception as e:
             print(f"❌ PostToolUse fallback mode error: {e}")
