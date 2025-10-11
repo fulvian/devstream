@@ -1012,12 +1012,11 @@ class PostToolUseHook:
                     if file_path not in current_files:
                         current_files.append(file_path)
 
-                        # DISABLED: WorkSessionManager.update_session_progress() doesn't accept active_files
-                        # Event Sourcing captures this via capture_session_event() instead
-                        # await session_manager.update_session_progress(
-                        #     session_id=session_id,
-                        #     active_files=current_files
-                        # )
+                        # Update session with active_files via WorkSessionManager
+                        await session_manager.update_session_progress(
+                            session_id=session_id,
+                            active_files=current_files
+                        )
 
                         self.base.debug_log(
                             f"Updated active_files via WorkSessionManager: {file_path} "
@@ -1042,13 +1041,12 @@ class PostToolUseHook:
                             current_tasks.append(task_content)
                             tasks_updated = True
 
-                # DISABLED: WorkSessionManager.update_session_progress() doesn't accept active_tasks
-                # Event Sourcing captures this via capture_session_event() instead
-                # if tasks_updated:
-                #     await session_manager.update_session_progress(
-                #         session_id=session_id,
-                #         active_tasks=current_tasks
-                #     )
+                # Update session with active_tasks via WorkSessionManager
+                if tasks_updated:
+                    await session_manager.update_session_progress(
+                        session_id=session_id,
+                        active_tasks=current_tasks
+                    )
 
                     self.base.debug_log(
                         f"Updated active_tasks via WorkSessionManager: "

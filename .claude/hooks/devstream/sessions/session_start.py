@@ -96,6 +96,36 @@ class SessionStartHook:
         }
 
         try:
+            # Session ID-based idempotency check (v2 - multi-session safe)
+            # Check if session already exists and is active before cleanup
+            existing_session = await self.session_manager.get_session(session_id)
+
+            if existing_session and existing_session.status == "active":
+                self.logger.info(
+                    f"Session {session_id[:12]}... already initialized - idempotent return"
+                )
+
+                # Update last_activity_at and return existing session
+                await self.session_manager.resume_session(session_id)
+
+                # Bind context for automatic log propagation
+                self.session_manager.bind_session_context(
+                    session_id=existing_session.id,
+                    session_name=existing_session.session_name
+                )
+
+                results["success"] = True
+                results["session_resumed"] = True
+                results["session_data"] = {
+                    "id": existing_session.id,
+                    "status": existing_session.status,
+                    "started_at": existing_session.started_at.isoformat(),
+                    "tokens_used": existing_session.tokens_used
+                }
+
+                self.logger.debug(f"Idempotent return for active session: {session_id[:12]}...")
+                return results
+
             # Proactive cleanup of zombie sessions before checking limits
             self.logger.info("Performing proactive session cleanup...")
             cleanup_stats = self.cleanup_manager.aggressive_cleanup()

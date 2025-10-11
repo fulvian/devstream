@@ -301,7 +301,8 @@ class WorkSessionManager:
         session_id: str,
         tokens_delta: int = 0,
         active_tasks: Optional[List[str]] = None,
-        completed_tasks: Optional[List[str]] = None
+        completed_tasks: Optional[List[str]] = None,
+        active_files: Optional[List[str]] = None
     ) -> bool:
         """
         Update session progress metrics.
@@ -311,6 +312,7 @@ class WorkSessionManager:
             tokens_delta: Token count increment (added to existing tokens_used)
             active_tasks: Current active tasks list (replaces existing)
             completed_tasks: Current completed tasks list (replaces existing)
+            active_files: Current active files list (replaces existing)
 
         Returns:
             bool: True if update successful
@@ -337,6 +339,10 @@ class WorkSessionManager:
         if completed_tasks is not None:
             updates.append("completed_tasks = ?")
             params.append(json.dumps(completed_tasks))
+
+        if active_files is not None:
+            updates.append("active_files = ?")
+            params.append(json.dumps(active_files))
 
         # Add session_id for WHERE clause
         params.append(session_id)

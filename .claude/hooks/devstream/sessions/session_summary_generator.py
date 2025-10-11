@@ -43,6 +43,7 @@ class SessionSummary:
     started_at: datetime
     ended_at: datetime
     duration_minutes: int
+    duration_formatted: str  # Human-readable duration (e.g., "2 hours 15 minutes", "45 seconds")
 
     # Work accomplished
     tasks_completed: int
@@ -78,7 +79,7 @@ class SessionSummary:
 **Session**: {self.session_name or self.session_id}
 **Started**: {started}
 **Ended**: {ended}
-**Duration**: {self.duration_minutes} minutes
+**Duration**: {self.duration_formatted}
 **Status**: {self.status}
 
 ---
@@ -165,6 +166,51 @@ class SessionSummaryGenerator:
 
         self.logger.info("SessionSummaryGenerator initialized")
 
+    def _format_duration(self, started_at: datetime, ended_at: datetime) -> str:
+        """
+        Format session duration in human-readable format.
+
+        Handles short sessions (<1 minute) by showing seconds instead of "0 minutes".
+
+        Args:
+            started_at: Session start timestamp
+            ended_at: Session end timestamp
+
+        Returns:
+            Human-readable duration string (e.g., "2 hours 15 minutes", "45 seconds", "1 second")
+
+        Examples:
+            >>> _format_duration(datetime(2025, 1, 1, 10, 0, 0), datetime(2025, 1, 1, 10, 0, 30))
+            "30 seconds"
+            >>> _format_duration(datetime(2025, 1, 1, 10, 0, 0), datetime(2025, 1, 1, 10, 5, 0))
+            "5 minutes"
+            >>> _format_duration(datetime(2025, 1, 1, 10, 0, 0), datetime(2025, 1, 1, 12, 15, 0))
+            "2 hours 15 minutes"
+        """
+        if not ended_at or not started_at:
+            return "0 minutes"
+
+        duration_seconds = int((ended_at - started_at).total_seconds())
+
+        # Less than 1 minute → show seconds
+        if duration_seconds < 60:
+            return f"{duration_seconds} second{'s' if duration_seconds != 1 else ''}"
+
+        # Less than 1 hour → show minutes
+        elif duration_seconds < 3600:
+            minutes = duration_seconds // 60
+            return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+        # 1 hour or more → show hours + minutes
+        else:
+            hours = duration_seconds // 3600
+            minutes = (duration_seconds % 3600) // 60
+            parts = []
+            parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+            if minutes > 0:
+                parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+            return " ".join(parts)
+
     def aggregate_session_data(
         self,
         session_data: SessionData,
@@ -201,10 +247,14 @@ class SessionSummaryGenerator:
         duration = ended_at - session_data.started_at
         duration_minutes = int(duration.total_seconds() / 60)
 
+        # Format duration for human readability (handles short sessions)
+        duration_formatted = self._format_duration(session_data.started_at, ended_at)
+
         self.logger.debug(
             "Aggregating session data",
             session_id=session_data.session_id,
             duration_minutes=duration_minutes,
+            duration_formatted=duration_formatted,
             tasks_completed=task_stats.completed if task_stats else 0,
             files_modified=memory_stats.files_modified if memory_stats else 0
         )
@@ -216,6 +266,7 @@ class SessionSummaryGenerator:
             started_at=session_data.started_at,
             ended_at=ended_at,
             duration_minutes=duration_minutes,
+            duration_formatted=duration_formatted,
 
             # Work accomplished
             tasks_completed=task_stats.completed if task_stats else 0,
