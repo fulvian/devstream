@@ -9,10 +9,10 @@
     },
     "devstream": {
       "command": "node",
-      "args": ["${CLAUDE_PROJECT_DIR}/mcp-devstream-server/dist/index.js"],
-      "env": {
-        "DEVSTREAM_DB_PATH": "${CLAUDE_PROJECT_DIR}/data/devstream.db"
-      }
+      "args": [
+        "${CLAUDE_PROJECT_DIR}/mcp-devstream-server/dist/index.js",
+        "${CLAUDE_PROJECT_DIR}/data/devstream.db"
+      ]
     }
   }
 }

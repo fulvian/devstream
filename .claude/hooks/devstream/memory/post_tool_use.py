@@ -491,37 +491,27 @@ class PostToolUseHook:
 
             self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
 
-            # Phase 2: Generate and store embedding (with retry logic)
+            # Phase 2: Generate and store embedding (synchronous call - NO await)
             try:
                 self.base.debug_log("Generating embedding via Ollama...")
 
-                # FASE 4.4: Wrap embedding generation with retry logic
-                async def _generate_embedding():
-                    return self.ollama_client.generate_embedding(content)
-
-                embedding = await self.retry_with_backoff(
-                    f"Ollama embedding ({Path(file_path).name})",
-                    _generate_embedding
-                )
+                # CRITICAL FIX: generate_embedding() is SYNCHRONOUS, do NOT use await
+                # The Ollama client is synchronous by design (ollama.embed() blocks)
+                embedding = self.ollama_client.generate_embedding(content)
 
                 if embedding:
-                    # FASE 4.4: Wrap embedding update with retry logic
-                    async def _update_embedding():
-                        return self.update_memory_embedding(memory_id, embedding)
-
-                    embedding_updated = await self.retry_with_backoff(
-                        f"Embedding update ({Path(file_path).name})",
-                        _update_embedding
-                    )
+                    # CRITICAL FIX: update_memory_embedding() is ALSO SYNCHRONOUS
+                    # Database operations use synchronous sqlite3, not aiosqlite
+                    embedding_updated = self.update_memory_embedding(memory_id, embedding)
 
                     if embedding_updated:
                         self.base.debug_log(
                             f"✓ Embedding stored: {len(embedding)}D"
                         )
                     else:
-                        self.base.debug_log("Embedding update failed after retries")
+                        self.base.debug_log("Embedding update failed")
                 else:
-                    self.base.debug_log("Embedding generation returned None after retries")
+                    self.base.debug_log("Embedding generation returned None")
 
             except Exception as embed_error:
                 # Graceful degradation - log but don't fail
