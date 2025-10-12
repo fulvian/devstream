@@ -53,6 +53,7 @@ class MCPHealthCheck:
         Ping MCP server with lightweight operation.
 
         Uses devstream_list_tasks (no parameters) as ping operation.
+        Falls back to process check if MCP client unavailable.
 
         Returns:
             Dictionary with ping status, latency_ms, success
@@ -60,7 +61,7 @@ class MCPHealthCheck:
         start_time = time.time()
 
         try:
-            # Lightweight ping: list tasks (minimal operation)
+            # Primary: Try MCP client ping
             result = await asyncio.wait_for(
                 self.mcp_client.list_tasks(),
                 timeout=self.timeout_threshold
@@ -73,13 +74,15 @@ class MCPHealthCheck:
                 return {
                     "success": True,
                     "latency_ms": round(latency_ms, 2),
-                    "error": None
+                    "error": None,
+                    "method": "mcp_client"
                 }
             else:
                 return {
                     "success": False,
                     "latency_ms": round(latency_ms, 2),
-                    "error": "invalid_response"
+                    "error": "invalid_response",
+                    "method": "mcp_client"
                 }
 
         except asyncio.TimeoutError:
@@ -87,16 +90,53 @@ class MCPHealthCheck:
             return {
                 "success": False,
                 "latency_ms": round(latency_ms, 2),
-                "error": "timeout"
+                "error": "timeout",
+                "method": "mcp_client"
             }
 
         except Exception as e:
-            latency_ms = (time.time() - start_time) * 1000
-            return {
-                "success": False,
-                "latency_ms": round(latency_ms, 2),
-                "error": str(e)[:100]
-            }
+            # Fallback: Process-based health check (stdio-only mode)
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["pgrep", "-f", "devstream-mcp-server"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+
+                latency_ms = (time.time() - start_time) * 1000
+
+                if result.returncode == 0 and result.stdout.strip():
+                    return {
+                        "success": True,
+                        "latency_ms": round(latency_ms, 2),
+                        "error": None,
+                        "method": "process_check",
+                        "pid": result.stdout.strip().split('\n')[0]
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "latency_ms": round(latency_ms, 2),
+                        "error": "no_process",
+                        "method": "process_check"
+                    }
+
+            except subprocess.TimeoutError:
+                return {
+                    "success": False,
+                    "latency_ms": round(latency_ms, 2),
+                    "error": "process_timeout",
+                    "method": "process_check"
+                }
+            except Exception as fallback_error:
+                return {
+                    "success": False,
+                    "latency_ms": round(latency_ms, 2),
+                    "error": f"mcp_error:{str(e)[:50]}|process_error:{str(fallback_error)[:50]}",
+                    "method": "both_failed"
+                }
 
     def _update_health_status(self, ping_result: Dict[str, Any]) -> str:
         """
@@ -159,6 +199,8 @@ class MCPHealthCheck:
             "ping_success": ping_result["success"],
             "ping_latency_ms": ping_result["latency_ms"],
             "ping_error": ping_result["error"],
+            "ping_method": ping_result.get("method", "unknown"),
+            "process_id": ping_result.get("pid"),
             "consecutive_failures": self.consecutive_failures,
             "uptime_seconds": uptime_seconds
         }

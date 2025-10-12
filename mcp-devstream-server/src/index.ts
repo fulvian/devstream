@@ -16,6 +16,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   PingRequestSchema,
+  SetLevelRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { DevStreamDatabase } from './database.js';
@@ -26,7 +27,8 @@ import { MemoryTools } from './tools/memory.js';
 import { ImplementationPlanTools } from './tools/implementation-plans.js';
 import { initializeOllamaClient } from './ollama-client.js';
 import { AutoSaveService } from './services/auto-save.js';
-import { HealthServer } from './health-server.js';
+// Health server disabled for stability - HTTP transport causes conflicts with stdio
+// import { HealthServer } from './health-server.js';
 
 /**
  * Main MCP Server class for DevStream integration
@@ -49,8 +51,10 @@ class DevStreamMcpServer {
   private memoryTools: MemoryTools;
   private implementationPlanTools: ImplementationPlanTools;
   private autoSaveService: AutoSaveService;
-  private healthServer: HealthServer;
+  // Health server disabled for stability - HTTP transport causes conflicts with stdio
+  // private healthServer: HealthServer;
   private heartbeatInterval?: NodeJS.Timeout;
+  private logLevel: string = 'info';
 
   constructor(dbPath: string) {
     // Initialize MCP server
@@ -62,12 +66,23 @@ class DevStreamMcpServer {
       {
         capabilities: {
           tools: {},
+          logging: {},
         },
       }
     );
 
     // Respond to MCP ping requests to keep connection healthy during idle periods
-    this.server.setRequestHandler(PingRequestSchema, async () => ({}));
+    this.server.setRequestHandler(PingRequestSchema, async () => {
+      console.error(`🔁 MCP ping received at ${new Date().toISOString()}`);
+      return {};
+    });
+
+    // Honor MCP logging/setLevel so clients can adjust verbosity without errors
+    this.server.setRequestHandler(SetLevelRequestSchema, async (request) => {
+      this.logLevel = request.params.level;
+      console.error(`📎 MCP log level set to ${this.logLevel}`);
+      return {};
+    });
 
     // Initialize database connection
     this.database = new DevStreamDatabase(dbPath);
@@ -84,8 +99,8 @@ class DevStreamMcpServer {
       enabled: true
     });
 
-    // Initialize health server
-    this.healthServer = new HealthServer(this.database);
+    // Health server disabled for stability - HTTP transport causes conflicts with stdio
+    // this.healthServer = new HealthServer(this.database);
 
     this.setupHandlers();
   }
@@ -540,7 +555,7 @@ class DevStreamMcpServer {
     console.error(`   PID: ${process.pid}`);
     console.error(`   Transport: stdio`);
     console.error(`   Database: ${dbPath}`);
-    console.error(`   Metrics endpoint: http://localhost:9090/health`);
+    console.error(`   Health server: DISABLED (stdio-only for stability)`);
 
     // Start heartbeat logging (every 5 minutes)
     this.heartbeatInterval = setInterval(() => {
@@ -559,13 +574,8 @@ class DevStreamMcpServer {
         console.error('⚠️ Continuing without auto-save - manual checkpoints still available');
       });
 
-    // Start health server
-    try {
-      await this.healthServer.start();
-    } catch (error) {
-      console.error('⚠️ Failed to start health server:', error instanceof Error ? error.message : 'Unknown error');
-      console.error('⚠️ Continuing without health endpoint - MCP functionality unaffected');
-    }
+    // Health server disabled for stability - HTTP transport causes conflicts with stdio
+    console.error('ℹ️ Health server: DISABLED (stdio-only operation for improved stability)');
   }
 
   /**
@@ -601,14 +611,8 @@ class DevStreamMcpServer {
         console.error('  ⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
       }
 
-      // Step 2.5: Stop health server
-      console.error('  └─ Stopping health server...');
-      try {
-        await this.healthServer.stop();
-        console.error('  ✅ Health server stopped');
-      } catch (error) {
-        console.error('  ⚠️ Error stopping health server:', error instanceof Error ? error.message : 'Unknown error');
-      }
+      // Health server disabled for stability - no HTTP server to stop
+      console.error('  ℹ️ Health server: DISABLED (no HTTP server to stop)');
 
       // Step 3: Close DatabasePool (Context7 Piscina Pattern - Graceful Shutdown)
       // Waits for pending tasks to complete before destroying workers
@@ -650,14 +654,26 @@ class DevStreamMcpServer {
  * Main entry point
  */
 async function main() {
-  // Get database path from command line argument
-  const dbPath = process.argv[2];
+  // Get database path from command line argument OR environment variable
+  // Priority: CLI arg > DEVSTREAM_DB_PATH env var
+  const dbPath = process.argv[2] || process.env.DEVSTREAM_DB_PATH;
 
   if (!dbPath) {
-    console.error('Usage: devstream-mcp <database-path>');
-    console.error('Example: devstream-mcp /path/to/devstream.db');
+    console.error('Error: Database path not provided');
+    console.error('');
+    console.error('Provide database path via either:');
+    console.error('  1. Command line argument: devstream-mcp /path/to/devstream.db');
+    console.error('  2. Environment variable: DEVSTREAM_DB_PATH=/path/to/devstream.db');
+    console.error('');
+    console.error('Current values:');
+    console.error(`  process.argv[2]: ${process.argv[2] || '(not set)'}`);
+    console.error(`  DEVSTREAM_DB_PATH: ${process.env.DEVSTREAM_DB_PATH || '(not set)'}`);
     process.exit(1);
   }
+
+  // Log database path resolution for debugging
+  const source = process.argv[2] ? 'CLI argument' : 'DEVSTREAM_DB_PATH env var';
+  console.error(`📂 Database path resolved from ${source}: ${dbPath}`);
 
   const server = new DevStreamMcpServer(dbPath);
 

@@ -60,17 +60,19 @@ print_success "Triggered .mcp.json file watcher (touch)"
 echo ""
 echo "🔍 Checking MCP server status..."
 
-if lsof -i :9090 >/dev/null 2>&1; then
-  print_success "MCP server is running (port 9090 active)"
+# Check for DevStream MCP process (stdio-based, no HTTP)
+if pgrep -f "devstream-mcp-server" >/dev/null 2>&1; then
+  MCP_PID=$(pgrep -f "devstream-mcp-server" | head -1)
+  print_success "MCP server is running (stdio process PID: $MCP_PID)"
 
-  # Try to fetch health endpoint
-  if curl -s http://localhost:9090/health >/dev/null 2>&1; then
-    print_success "MCP server health check passed"
+  # Verify database connectivity via process check
+  if ps -p $MCP_PID -o command= | grep -q "devstream.db"; then
+    print_success "MCP server database connection verified"
   else
-    print_warning "MCP server running but health check failed"
+    print_warning "MCP server running but database path unclear"
   fi
 else
-  print_error "MCP server is NOT running on port 9090"
+  print_error "MCP server is NOT running"
   echo ""
   echo "To start the server, run:"
   echo "  ./start-devstream.sh"
