@@ -317,6 +317,23 @@ class DevStreamLogger:
             api_calls=api_calls
         )
 
+    # Delegate methods for standard logging (Context7 pattern)
+    def info(self, event: str, **kwargs) -> None:
+        """Log info message with structured context."""
+        self.logger.info(event, hook=self.hook_name, **kwargs)
+
+    def debug(self, event: str, **kwargs) -> None:
+        """Log debug message with structured context."""
+        self.logger.debug(event, hook=self.hook_name, **kwargs)
+
+    def warning(self, event: str, **kwargs) -> None:
+        """Log warning message with structured context."""
+        self.logger.warning(event, hook=self.hook_name, **kwargs)
+
+    def error(self, event: str, **kwargs) -> None:
+        """Log error message with structured context."""
+        self.logger.error(event, hook=self.hook_name, **kwargs)
+
 def get_devstream_logger(hook_name: str, log_level: str = "INFO") -> DevStreamLogger:
     """
     Get DevStream logger instance.
