@@ -724,23 +724,10 @@ class PreToolUseHook:
             context.output.exit_success()
             return
 
-        # PHASE -1: MCP Process Cleanup (prevent zombie processes)
-        try:
-            # Import cleanup hook dynamically to avoid startup overhead
-            sys.path.insert(0, str(Path(__file__).parent.parent / 'monitoring'))
-            from mcp_cleanup_hook import MCPCleanupHook
-
-            cleanup = MCPCleanupHook()
-            cleanup_result = await cleanup.run_cleanup()
-
-            if cleanup_result.get("killed_count", 0) > 0:
-                self.base.warning_feedback(
-                    f"Cleaned {cleanup_result['killed_count']} zombie MCP processes"
-                )
-
-        except Exception as e:
-            # Non-blocking error - zombie cleanup failure shouldn't stop execution
-            self.base.debug_log(f"MCP cleanup failed (non-critical): {e}")
+        # PHASE -1: MCP Process Cleanup (DISABLED - causing disconnections!)
+        # The cleanup hook was killing and restarting MCP processes in an infinite loop
+        # TODO: Re-evaluate if cleanup is actually needed for single-instance setup
+        pass
 
         # Extract tool information
         tool_name = context.tool_name
