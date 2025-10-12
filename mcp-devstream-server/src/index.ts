@@ -15,6 +15,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  PingRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { DevStreamDatabase } from './database.js';
@@ -30,6 +31,16 @@ import { HealthServer } from './health-server.js';
 /**
  * Main MCP Server class for DevStream integration
  */
+// Redirect stdout-based console methods to stderr to keep MCP stdio clean
+const originalConsoleError = console.error.bind(console);
+const redirectToStderr = (...args: unknown[]): void => {
+  originalConsoleError(...args);
+};
+
+console.log = redirectToStderr;
+console.info = redirectToStderr;
+console.debug = redirectToStderr;
+
 class DevStreamMcpServer {
   private server: Server;
   private database: DevStreamDatabase;
@@ -54,6 +65,9 @@ class DevStreamMcpServer {
         },
       }
     );
+
+    // Respond to MCP ping requests to keep connection healthy during idle periods
+    this.server.setRequestHandler(PingRequestSchema, async () => ({}));
 
     // Initialize database connection
     this.database = new DevStreamDatabase(dbPath);
