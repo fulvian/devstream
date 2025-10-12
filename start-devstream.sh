@@ -453,6 +453,20 @@ start_mcp_server() {
     return 0
   fi
 
+  # NEW: Cleanup zombie MCP processes BEFORE starting server
+  print_status "Running pre-launch zombie cleanup..."
+  local zombie_count=$(pgrep -f "mcp-devstream-server/dist/index.js" 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ "$zombie_count" -gt 0 ]; then
+    print_warning "Found $zombie_count existing MCP processes, cleaning up..."
+    if "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/mcp_cleanup_hook.py"; then
+      print_status "✅ Pre-launch cleanup complete"
+      sleep 1  # Brief pause to ensure processes fully terminated
+    else
+      print_warning "⚠️  Cleanup had issues, but continuing..."
+    fi
+  fi
+
   # Start production server in background with memory optimization flags
   # Context7 best practice: Increase heap size and expose GC for long-running Node.js processes
   nohup node --max-old-space-size=8192 --expose-gc start-production.js > "$PROJECT_ROOT/devstream-server.log" 2>&1 &
@@ -802,6 +816,160 @@ start_claude_with_devstream() {
   fi
 }
 
+# Function to start background monitors
+start_monitors() {
+  print_status "Starting background monitoring daemons..."
+
+  local monitor_log_dir="$PROJECT_ROOT/.claude/logs/devstream"
+  mkdir -p "$monitor_log_dir"
+
+  # 1. MCP Process Monitor (60s interval)
+  print_info "Starting MCP Process Monitor..."
+  nohup "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/mcp_process_monitor.py" \
+    > "$monitor_log_dir/process_monitor_daemon.log" 2>&1 &
+  echo $! > "$PROJECT_ROOT/.devstream/process_monitor.pid"
+  print_status "✅ Process Monitor PID: $(cat $PROJECT_ROOT/.devstream/process_monitor.pid)"
+
+  # 2. MCP Health Check (30s interval)
+  print_info "Starting MCP Health Check..."
+  nohup "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/mcp_health_check.py" \
+    --interval 30 --timeout 10 \
+    > "$monitor_log_dir/health_check_daemon.log" 2>&1 &
+  echo $! > "$PROJECT_ROOT/.devstream/health_check.pid"
+  print_status "✅ Health Check PID: $(cat $PROJECT_ROOT/.devstream/health_check.pid)"
+
+  # 3. Database Update Monitor (60s interval, 10min threshold)
+  print_info "Starting Database Update Monitor..."
+  nohup "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/database_update_monitor.py" \
+    --interval 60 --threshold 600 \
+    > "$monitor_log_dir/db_monitor_daemon.log" 2>&1 &
+  echo $! > "$PROJECT_ROOT/.devstream/db_monitor.pid"
+  print_status "✅ Database Monitor PID: $(cat $PROJECT_ROOT/.devstream/db_monitor.pid)"
+
+  # 4. Embedding Coverage Monitor (60s interval, 95% threshold)
+  print_info "Starting Embedding Coverage Monitor..."
+  nohup "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/embedding_coverage_monitor.py" \
+    --interval 60 --threshold 95.0 \
+    > "$monitor_log_dir/embedding_coverage_daemon.log" 2>&1 &
+  echo $! > "$PROJECT_ROOT/.devstream/embedding_coverage.pid"
+  print_status "✅ Embedding Coverage PID: $(cat $PROJECT_ROOT/.devstream/embedding_coverage.pid)"
+
+  sleep 1  # Brief pause to ensure monitors start
+
+  print_status "✅ All monitoring daemons started"
+  print_info "Monitor logs: $monitor_log_dir/*_daemon.log"
+}
+
+# Function to stop monitors
+stop_monitors() {
+  print_status "Stopping monitoring daemons..."
+
+  local stopped_count=0
+
+  # Stop Process Monitor
+  if [ -f "$PROJECT_ROOT/.devstream/process_monitor.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/process_monitor.pid")
+    if kill "$pid" 2>/dev/null; then
+      print_info "Process Monitor stopped (PID: $pid)"
+      stopped_count=$((stopped_count + 1))
+    fi
+    rm -f "$PROJECT_ROOT/.devstream/process_monitor.pid"
+  fi
+
+  # Stop Health Check
+  if [ -f "$PROJECT_ROOT/.devstream/health_check.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/health_check.pid")
+    if kill "$pid" 2>/dev/null; then
+      print_info "Health Check stopped (PID: $pid)"
+      stopped_count=$((stopped_count + 1))
+    fi
+    rm -f "$PROJECT_ROOT/.devstream/health_check.pid"
+  fi
+
+  # Stop Database Monitor
+  if [ -f "$PROJECT_ROOT/.devstream/db_monitor.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/db_monitor.pid")
+    if kill "$pid" 2>/dev/null; then
+      print_info "Database Monitor stopped (PID: $pid)"
+      stopped_count=$((stopped_count + 1))
+    fi
+    rm -f "$PROJECT_ROOT/.devstream/db_monitor.pid"
+  fi
+
+  if [ $stopped_count -gt 0 ]; then
+    print_status "✅ Stopped $stopped_count monitoring daemon(s)"
+  else
+    print_info "No monitoring daemons were running"
+  fi
+}
+
+# Function to check monitor status
+check_monitor_status() {
+  print_status "📊 Monitoring Daemon Status"
+  print_status "=============================="
+  echo ""
+
+  local monitors_running=0
+
+  # Check Process Monitor
+  if [ -f "$PROJECT_ROOT/.devstream/process_monitor.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/process_monitor.pid")
+    if ps -p "$pid" > /dev/null 2>&1; then
+      print_status "✅ Process Monitor: Running (PID: $pid)"
+      monitors_running=$((monitors_running + 1))
+    else
+      print_warning "⚠️  Process Monitor: PID file exists but process not running"
+      rm -f "$PROJECT_ROOT/.devstream/process_monitor.pid"
+    fi
+  else
+    print_info "❌ Process Monitor: Not running"
+  fi
+
+  # Check Health Check
+  if [ -f "$PROJECT_ROOT/.devstream/health_check.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/health_check.pid")
+    if ps -p "$pid" > /dev/null 2>&1; then
+      print_status "✅ Health Check: Running (PID: $pid)"
+      monitors_running=$((monitors_running + 1))
+    else
+      print_warning "⚠️  Health Check: PID file exists but process not running"
+      rm -f "$PROJECT_ROOT/.devstream/health_check.pid"
+    fi
+  else
+    print_info "❌ Health Check: Not running"
+  fi
+
+  # Check Database Monitor
+  if [ -f "$PROJECT_ROOT/.devstream/db_monitor.pid" ]; then
+    local pid=$(cat "$PROJECT_ROOT/.devstream/db_monitor.pid")
+    if ps -p "$pid" > /dev/null 2>&1; then
+      print_status "✅ Database Monitor: Running (PID: $pid)"
+      monitors_running=$((monitors_running + 1))
+    else
+      print_warning "⚠️  Database Monitor: PID file exists but process not running"
+      rm -f "$PROJECT_ROOT/.devstream/db_monitor.pid"
+    fi
+  else
+    print_info "❌ Database Monitor: Not running"
+  fi
+
+  echo ""
+  if [ $monitors_running -eq 3 ]; then
+    print_status "✅ All 3 monitoring daemons operational"
+  elif [ $monitors_running -gt 0 ]; then
+    print_warning "⚠️  Only $monitors_running/3 monitors running"
+  else
+    print_info "No monitoring daemons running (start with: ./start-devstream.sh start)"
+  fi
+
+  echo ""
+  print_info "Monitor Logs:"
+  print_info "  tail -f ~/.claude/logs/devstream/process_monitor_daemon.log"
+  print_info "  tail -f ~/.claude/logs/devstream/health_check_daemon.log"
+  print_info "  tail -f ~/.claude/logs/devstream/db_monitor_daemon.log"
+  echo ""
+}
+
 # Function to stop server
 stop_server() {
   print_status "Stopping DevStream MCP Server..."
@@ -815,6 +983,9 @@ stop_server() {
   else
     print_info "No server running on port 9090"
   fi
+
+  # Also stop monitoring daemons
+  stop_monitors
 }
 
 # Main function
@@ -867,11 +1038,17 @@ main() {
       # Start MCP server
       start_mcp_server
 
+      # Start monitoring daemons (NEW - Automatic monitoring)
+      start_monitors
+
       # Show server status
       show_server_status
 
       # Show Agent status
       show_agent_status
+
+      # Show monitoring status (NEW)
+      check_monitor_status
 
       # Setup Claude MCP configuration
       setup_claude_mcp
@@ -892,6 +1069,7 @@ main() {
       load_devstream_config
       show_server_status
       show_agent_status
+      check_monitor_status
       ;;
 
     codex)

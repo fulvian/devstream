@@ -1,0 +1,10 @@
+Test file to verify PostToolUse hook embedding generation fix.
+
+This file should trigger the PostToolUse hook, which will:
+1. Store the file content in semantic_memory (via MCP)
+2. Generate embedding via Ollama (SYNCHRONOUSLY, not async)
+3. Update the database with the embedding
+
+Expected result: New record in semantic_memory WITH embedding (not NULL).
+
+Created: 2025-10-12T02:25:00Z

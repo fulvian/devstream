@@ -18,6 +18,7 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { DevStreamDatabase } from './database.js';
+import { closeDatabasePool } from './core/database-pool.js';
 import { TaskTools } from './tools/tasks.js';
 import { PlanTools } from './tools/plans.js';
 import { MemoryTools } from './tools/memory.js';
@@ -595,7 +596,18 @@ class DevStreamMcpServer {
         console.error('  ⚠️ Error stopping health server:', error instanceof Error ? error.message : 'Unknown error');
       }
 
-      // Step 3: Close database connection
+      // Step 3: Close DatabasePool (Context7 Piscina Pattern - Graceful Shutdown)
+      // Waits for pending tasks to complete before destroying workers
+      // This MUST happen before database close to allow in-flight queries to finish
+      console.error('  └─ Closing database worker pool...');
+      try {
+        await closeDatabasePool();
+        console.error('  ✅ Database worker pool closed');
+      } catch (error) {
+        console.error('  ⚠️ Error closing database pool:', error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      // Step 4: Close database connection (direct connection for sqlite-vec)
       console.error('  └─ Closing database connection...');
       try {
         await this.database.close();

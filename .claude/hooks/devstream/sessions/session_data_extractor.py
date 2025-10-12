@@ -590,7 +590,7 @@ class SessionDataExtractor:
                 async with db.execute(
                     """
                     SELECT id, session_name, started_at, ended_at, tokens_used,
-                           active_tasks, completed_tasks, active_files, status
+                           active_tasks, completed_tasks, status
                     FROM work_sessions
                     WHERE id = ?
                     """,
@@ -606,7 +606,7 @@ class SessionDataExtractor:
                     import json
                     active_tasks = json.loads(row['active_tasks']) if row['active_tasks'] else []
                     completed_tasks = json.loads(row['completed_tasks']) if row['completed_tasks'] else []
-                    active_files = json.loads(row['active_files']) if row['active_files'] else []
+                    active_files = []  # Column doesn't exist in database, set empty list
 
                     return SessionData(
                         session_id=row['id'],

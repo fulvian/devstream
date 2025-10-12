@@ -71,7 +71,7 @@ export class DevStreamOllamaClient {
     try {
       await this.ollama.ps();
       this.isConnected = true;
-      console.log('✅ Ollama connection established');
+      console.error('✅ Ollama connection established');
       return true;
     } catch (error) {
       this.isConnected = false;
@@ -122,7 +122,7 @@ export class DevStreamOllamaClient {
         return null;
       }
 
-      console.log(`✅ Generated embedding: ${embedding.length} dimensions, model: ${modelToUse}`);
+      console.error(`✅ Generated embedding: ${embedding.length} dimensions, model: ${modelToUse}`);
       return embedding;
 
     } catch (error) {
@@ -173,14 +173,14 @@ export class DevStreamOllamaClient {
         return texts.map(() => null);
       }
 
-      console.log(`✅ Generated ${response.embeddings.length} embeddings, model: ${modelToUse}`);
+      console.error(`✅ Generated ${response.embeddings.length} embeddings, model: ${modelToUse}`);
       return response.embeddings;
 
     } catch (error) {
       console.error('❌ Batch embedding generation failed:', error instanceof Error ? error.message : 'Unknown error');
 
       // Context7 pattern: fallback to individual processing
-      console.log('🔄 Falling back to individual embedding generation...');
+      console.error('🔄 Falling back to individual embedding generation...');
       const results: (number[] | null)[] = [];
 
       for (const text of texts) {

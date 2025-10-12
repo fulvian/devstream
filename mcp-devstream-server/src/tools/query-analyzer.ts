@@ -104,7 +104,7 @@ export class QueryAnalyzer {
       }
 
       this.initialized = true;
-      console.log(`✅ QueryAnalyzer initialized: ${this.idfCache.size} terms, ${this.corpusSize} documents`);
+      console.error(`✅ QueryAnalyzer initialized: ${this.idfCache.size} terms, ${this.corpusSize} documents`);
 
     } catch (error) {
       console.error('❌ QueryAnalyzer initialization failed:', error);

@@ -56,6 +56,7 @@ export class AutoSaveService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
+  private checkpointInProgress: boolean = false;
 
   /**
    * Initialize auto-save service
@@ -140,11 +141,16 @@ export class AutoSaveService {
     }
 
     // Wait for any in-progress checkpoint to complete (max 10s)
+    // Context7 Pattern: Poll-based wait with timeout protection
     const shutdownTimeout = 10000; // 10 seconds
     const startTime = Date.now();
 
-    while (this.isRunning && (Date.now() - startTime) < shutdownTimeout) {
+    while (this.checkpointInProgress && (Date.now() - startTime) < shutdownTimeout) {
       await new Promise(resolve => setTimeout(resolve, 100)); // Poll every 100ms
+    }
+
+    if (this.checkpointInProgress) {
+      console.error('⚠️ Checkpoint still in progress after timeout - forcing shutdown');
     }
 
     this.isRunning = false;
@@ -160,6 +166,7 @@ export class AutoSaveService {
    * @returns Number of checkpoints created
    */
   private async executeCheckpointCycle(): Promise<number> {
+    this.checkpointInProgress = true;
     try {
       // Query all active tasks from database
       const activeTasks = await this.getActiveTasks();
@@ -192,6 +199,8 @@ export class AutoSaveService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Checkpoint cycle execution failed: ${errorMessage}`);
+    } finally {
+      this.checkpointInProgress = false;
     }
   }
 
