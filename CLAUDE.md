@@ -593,6 +593,193 @@ if [ ! -d ".devstream" ]; then python3.11 -m venv .devstream; fi
 **COVERAGE**: ✅ 95%+ for NEW code, 100% pass rate before commit, E2E integration tests, performance validation, error handling | ❌ Commit with failing tests, commit without tests
 **STRUCTURE**: `tests/unit/` (fast <1s), `tests/integration/` (E2E <10s), `tests/fixtures/` (test data)
 **EXECUTION**: `.devstream/bin/python -m pytest tests/ -v --cov=.claude/hooks/devstream --cov-report=html`
+**COVERAGE THRESHOLDS**: Unit 95%+, Integration 85%+, E2E 70%+ (differentiated by test type)
+**ASYNC TESTING**: ✅ pytest-asyncio for async functions, proper fixture scoping, AsyncMock for retries
+
+#### pytest-asyncio Patterns (Context7 Research)
+
+**Pattern 1: Async Fixtures with Proper Scoping**
+```python
+import pytest_asyncio
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def mcp_client():
+    """Module-scoped async fixture for MCP client."""
+    client = await create_mcp_client()
+    yield client
+    await client.close()
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def temp_db():
+    """Function-scoped async fixture for temporary database."""
+    db = await create_test_database()
+    yield db
+    await db.cleanup()
+```
+
+**Pattern 2: Async Error Testing with pytest.raises**
+```python
+@pytest.mark.asyncio
+async def test_connection_error_handling():
+    """Test async error handling with proper exception matching."""
+    with pytest.raises(ConnectionError, match="timeout|connection refused"):
+        await failing_async_function()
+```
+
+**Pattern 3: AsyncMock for Retry Logic Testing**
+```python
+@pytest.mark.asyncio
+async def test_circuit_breaker_retry():
+    """Test circuit breaker with AsyncMock for retry simulation."""
+    mock_client = AsyncMock()
+    mock_client.create_task.side_effect = [
+        ConnectionError("First failure"),
+        ConnectionError("Second failure"),
+        {"task_id": "success-on-retry"}
+    ]
+
+    result = await circuit_breaker_execute(mock_client)
+    assert result["task_id"] == "success-on-retry"
+    assert mock_client.create_task.call_count == 3
+```
+
+**Pattern 4: Async Context Manager Testing**
+```python
+@pytest.mark.asyncio
+async def test_async_context_manager():
+    """Test async context manager usage."""
+    async with AsyncDatabaseConnection() as conn:
+        result = await conn.execute("SELECT 1")
+        assert result is not None
+    # Connection automatically closed
+```
+
+**Pattern 5: Concurrent Async Testing**
+```python
+@pytest.mark.asyncio
+async def test_concurrent_operations():
+    """Test multiple concurrent async operations."""
+    tasks = [
+        async_operation("task1"),
+        async_operation("task2"),
+        async_operation("task3")
+    ]
+    results = await asyncio.gather(*tasks)
+    assert len(results) == 3
+```
+
+**Pattern 6: Async Generator Testing**
+```python
+@pytest.mark.asyncio
+async def test_async_generator():
+    """Test async generator functions."""
+    async def data_stream():
+        for i in range(3):
+            yield f"data-{i}"
+            await asyncio.sleep(0.01)
+
+    results = [item async for item in data_stream()]
+    assert results == ["data-0", "data-1", "data-2"]
+```
+
+**Pattern 7: Async Timeout Testing**
+```python
+@pytest.mark.asyncio
+async def test_async_timeout():
+    """Test async function timeout handling."""
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            slow_async_function(),
+            timeout=0.1
+        )
+```
+
+#### Configuration (.coveragerc for Async Testing)
+```ini
+[run]
+source = .claude/hooks/devstream
+omit =
+    */tests/*
+    */test_*
+    __pycache__
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__:
+
+[html]
+directory = htmlcov
+
+# CRITICAL for async testing
+concurrency = gevent
+```
+
+#### Async Testing Pitfalls to Avoid
+
+❌ **Common Issues**:
+- Missing `@pytest.mark.asyncio` decorator
+- Fixture scope mismatch (`loop_scope` must match fixture `scope`)
+- Not awaiting async calls in tests
+- Mixing sync and async code improperly
+- Not cleaning up resources in async fixtures
+
+✅ **Best Practices**:
+- Always mark async test functions with `@pytest.mark.asyncio`
+- Use proper fixture scoping with matching `loop_scope`
+- Use `AsyncMock` instead of `Mock` for async objects
+- Clean up resources in fixture teardowns
+- Test both success and failure scenarios
+
+#### CI/CD Integration Guidelines
+
+**GitHub Actions Workflow Example**:
+```yaml
+name: Test Protocol Enforcement
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m venv .devstream
+        .devstream/bin/pip install -e .[test]
+
+    - name: Run unit tests
+      run: |
+        .devstream/bin/python -m pytest tests/unit/ -v \
+          --cov=.claude/hooks/devstream \
+          --cov-report=xml \
+          --cov-fail-under=95
+
+    - name: Run integration tests
+      run: |
+        .devstream/bin/python -m pytest tests/integration/ -v \
+          --cov-append \
+          --cov-fail-under=85
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+```
 
 ---
 
@@ -704,18 +891,24 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 ## 📚 APPENDIX - System Integration Reference
 
 ### Hook Integration Points
-| Hook | Location | Trigger | Purpose | Config |
-|------|----------|---------|---------|--------|
-| PreToolUse | `.claude/hooks/devstream/memory/pre_tool_use.py` | Before EVERY tool execution | Inject Context7 + DevStream memory | `DEVSTREAM_CONTEXT_INJECTION_ENABLED` |
-| PostToolUse | `.claude/hooks/devstream/memory/post_tool_use.py` | After EVERY tool execution | Store code/docs/context | `DEVSTREAM_MEMORY_ENABLED` |
-| UserPromptSubmit | `.claude/hooks/devstream/context/user_query_context_enhancer.py` | On EVERY user prompt | Enhance query with context | `DEVSTREAM_QUERY_ENHANCEMENT_ENABLED` |
-| SessionEnd | `.claude/hooks/devstream/sessions/session_end.py` | Session exit/logout | Generate and save session summary | `DEVSTREAM_SESSION_TRACKING_ENABLED` |
-| PreCompact | `.claude/hooks/devstream/sessions/pre_compact.py` | Before /compact command | Save summary before compaction | `DEVSTREAM_SESSION_TRACKING_ENABLED` |
-| SessionStart | `.claude/hooks/devstream/sessions/session_start.py` | Session startup | Display previous session summary | `DEVSTREAM_SESSION_TRACKING_ENABLED` |
+| Hook | Location | Trigger | Purpose | Config | Status |
+|------|----------|---------|---------|--------|--------|
+| PreToolUse | `.claude/hooks/devstream/memory/pre_tool_use.py` | Before EVERY tool execution | Inject Context7 + DevStream memory | `DEVSTREAM_CONTEXT_INJECTION_ENABLED` | ✅ Active |
+| PostToolUse | `.claude/hooks/devstream/memory/post_tool_use.py` | After EVERY tool execution | Store code/docs/context | `DEVSTREAM_MEMORY_ENABLED` | ✅ Active |
+| UserPromptSubmit | `.claude/hooks/devstream/context/user_query_context_enhancer.py` | On EVERY user prompt | Enhance query with context | `DEVSTREAM_QUERY_ENHANCEMENT_ENABLED` | ✅ Active |
+| SessionEnd | `.claude/hooks/devstream/sessions/session_end.py` | Session exit/logout | Generate and save session summary | `DEVSTREAM_HOOK_SESSION_END` | ⚠️ **DISABLED** (2025-10-12) |
+| PreCompact | `.claude/hooks/devstream/sessions/pre_compact.py` | Before /compact command | Save summary before compaction | `DEVSTREAM_HOOK_PRE_COMPACT` | ⚠️ **DISABLED** (2025-10-12) |
+| SessionStart | `.claude/hooks/devstream/sessions/session_start.py` | Session startup | Display previous session summary | `DEVSTREAM_HOOK_SESSIONSTART` | ⚠️ **DISABLED** (2025-10-12) |
 
 ### Cross-Session Summary Preservation
 
-**Pattern**: Atomic Marker File Write (Production Ready - 2025-10-02)
+⚠️ **SYSTEM DISABLED (2025-10-12)** - Cross-session summary system interferes with Claude Code auto-compacting functionality. All session hooks (SessionStart, SessionEnd, PreCompact) have been disabled via `.env.devstream` configuration. To restore original auto-compacting behavior, these hooks remain configured in `settings.json` but are disabled via environment flags.
+
+**Re-enable**: Set `DEVSTREAM_HOOK_SESSIONSTART=true`, `DEVSTREAM_HOOK_SESSION_END=true`, `DEVSTREAM_HOOK_PRE_COMPACT=true` in `.env.devstream`
+
+---
+
+**Pattern** (HISTORICAL): Atomic Marker File Write (Production Ready - 2025-10-02)
 
 **Implementation**:
 - **Utility**: `.claude/hooks/devstream/utils/atomic_file_writer.py`

@@ -47,6 +47,8 @@ export class HealthServer {
   private server?: Server;
   private port: number;
   private database: DevStreamDatabase;
+  private maxRetries = 10;
+  private retryDelay = 1000; // 1 second as per Node.js best practice
 
   constructor(database: DevStreamDatabase, port: number = 9090) {
     this.database = database;
@@ -54,9 +56,57 @@ export class HealthServer {
   }
 
   /**
-   * Start the health check HTTP server
+   * Find an available port using Node.js best practice pattern
+   */
+  private async findAvailablePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const testServer = createServer();
+
+      testServer.listen(this.port, () => {
+        const address = testServer.address();
+        const port = typeof address === 'string' ? parseInt(address) : address?.port || this.port;
+        testServer.close(() => resolve(port));
+      });
+
+      testServer.on('error', (e: any) => {
+        if (e.code === 'EADDRINUSE') {
+          console.error(`⚠️ Port ${this.port} in use, trying next port...`);
+          if (this.port < 9100) {
+            this.port++;
+            resolve(this.findAvailablePort());
+          } else {
+            reject(new Error('No available ports found in range 9090-9100'));
+          }
+        } else {
+          reject(e);
+        }
+      });
+    });
+  }
+
+  /**
+   * Start the health check HTTP server with EADDRINUSE retry mechanism
+   * Implements Node.js best practice for port conflict resolution
    */
   async start(): Promise<void> {
+    // First, find an available port
+    try {
+      this.port = await this.findAvailablePort();
+      console.error(`🔍 Found available port: ${this.port}`);
+    } catch (error) {
+      console.error('❌ Failed to find available port:', error);
+      throw error;
+    }
+
+    // Now start the server with retry mechanism
+    return this.startWithRetry();
+  }
+
+  /**
+   * Start server with Node.js EADDRINUSE retry mechanism
+   * Implements the official Node.js best practice pattern
+   */
+  private async startWithRetry(retryCount = 0): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = createServer(async (req, res) => {
         // Only handle /health endpoint
@@ -87,7 +137,7 @@ export class HealthServer {
             }, null, 2));
           }
         } else if (req.url === '/' && req.method === 'GET') {
-          // Simple landing page
+          // Simple landing page with dynamic port
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(`
             <!DOCTYPE html>
@@ -109,7 +159,7 @@ export class HealthServer {
                 <h1>🚀 DevStream MCP Server</h1>
                 <p><strong>Health Endpoint:</strong> <a href="/health">/health</a></p>
                 <p><strong>Format:</strong> JSON with detailed system status</p>
-                <p><strong>Usage:</strong> <code>curl http://localhost:9090/health</code></p>
+                <p><strong>Usage:</strong> <code>curl http://localhost:${this.port}/health</code></p>
               </div>
             </body>
             </html>
@@ -120,14 +170,29 @@ export class HealthServer {
         }
       });
 
+      // Node.js best practice: Handle EADDRINUSE with retry
+      this.server.on('error', (e: any) => {
+        if (e.code === 'EADDRINUSE' && retryCount < this.maxRetries) {
+          console.error(`⚠️ Address in use, retrying... (attempt ${retryCount + 1}/${this.maxRetries})`);
+
+          // Close any existing server and retry after delay (Node.js best practice)
+          if (this.server) {
+            this.server.close();
+          }
+
+          setTimeout(() => {
+            this.port++;
+            this.startWithRetry(retryCount + 1).then(resolve).catch(reject);
+          }, this.retryDelay);
+        } else {
+          console.error('❌ Health server error:', e);
+          reject(e);
+        }
+      });
+
       this.server.listen(this.port, () => {
         console.error(`🏥 Health server listening on http://localhost:${this.port}/health`);
         resolve();
-      });
-
-      this.server.on('error', (error) => {
-        console.error('Health server error:', error);
-        reject(error);
       });
     });
   }

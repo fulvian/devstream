@@ -68,13 +68,18 @@ export class MemoryTools {
       let embeddingModel: string | null = null;
       let embeddingDimension: number | null = null;
 
+      // DEBUG: Check embedding value
+      console.error(`🔍 DEBUG: embedding type=${typeof embedding}, isArray=${Array.isArray(embedding)}, value=${embedding ? 'truthy' : 'falsy'}`);
+
       if (embedding) {
         embeddingJson = JSON.stringify(embedding);
         embeddingModel = this.ollamaClient.getDefaultModel();
         embeddingDimension = embedding.length;
         console.error(`✅ Embedding generated: ${embeddingDimension} dimensions using ${embeddingModel}`);
+        console.error(`🔍 DEBUG: embeddingJson length=${embeddingJson?.length}, first 100 chars=${embeddingJson?.substring(0, 100)}`);
       } else {
         console.warn(`⚠️ Embedding generation failed - storing without vector search capability`);
+        console.error(`🔍 DEBUG: embedding is ${embedding === null ? 'NULL' : embedding === undefined ? 'UNDEFINED' : 'falsy but not null/undefined'}`);
       }
 
       // Context7 Pattern: Use UTC timestamps for timezone-aware storage
