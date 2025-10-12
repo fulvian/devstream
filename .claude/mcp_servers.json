@@ -6,13 +6,5 @@
       "env": {
         "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
       }
-    },
-    "devstream": {
-      "command": "node",
-      "args": [
-        "${CLAUDE_PROJECT_DIR}/mcp-devstream-server/dist/index.js",
-        "${CLAUDE_PROJECT_DIR}/data/devstream.db"
-      ]
     }
-  }
 }
