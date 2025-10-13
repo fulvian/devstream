@@ -14,6 +14,7 @@ Enhanced logging per DevStream hook system con structured output.
 
 import logging
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -113,10 +114,14 @@ class DevStreamLogger:
         file_handler.name = hook_handler_name  # Name to track and avoid duplicates
         root_logger.addHandler(file_handler)
 
-        # Add stderr handler (only add once)
+        # Add stderr handler (only add once) - only for non-hook contexts to avoid interference
         stderr_handler_name = 'devstream_stderr_handler'
         has_stderr = any(getattr(h, 'name', None) == stderr_handler_name for h in root_logger.handlers)
-        if not has_stderr:
+
+        # Check if we're in a hook context (avoid stderr logging for hooks to prevent interference with user output)
+        is_hook_context = os.environ.get('CLAUDE_HOOK_EXECUTION') == 'true' or self.hook_name.endswith('_hook')
+
+        if not has_stderr and not is_hook_context:
             stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(logging.Formatter('%(message)s'))
             stream_handler.name = stderr_handler_name
