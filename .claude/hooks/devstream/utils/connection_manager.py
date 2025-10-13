@@ -85,8 +85,25 @@ class ConnectionManager:
         try:
             self.db_path = validate_db_path(raw_path)
         except PathValidationError as e:
-            logging.error(f"Database path validation failed: {e}")
-            raise
+            # Allow official DevStream database path even if outside current subdirectory
+            if raw_path == "data/devstream.db" or raw_path.endswith("/data/devstream.db"):
+                import os
+                # Convert to absolute path from project root
+                if os.path.isabs(raw_path):
+                    self.db_path = raw_path
+                else:
+                    # Calculate project root correctly (4 levels up from utils)
+                    # utils -> devstream -> hooks -> .claude -> project_root
+                    current_dir = Path(__file__).parent
+                    project_root = current_dir.parent.parent.parent.parent
+                    self.db_path = str(project_root / raw_path)
+
+                self.logger.warning(
+                    f"Using official DevStream database path outside subdirectory: {self.db_path}"
+                )
+            else:
+                logging.error(f"Database path validation failed: {e}")
+                raise
 
         # Thread-local storage for connections (one connection per thread)
         self._local = threading.local()
@@ -135,7 +152,7 @@ class ConnectionManager:
 
     def _create_connection(self) -> sqlite3.Connection:
         """
-        Create new SQLite connection with WAL mode and safety pragmas.
+        Create new SQLite connection with WAL mode, safety pragmas, and sqlite-vec extension.
 
         CRITICAL: This is the ONLY method that creates connections.
         ALL connections MUST go through this to enforce WAL mode.
@@ -146,8 +163,13 @@ class ConnectionManager:
         - PRAGMA synchronous=NORMAL (safe in WAL mode, better performance)
         - PRAGMA journal_size_limit=33554432 (32MB WAL limit)
 
+        sqlite-vec Extension:
+        - Automatically loads sqlite-vec extension when available
+        - Required for vec_semantic_memory table access
+        - Graceful fallback if extension not available
+
         Returns:
-            sqlite3.Connection with WAL mode enabled
+            sqlite3.Connection with WAL mode enabled and sqlite-vec loaded
 
         Raises:
             sqlite3.Error: If connection or pragma execution fails
@@ -170,6 +192,28 @@ class ConnectionManager:
             conn.execute("PRAGMA busy_timeout=30000")  # 30 seconds
             conn.execute("PRAGMA synchronous=NORMAL")  # Safe in WAL mode
             conn.execute("PRAGMA journal_size_limit=33554432")  # 32 MB
+
+            # Load sqlite-vec extension if available
+            try:
+                conn.enable_load_extension(True)
+
+                # Try to load sqlite-vec extension
+                try:
+                    import sqlite_vec
+                    sqlite_vec.load(conn)
+                    self.logger.debug("sqlite-vec extension loaded successfully")
+                except ImportError:
+                    self.logger.debug("sqlite-vec not available, loading extension manually")
+                    # Try manual loading
+                    conn.load_extension("vec0")
+                    self.logger.debug("vec0 extension loaded manually")
+
+                conn.enable_load_extension(False)
+
+            except Exception as e:
+                self.logger.warning(f"Failed to load sqlite-vec extension: {e}")
+                self.logger.debug("Continuing without sqlite-vec extension")
+                # Continue without extension - some features may not work
 
             # Enable row_factory for dict-like access
             conn.row_factory = sqlite3.Row

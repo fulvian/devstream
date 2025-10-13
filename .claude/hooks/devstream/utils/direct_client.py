@@ -207,14 +207,24 @@ class DevStreamDirectClient:
         Initialize direct client with ConnectionManager.
 
         Args:
-            db_path: Path to database file (validated)
+            db_path: Path to database file (validated) - FORCED to data/devstream.db
 
         Raises:
             DatabaseException: If database connection fails
         """
         try:
-            # Initialize connection manager
-            self.connection_manager = ConnectionManager.get_instance(db_path)
+            # CRITICAL: Force database path to official DevStream database
+            if db_path is not None and db_path != "data/devstream.db":
+                self.logger.logger.warning(
+                    f"Overriding custom db_path '{db_path}' with official 'data/devstream.db'",
+                    extra={"custom_path": db_path, "official_path": "data/devstream.db"}
+                )
+
+            # Use official DevStream database path - let connection_manager handle path resolution
+            official_db_path = "data/devstream.db"
+
+            # Initialize connection manager with official path
+            self.connection_manager = ConnectionManager.get_instance(official_db_path)
             self.db_path = self.connection_manager.db_path
             self.logger = get_devstream_logger('direct_client')
 
@@ -222,7 +232,7 @@ class DevStreamDirectClient:
             self._verify_database_schema()
 
             self.logger.logger.info(
-                "Direct database client initialized",
+                "Direct database client initialized with official database",
                 extra={"db_path": self.db_path}
             )
 
@@ -302,36 +312,49 @@ class DevStreamDirectClient:
         Args:
             conn: Database connection to use for checking
         """
-        try:
-            # Try to load vec0 extension first
-            conn.enable_load_extension(True)
-            conn.load_extension("vec0")
-            conn.enable_load_extension(False)
+        # Default to False
+        self.vector_search_available = False
 
-            # Check if vector table exists
+        try:
+            # First, check if vector table exists in the current database using the provided connection
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_semantic_memory'")
-            if cursor.fetchone():
+            if not cursor.fetchone():
+                self.logger.logger.info("Vector table does not exist, using FTS search only")
+                return
+
+            # Vector table exists, now check if sqlite-vec extension is available
+            try:
+                import sqlite_vec
+            except ImportError:
+                self.logger.logger.info(
+                    "sqlite-vec not installed but vector table exists, using FTS search only"
+                )
+                return
+
+            # Try to test vector functionality without using sqlite_vec_helper
+            try:
+                # Test if we can access vec_semantic_memory table
                 cursor = conn.execute("SELECT rowid FROM vec_semantic_memory LIMIT 1")
                 cursor.fetchone()
-                self.vector_search_available = True
-            else:
-                self.vector_search_available = False
 
-        except sqlite3.OperationalError as e:
-            if "no such module" in str(e) or "not found" in str(e):
-                self.logger.logger.warning(
-                    "sqlite-vec extension not available, using fallback search"
-                )
-                self.vector_search_available = False
-            else:
-                # Other error, assume vector search unavailable
-                self.logger.logger.debug(
-                    f"Vector search check failed: {e}, using fallback"
-                )
-                self.vector_search_available = False
+                # If we get here, vector extension is working
+                self.vector_search_available = True
+                self.logger.logger.info("Vector search extension is available and working")
+
+            except sqlite3.OperationalError as e:
+                if "no such module" in str(e) or "no such function" in str(e):
+                    self.logger.logger.info(
+                        "sqlite-vec extension not loaded in connection, using FTS search only"
+                    )
+                else:
+                    self.logger.logger.warning(
+                        f"Vector extension error: {e}, using fallback search"
+                    )
+
         except Exception as e:
-            # Any other error, set to False
-            self.vector_search_available = False
+            self.logger.logger.warning(
+                f"Vector search check failed: {e}, using FTS fallback"
+            )
 
     async def store_memory(
         self,
@@ -367,64 +390,63 @@ class DevStreamDirectClient:
 
             # CRITICAL FIX: Use explicit transaction control for multi-statement operations
             # Context7 Pattern: Begin explicit transaction for data consistency
-            conn = self.connection_manager._get_thread_connection()
-            try:
-                # Begin explicit transaction
-                conn.execute("BEGIN IMMEDIATE")
-
-                # Insert memory record
-                cursor = conn.execute("""
-                    INSERT INTO semantic_memory (
-                        id, content, content_type, keywords, session_id,
-                        created_at, updated_at, access_count, relevance_score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0)
-                """, (
-                    memory_id, content, content_type, keywords_json,
-                    session_id_clean, current_time, current_time
-                ))
-
-                # Update full-text search index with error handling
+            with self.connection_manager.get_connection() as conn:
                 try:
-                    cursor.execute("""
-                        INSERT INTO fts_semantic_memory (content, content_type, memory_id, created_at)
-                        VALUES (?, ?, ?, ?)
-                    """, (content, content_type, memory_id, current_time))
-                except sqlite3.Error as fts_error:
-                    # Log warning but don't fail the entire operation
-                    self.logger.logger.warning(
-                        f"Failed to update FTS index for memory {memory_id}: {fts_error}",
-                        extra={
-                            "memory_id": memory_id,
-                            "content_type": content_type,
-                            "error": str(fts_error)
-                        }
-                    )
-                    # Memory is stored but not searchable via FTS
+                    # Begin explicit transaction
+                    conn.execute("BEGIN IMMEDIATE")
 
-                # Commit transaction if all operations succeed
-                conn.commit()
-                self.logger.logger.debug(
-                    f"Transaction committed for memory storage: {memory_id}",
-                    extra={"memory_id": memory_id, "operation": "store_memory"}
-                )
+                    # Insert memory record
+                    cursor = conn.execute("""
+                        INSERT INTO semantic_memory (
+                            id, content, content_type, keywords, session_id,
+                            created_at, updated_at, access_count, relevance_score
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0)
+                    """, (
+                        memory_id, content, content_type, keywords_json,
+                        session_id_clean, current_time, current_time
+                    ))
 
-            except Exception as e:
-                # Rollback transaction on any error
-                try:
-                    conn.rollback()
-                    self.logger.logger.warning(
-                        f"Transaction rolled back for memory storage: {memory_id}",
-                        extra={"memory_id": memory_id, "operation": "store_memory", "error": str(e)}
-                    )
-                except sqlite3.Error as rollback_error:
-                    self.logger.logger.error(
-                        f"Failed to rollback transaction: {rollback_error}",
+                    # Update full-text search index with error handling
+                    try:
+                        cursor.execute("""
+                            INSERT INTO fts_semantic_memory (content, content_type, memory_id, created_at)
+                            VALUES (?, ?, ?, ?)
+                        """, (content, content_type, memory_id, current_time))
+                    except sqlite3.Error as fts_error:
+                        # Log warning but don't fail the entire operation
+                        self.logger.logger.warning(
+                            f"Failed to update FTS index for memory {memory_id}: {fts_error}",
+                            extra={
+                                "memory_id": memory_id,
+                                "content_type": content_type,
+                                "error": str(fts_error)
+                            }
+                        )
+                        # Memory is stored but not searchable via FTS
+
+                    # Commit transaction if all operations succeed
+                    conn.commit()
+                    self.logger.logger.debug(
+                        f"Transaction committed for memory storage: {memory_id}",
                         extra={"memory_id": memory_id, "operation": "store_memory"}
                     )
-                raise
 
-            # Note: Vector embedding would be handled by a background process
-            # or using a simpler embedding model for direct access
+                except Exception as e:
+                    # Rollback transaction on any error
+                    try:
+                        conn.rollback()
+                        self.logger.logger.warning(
+                            f"Transaction rolled back for memory storage: {memory_id}",
+                            extra={"memory_id": memory_id, "operation": "store_memory", "error": str(e)}
+                        )
+                    except sqlite3.Error as rollback_error:
+                        self.logger.logger.error(
+                            f"Failed to rollback transaction: {rollback_error}",
+                            extra={"memory_id": memory_id, "operation": "store_memory"}
+                        )
+                    raise
+
+            # Note: Vector embedding would be handled by background process or triggers
 
             duration = (time.time() - start_time) * 1000
 
@@ -595,7 +617,7 @@ class DevStreamDirectClient:
         Perform vector similarity search using sqlite-vec.
 
         Args:
-            conn: Database connection
+            conn: Database connection (may not have vector extension)
             query: Search query
             content_type: Filter by content type
             limit: Maximum results
@@ -619,86 +641,98 @@ class DevStreamDirectClient:
             if not isinstance(content_type, str):
                 raise ValueError("Content type must be a string or None")
 
-        # This is a simplified implementation
-        # In production, you'd generate embeddings for the query
-        # and perform proper vector similarity search
-
-        # Context7 Pattern: Run synchronous embedding generation in executor to avoid blocking
-        loop = asyncio.get_event_loop()
+        # Use the existing connection which already has sqlite-vec loaded
         try:
-            query_embedding = await loop.run_in_executor(
-                None,  # Use default executor
-                self._generate_simple_embedding,
-                query
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to generate query embedding: {e}")
-            # Fallback to FTS search
-            return self._fts_search(conn, query, content_type, limit)
+            # The connection from connection_manager already has sqlite-vec loaded
+            vec_conn = conn
 
-        # Validate embedding
-        if not query_embedding or not isinstance(query_embedding, str):
-            self.logger.warning("Generated invalid embedding, falling back to FTS search")
-            return self._fts_search(conn, query, content_type, limit)
+            # This is a simplified implementation
+            # In production, you'd generate embeddings for the query
+            # and perform proper vector similarity search
 
-        try:
-            sql = """
-                SELECT
-                    sm.id, sm.content, sm.content_type, sm.keywords,
-                    sm.created_at, sm.access_count, sm.importance_score
-                FROM vec_semantic_memory
-                JOIN semantic_memory sm ON vec_semantic_memory.rowid = sm.rowid
-                WHERE vec_semantic_memory MATCH ?
-                ORDER BY distance
-                LIMIT ?
-            """
+            # Context7 Pattern: Run synchronous embedding generation in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            try:
+                query_embedding = await loop.run_in_executor(
+                    None,  # Use default executor
+                    self._generate_simple_embedding,
+                    query
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to generate query embedding: {e}")
+                # Don't close vec_conn here as it's the same as conn
+                # Fallback to FTS search
+                return self._fts_search(conn, query, content_type, limit)
 
-            params: List[Union[str, int]] = [query_embedding, limit]
+            # Validate embedding
+            if not query_embedding or not isinstance(query_embedding, str):
+                self.logger.warning("Generated invalid embedding, falling back to FTS search")
+                # Don't close vec_conn here as it's the same as conn
+                return self._fts_search(conn, query, content_type, limit)
 
-            if content_type:
+            try:
+                # Use sqlite-vec knn syntax with k parameter instead of LIMIT
                 sql = """
                     SELECT
                         sm.id, sm.content, sm.content_type, sm.keywords,
                         sm.created_at, sm.access_count, sm.importance_score
-                    FROM vec_semantic_memory
-                    JOIN semantic_memory sm ON vec_semantic_memory.rowid = sm.rowid
-                    WHERE vec_semantic_memory MATCH ? AND sm.content_type = ?
+                    FROM vec_semantic_memory AS vec
+                    JOIN semantic_memory sm ON vec.memory_id = sm.id
+                    WHERE vec.embedding MATCH ?
                     ORDER BY distance
                     LIMIT ?
                 """
-                params = [query_embedding, content_type, limit]
 
-            cursor = conn.execute(sql, params)
-            rows = cursor.fetchall()
+                params: List[Union[str, int]] = [f"[{query_embedding}]", limit]
 
-            # Validate results
-            results = []
-            for row in rows:
-                result = dict(row)
-                # Parse keywords JSON if needed
-                if result.get('keywords') and isinstance(result['keywords'], str):
-                    try:
-                        result['keywords'] = json.loads(result['keywords'])
-                    except json.JSONDecodeError:
-                        self.logger.warning(f"Invalid JSON in keywords for memory {result.get('id')}")
-                        result['keywords'] = []
-                results.append(result)
+                if content_type:
+                    sql = """
+                        SELECT
+                            sm.id, sm.content, sm.content_type, sm.keywords,
+                            sm.created_at, sm.access_count, sm.importance_score
+                        FROM vec_semantic_memory AS vec
+                        JOIN semantic_memory sm ON vec.memory_id = sm.id
+                        WHERE vec.embedding MATCH ? AND sm.content_type = ?
+                        ORDER BY distance
+                        LIMIT ?
+                    """
+                    params = [f"[{query_embedding}]", content_type, limit]
 
-            return results
+                cursor = vec_conn.execute(sql, params)
+                rows = cursor.fetchall()
 
-        except sqlite3.OperationalError as e:
-            if "no such module" in str(e):
-                self.logger.warning("Vector extension not available, falling back to FTS search")
-                return self._fts_search(conn, query, content_type, limit)
-            elif "no such table" in str(e):
-                self.logger.warning("Vector table not found, falling back to FTS search")
-                return self._fts_search(conn, query, content_type, limit)
-            else:
-                self.logger.error(f"Vector search failed: {e}")
+                # Validate results
+                results = []
+                for row in rows:
+                    result = dict(row)
+                    # Parse keywords JSON if needed
+                    if result.get('keywords') and isinstance(result['keywords'], str):
+                        try:
+                            result['keywords'] = json.loads(result['keywords'])
+                        except json.JSONDecodeError:
+                            self.logger.warning(f"Invalid JSON in keywords for memory {result.get('id')}")
+                            result['keywords'] = []
+                    results.append(result)
+
+                return results
+
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e):
+                    self.logger.warning("Vector table not found, falling back to FTS search")
+                    return self._fts_search(conn, query, content_type, limit)
+                else:
+                    self.logger.error(f"Vector search failed: {e}")
+                    raise DatabaseException(f"Vector search failed: {e}") from e
+            except Exception as e:
+                self.logger.error(f"Unexpected error in vector search: {e}")
                 raise DatabaseException(f"Vector search failed: {e}") from e
+
+        except ImportError:
+            self.logger.warning("sqlite-vec helper not available, falling back to FTS search")
+            return self._fts_search(conn, query, content_type, limit)
         except Exception as e:
-            self.logger.error(f"Unexpected error in vector search: {e}")
-            raise DatabaseException(f"Vector search failed: {e}") from e
+            self.logger.error(f"Failed to get vector connection: {e}")
+            return self._fts_search(conn, query, content_type, limit)
 
     def _fts_search(
         self,
