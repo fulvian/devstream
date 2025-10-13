@@ -265,9 +265,9 @@ class ConnectionManager:
                 conn.commit()
             except sqlite3.ProgrammingError as e:
                 if "closed database" in str(e):
-                    # Connection was closed during test - create new one
-                    self.close_thread_connection()
-                    self.logger.warning("Connection was closed, recreated")
+                    # CRITICAL FIX: Connection was closed during operation - cleanup properly
+                    self._cleanup_connection(conn)
+                    self.logger.warning("Connection was closed during commit, cleaned up")
                 else:
                     raise
         except Exception as e:
@@ -276,14 +276,39 @@ class ConnectionManager:
                 conn.rollback()
             except sqlite3.ProgrammingError as rollback_error:
                 if "closed database" in str(rollback_error):
-                    # Connection already closed - cleanup and re-raise original error
-                    self.close_thread_connection()
-                    self.logger.warning("Cannot rollback closed connection")
+                    # CRITICAL FIX: Connection already closed - cleanup properly
+                    self._cleanup_connection(conn)
+                    self.logger.warning("Cannot rollback closed connection, cleaned up")
                 else:
                     raise rollback_error
             self.logger.error(f"Transaction failed, rolled back: {e}")
             raise
         # Note: Connection is NOT closed (reused via thread-local storage)
+
+    def _cleanup_connection(self, conn: sqlite3.Connection) -> None:
+        """
+        CRITICAL FIX: Properly clean up closed connection from thread-local storage.
+
+        Args:
+            conn: The connection that was closed
+        """
+        thread_id = threading.get_ident()
+
+        try:
+            # Remove from thread-local storage
+            if hasattr(self._local, 'connection') and self._local.connection == conn:
+                self._local.connection = None
+
+            # Remove from active connections tracking
+            with self._pool_lock:
+                if thread_id in self._active_connections:
+                    # Verify it's the same connection before removing
+                    active_conn, _, _ = self._active_connections[thread_id]
+                    if active_conn == conn:
+                        del self._active_connections[thread_id]
+                        self.logger.debug(f"Cleaned up closed connection for thread {thread_id}")
+        except Exception as e:
+            self.logger.error(f"Error during connection cleanup: {e}")
 
     def _health_check_connection(self, conn: sqlite3.Connection) -> bool:
         """

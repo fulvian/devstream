@@ -38,6 +38,151 @@ class DatabaseException(Exception):
     pass
 
 
+class TransactionManager:
+    """
+    Context manager for explicit SQLite transactions with proper error handling.
+
+    Implements Context7 best practices for transaction control:
+    - BEGIN IMMEDIATE for write operations (acquires write lock immediately)
+    - BEGIN DEFERRED for read operations (acquires read lock, upgrades to write when needed)
+    - Automatic rollback on error
+    - Proper logging and cleanup
+
+    Usage:
+        >>> conn = connection_manager._get_thread_connection()
+        >>> with TransactionManager(conn, "IMMEDIATE") as tx:
+        ...     # Database operations here
+        ...     conn.execute("INSERT INTO table ...")
+        ...     # Automatic commit on success, rollback on error
+    """
+
+    def __init__(self, conn: sqlite3.Connection, mode: str = "IMMEDIATE", logger: Optional[logging.Logger] = None):
+        """
+        Initialize transaction manager.
+
+        Args:
+            conn: SQLite connection to manage transaction for
+            mode: Transaction mode ("IMMEDIATE", "DEFERRED", "EXCLUSIVE")
+            logger: Optional logger for transaction events
+        """
+        self.conn = conn
+        self.mode = mode.upper()
+        self.logger = logger or logging.getLogger(__name__)
+
+        if self.mode not in ["IMMEDIATE", "DEFERRED", "EXCLUSIVE"]:
+            raise ValueError(f"Invalid transaction mode: {mode}. Must be IMMEDIATE, DEFERDED, or EXCLUSIVE")
+
+    def __enter__(self) -> 'TransactionManager':
+        """Begin transaction and return self."""
+        try:
+            self.conn.execute(f"BEGIN {self.mode}")
+            self.logger.debug(
+                f"Transaction started (mode: {self.mode})",
+                extra={"transaction_mode": self.mode, "operation": "begin_transaction"}
+            )
+            return self
+        except sqlite3.Error as e:
+            self.logger.error(
+                f"Failed to begin transaction: {e}",
+                extra={"transaction_mode": self.mode, "operation": "begin_transaction", "error": str(e)}
+            )
+            raise DatabaseException(f"Failed to begin transaction: {e}") from e
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """
+        Handle transaction completion.
+
+        Commits on success, rolls back on exception.
+        """
+        if exc_type is None:
+            # No exception - commit transaction
+            try:
+                self.conn.commit()
+                self.logger.debug(
+                    "Transaction committed successfully",
+                    extra={"transaction_mode": self.mode, "operation": "commit_transaction"}
+                )
+            except sqlite3.Error as e:
+                self.logger.error(
+                    f"Failed to commit transaction: {e}",
+                    extra={"transaction_mode": self.mode, "operation": "commit_transaction", "error": str(e)}
+                )
+                # Try to rollback on commit failure
+                try:
+                    self.conn.rollback()
+                    self.logger.warning(
+                        "Transaction rolled back due to commit failure",
+                        extra={"transaction_mode": self.mode, "operation": "rollback_on_commit_failure"}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.error(
+                        f"Failed to rollback after commit failure: {rollback_error}",
+                        extra={"transaction_mode": self.mode, "operation": "rollback_failure", "error": str(rollback_error)}
+                    )
+                raise DatabaseException(f"Transaction commit failed: {e}") from e
+        else:
+            # Exception occurred - rollback transaction
+            try:
+                self.conn.rollback()
+                self.logger.warning(
+                    f"Transaction rolled back due to {exc_type.__name__}: {exc_val}",
+                    extra={
+                        "transaction_mode": self.mode,
+                        "operation": "rollback_transaction",
+                        "exception_type": exc_type.__name__,
+                        "exception": str(exc_val)
+                    }
+                )
+            except sqlite3.Error as rollback_error:
+                self.logger.error(
+                    f"Failed to rollback transaction: {rollback_error}",
+                    extra={"transaction_mode": self.mode, "operation": "rollback_failure", "error": str(rollback_error)}
+                )
+                # Don't raise here - let original exception propagate
+                self.logger.error(
+                    "Original exception suppressed rollback failure",
+                    extra={"original_exception": str(exc_val), "rollback_error": str(rollback_error)}
+                )
+
+    def commit(self) -> None:
+        """
+        Manually commit transaction.
+
+        Useful for complex transactions requiring intermediate commits.
+        """
+        try:
+            self.conn.commit()
+            self.logger.debug(
+                "Transaction manually committed",
+                extra={"transaction_mode": self.mode, "operation": "manual_commit"}
+            )
+        except sqlite3.Error as e:
+            self.logger.error(
+                f"Manual commit failed: {e}",
+                extra={"transaction_mode": self.mode, "operation": "manual_commit", "error": str(e)}
+            )
+            raise DatabaseException(f"Manual commit failed: {e}") from e
+
+    def rollback(self) -> None:
+        """
+        Manually rollback transaction.
+
+        Useful for conditional rollback logic.
+        """
+        try:
+            self.conn.rollback()
+            self.logger.debug(
+                "Transaction manually rolled back",
+                extra={"transaction_mode": self.mode, "operation": "manual_rollback"}
+            )
+        except sqlite3.Error as e:
+            self.logger.error(
+                f"Manual rollback failed: {e}",
+                extra={"transaction_mode": self.mode, "operation": "manual_rollback", "error": str(e)}
+            )
+            raise DatabaseException(f"Manual rollback failed: {e}") from e
+
+
 class DevStreamDirectClient:
     """
     Direct database client replacing MCP server.
@@ -158,18 +303,35 @@ class DevStreamDirectClient:
             conn: Database connection to use for checking
         """
         try:
-            cursor = conn.execute("SELECT rowid FROM vec_semantic_memory LIMIT 1")
-            cursor.fetchone()
-            self.vector_search_available = True
+            # Try to load vec0 extension first
+            conn.enable_load_extension(True)
+            conn.load_extension("vec0")
+            conn.enable_load_extension(False)
+
+            # Check if vector table exists
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_semantic_memory'")
+            if cursor.fetchone():
+                cursor = conn.execute("SELECT rowid FROM vec_semantic_memory LIMIT 1")
+                cursor.fetchone()
+                self.vector_search_available = True
+            else:
+                self.vector_search_available = False
+
         except sqlite3.OperationalError as e:
-            if "no such module" in str(e):
+            if "no such module" in str(e) or "not found" in str(e):
                 self.logger.logger.warning(
                     "sqlite-vec extension not available, using fallback search"
                 )
                 self.vector_search_available = False
             else:
-                # Vector table doesn't exist, create a simple one
+                # Other error, assume vector search unavailable
+                self.logger.logger.debug(
+                    f"Vector search check failed: {e}, using fallback"
+                )
                 self.vector_search_available = False
+        except Exception as e:
+            # Any other error, set to False
+            self.vector_search_available = False
 
     async def store_memory(
         self,
@@ -203,7 +365,13 @@ class DevStreamDirectClient:
             keywords_json = json.dumps(keywords or [])
             session_id_clean = session_id or os.getenv('CLAUDE_SESSION_ID', '')
 
-            with self.connection_manager.get_connection() as conn:
+            # CRITICAL FIX: Use explicit transaction control for multi-statement operations
+            # Context7 Pattern: Begin explicit transaction for data consistency
+            conn = self.connection_manager._get_thread_connection()
+            try:
+                # Begin explicit transaction
+                conn.execute("BEGIN IMMEDIATE")
+
                 # Insert memory record
                 cursor = conn.execute("""
                     INSERT INTO semantic_memory (
@@ -233,8 +401,30 @@ class DevStreamDirectClient:
                     )
                     # Memory is stored but not searchable via FTS
 
-                # Note: Vector embedding would be handled by a background process
-                # or using a simpler embedding model for direct access
+                # Commit transaction if all operations succeed
+                conn.commit()
+                self.logger.logger.debug(
+                    f"Transaction committed for memory storage: {memory_id}",
+                    extra={"memory_id": memory_id, "operation": "store_memory"}
+                )
+
+            except Exception as e:
+                # Rollback transaction on any error
+                try:
+                    conn.rollback()
+                    self.logger.logger.warning(
+                        f"Transaction rolled back for memory storage: {memory_id}",
+                        extra={"memory_id": memory_id, "operation": "store_memory", "error": str(e)}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.logger.error(
+                        f"Failed to rollback transaction: {rollback_error}",
+                        extra={"memory_id": memory_id, "operation": "store_memory"}
+                    )
+                raise
+
+            # Note: Vector embedding would be handled by a background process
+            # or using a simpler embedding model for direct access
 
             duration = (time.time() - start_time) * 1000
 
@@ -297,11 +487,16 @@ class DevStreamDirectClient:
         start_time = time.time()
 
         try:
-            with self.connection_manager.get_connection() as conn:
+            # CRITICAL FIX: Use explicit transaction control for search + update operations
+            conn = self.connection_manager._get_thread_connection()
+            try:
+                # Begin explicit transaction for read consistency
+                conn.execute("BEGIN DEFERRED")
+
                 # Try vector search first if available
                 if hasattr(self, 'vector_search_available') and self.vector_search_available:
                     try:
-                        results = self._vector_search(conn, query, content_type, limit)
+                        results = await self._vector_search(conn, query, content_type, limit)
                     except sqlite3.OperationalError as e:
                         if "no such module" in str(e):
                             # Fallback to FTS search
@@ -326,6 +521,28 @@ class DevStreamDirectClient:
                         """,
                         [datetime.now().isoformat()] + memory_ids
                     )
+
+                # Commit transaction if all operations succeed
+                conn.commit()
+                self.logger.logger.debug(
+                    f"Transaction committed for memory search: {len(results)} results",
+                    extra={"query": query[:50], "results_count": len(results), "operation": "search_memory"}
+                )
+
+            except Exception as e:
+                # Rollback transaction on any error
+                try:
+                    conn.rollback()
+                    self.logger.logger.warning(
+                        f"Transaction rolled back for memory search: {query[:50]}",
+                        extra={"query": query[:50], "operation": "search_memory", "error": str(e)}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.logger.error(
+                        f"Failed to rollback search transaction: {rollback_error}",
+                        extra={"query": query[:50], "operation": "search_memory"}
+                    )
+                raise
 
             duration = (time.time() - start_time) * 1000
 
@@ -367,7 +584,7 @@ class DevStreamDirectClient:
 
             raise DatabaseException(f"Memory search failed: {e}") from e
 
-    def _vector_search(
+    async def _vector_search(
         self,
         conn: sqlite3.Connection,
         query: str,
@@ -385,43 +602,103 @@ class DevStreamDirectClient:
 
         Returns:
             List of memory records with similarity scores
+
+        Raises:
+            ValueError: If parameters are invalid
+            DatabaseException: If vector search fails
         """
+        # CRITICAL FIX: Add input validation
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("Query must be a non-empty string")
+
+        if not isinstance(limit, int) or limit < 1 or limit > 1000:
+            limit = 10
+            self.logger.warning(f"Invalid limit value {limit}, using default 10")
+
+        if content_type is not None:
+            if not isinstance(content_type, str):
+                raise ValueError("Content type must be a string or None")
+
         # This is a simplified implementation
         # In production, you'd generate embeddings for the query
         # and perform proper vector similarity search
 
-        query_embedding = self._generate_simple_embedding(query)
+        # Context7 Pattern: Run synchronous embedding generation in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        try:
+            query_embedding = await loop.run_in_executor(
+                None,  # Use default executor
+                self._generate_simple_embedding,
+                query
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to generate query embedding: {e}")
+            # Fallback to FTS search
+            return self._fts_search(conn, query, content_type, limit)
 
-        sql = """
-            SELECT
-                sm.id, sm.content, sm.content_type, sm.keywords,
-                sm.created_at, sm.access_count, sm.importance_score
-            FROM vec_semantic_memory
-            JOIN semantic_memory sm ON vec_semantic_memory.rowid = sm.rowid
-            WHERE vec_semantic_memory MATCH ?
-            ORDER BY distance
-            LIMIT ?
-        """
+        # Validate embedding
+        if not query_embedding or not isinstance(query_embedding, str):
+            self.logger.warning("Generated invalid embedding, falling back to FTS search")
+            return self._fts_search(conn, query, content_type, limit)
 
-        params: List[Union[str, int]] = [query_embedding, limit]
-
-        if content_type:
+        try:
             sql = """
                 SELECT
                     sm.id, sm.content, sm.content_type, sm.keywords,
                     sm.created_at, sm.access_count, sm.importance_score
                 FROM vec_semantic_memory
                 JOIN semantic_memory sm ON vec_semantic_memory.rowid = sm.rowid
-                WHERE vec_semantic_memory MATCH ? AND sm.content_type = ?
+                WHERE vec_semantic_memory MATCH ?
                 ORDER BY distance
                 LIMIT ?
             """
-            params = [query_embedding, content_type, limit]
 
-        cursor = conn.execute(sql, params)
-        rows = cursor.fetchall()
+            params: List[Union[str, int]] = [query_embedding, limit]
 
-        return [dict(row) for row in rows]
+            if content_type:
+                sql = """
+                    SELECT
+                        sm.id, sm.content, sm.content_type, sm.keywords,
+                        sm.created_at, sm.access_count, sm.importance_score
+                    FROM vec_semantic_memory
+                    JOIN semantic_memory sm ON vec_semantic_memory.rowid = sm.rowid
+                    WHERE vec_semantic_memory MATCH ? AND sm.content_type = ?
+                    ORDER BY distance
+                    LIMIT ?
+                """
+                params = [query_embedding, content_type, limit]
+
+            cursor = conn.execute(sql, params)
+            rows = cursor.fetchall()
+
+            # Validate results
+            results = []
+            for row in rows:
+                result = dict(row)
+                # Parse keywords JSON if needed
+                if result.get('keywords') and isinstance(result['keywords'], str):
+                    try:
+                        result['keywords'] = json.loads(result['keywords'])
+                    except json.JSONDecodeError:
+                        self.logger.warning(f"Invalid JSON in keywords for memory {result.get('id')}")
+                        result['keywords'] = []
+                results.append(result)
+
+            return results
+
+        except sqlite3.OperationalError as e:
+            if "no such module" in str(e):
+                self.logger.warning("Vector extension not available, falling back to FTS search")
+                return self._fts_search(conn, query, content_type, limit)
+            elif "no such table" in str(e):
+                self.logger.warning("Vector table not found, falling back to FTS search")
+                return self._fts_search(conn, query, content_type, limit)
+            else:
+                self.logger.error(f"Vector search failed: {e}")
+                raise DatabaseException(f"Vector search failed: {e}") from e
+        except Exception as e:
+            self.logger.error(f"Unexpected error in vector search: {e}")
+            raise DatabaseException(f"Vector search failed: {e}") from e
 
     def _fts_search(
         self,
@@ -580,7 +857,12 @@ class DevStreamDirectClient:
             current_time = datetime.now().isoformat()
             project_clean = project or "DevStream Development"
 
-            with self.connection_manager.get_connection() as conn:
+            # CRITICAL FIX: Use explicit transaction control for create operations
+            conn = self.connection_manager._get_thread_connection()
+            try:
+                # Begin explicit transaction
+                conn.execute("BEGIN IMMEDIATE")
+
                 # Check if tasks table exists, create if needed
                 cursor = conn.execute("""
                     SELECT name FROM sqlite_master
@@ -613,6 +895,28 @@ class DevStreamDirectClient:
                     task_id, title, description, task_type, priority,
                     "pending", phase_name, project_clean, current_time, current_time
                 ))
+
+                # Commit transaction if all operations succeed
+                conn.commit()
+                self.logger.logger.debug(
+                    f"Transaction committed for task creation: {task_id}",
+                    extra={"task_id": task_id, "operation": "create_task", "title": title}
+                )
+
+            except Exception as e:
+                # Rollback transaction on any error
+                try:
+                    conn.rollback()
+                    self.logger.logger.warning(
+                        f"Transaction rolled back for task creation: {task_id}",
+                        extra={"task_id": task_id, "operation": "create_task", "title": title, "error": str(e)}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.logger.error(
+                        f"Failed to rollback task creation transaction: {rollback_error}",
+                        extra={"task_id": task_id, "operation": "create_task"}
+                    )
+                raise
 
             duration = (time.time() - start_time) * 1000
 
@@ -763,7 +1067,12 @@ class DevStreamDirectClient:
         try:
             current_time = datetime.now().isoformat()
 
-            with self.connection_manager.get_connection() as conn:
+            # CRITICAL FIX: Use explicit transaction control for update operations
+            conn = self.connection_manager._get_thread_connection()
+            try:
+                # Begin explicit transaction
+                conn.execute("BEGIN IMMEDIATE")
+
                 # Update task status
                 cursor = conn.execute("""
                     UPDATE tasks
@@ -773,6 +1082,28 @@ class DevStreamDirectClient:
 
                 if cursor.rowcount == 0:
                     raise DatabaseException(f"Task not found: {task_id}")
+
+                # Commit transaction if all operations succeed
+                conn.commit()
+                self.logger.logger.debug(
+                    f"Transaction committed for task update: {task_id}",
+                    extra={"task_id": task_id, "operation": "update_task", "new_status": status}
+                )
+
+            except Exception as e:
+                # Rollback transaction on any error
+                try:
+                    conn.rollback()
+                    self.logger.logger.warning(
+                        f"Transaction rolled back for task update: {task_id}",
+                        extra={"task_id": task_id, "operation": "update_task", "new_status": status, "error": str(e)}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.logger.error(
+                        f"Failed to rollback task update transaction: {rollback_error}",
+                        extra={"task_id": task_id, "operation": "update_task"}
+                    )
+                raise
 
             duration = (time.time() - start_time) * 1000
 
@@ -832,8 +1163,12 @@ class DevStreamDirectClient:
             current_time = datetime.now().isoformat()
             checkpoint_id = str(uuid.uuid4())
 
-            # Log checkpoint trigger
-            with self.connection_manager.get_connection() as conn:
+            # CRITICAL FIX: Use explicit transaction control for checkpoint operations
+            conn = self.connection_manager._get_thread_connection()
+            try:
+                # Begin explicit transaction
+                conn.execute("BEGIN IMMEDIATE")
+
                 # Create checkpoint log entry if table doesn't exist
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS checkpoints (
@@ -848,6 +1183,28 @@ class DevStreamDirectClient:
                     INSERT INTO checkpoints (id, reason, triggered_at, status)
                     VALUES (?, ?, ?, 'completed')
                 """, (checkpoint_id, reason, current_time))
+
+                # Commit transaction if all operations succeed
+                conn.commit()
+                self.logger.logger.debug(
+                    f"Transaction committed for checkpoint trigger: {checkpoint_id}",
+                    extra={"checkpoint_id": checkpoint_id, "operation": "trigger_checkpoint", "reason": reason}
+                )
+
+            except Exception as e:
+                # Rollback transaction on any error
+                try:
+                    conn.rollback()
+                    self.logger.logger.warning(
+                        f"Transaction rolled back for checkpoint trigger: {checkpoint_id}",
+                        extra={"checkpoint_id": checkpoint_id, "operation": "trigger_checkpoint", "reason": reason, "error": str(e)}
+                    )
+                except sqlite3.Error as rollback_error:
+                    self.logger.logger.error(
+                        f"Failed to rollback checkpoint transaction: {rollback_error}",
+                        extra={"checkpoint_id": checkpoint_id, "operation": "trigger_checkpoint"}
+                    )
+                raise
 
             duration = (time.time() - start_time) * 1000
 

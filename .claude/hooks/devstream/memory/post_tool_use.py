@@ -457,6 +457,9 @@ class PostToolUseHook:
                 f"({len(topics)} topics, {len(entities)} entities)"
             )
 
+            # Get current session ID for memory storage
+            session_id = await self._get_current_session_id()
+
             # FASE 4.4: Use unified client with built-in retry and fallback logic
             result = await self.retry_with_backoff(
                 f"Memory storage ({Path(file_path).name})",

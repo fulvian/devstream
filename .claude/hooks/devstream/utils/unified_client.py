@@ -47,6 +47,7 @@ except ImportError:
     import asyncio
     from enum import Enum
     import time
+    import threading
 
     class CircuitState(Enum):
         """Circuit breaker states - matches robustness_patterns API"""
@@ -74,6 +75,7 @@ except ImportError:
 
         Context7 Best Practice: Support both config object and individual parameters
         for backward compatibility and graceful degradation.
+        CRITICAL FIX: Added atomic operations with threading.Lock for thread safety.
         """
 
         def __init__(self, *args, **kwargs):
@@ -100,13 +102,17 @@ except ImportError:
             self._state = CircuitState.CLOSED
             self.last_failure_time = None
 
+            # CRITICAL FIX: Add lock for atomic state modifications
+            self._lock = threading.Lock()
+
             # Expose CircuitState as class attribute for API compatibility
             self.CircuitState = CircuitState
 
         @property
         def state(self):
-            """Get current circuit breaker state."""
-            return self._state
+            """Get current circuit breaker state - thread-safe."""
+            with self._lock:
+                return self._state
 
         async def call(self, operation, *args, **kwargs):
             """
@@ -123,37 +129,46 @@ except ImportError:
             Raises:
                 Exception: If operation fails or circuit breaker is open
             """
-            # Check if circuit is open and timeout has elapsed
-            if self._state == CircuitState.OPEN:
-                if (self.last_failure_time and
-                    time.time() - self.last_failure_time > self.timeout_seconds):
-                    self._state = CircuitState.HALF_OPEN
+            # CRITICAL FIX: Check state and timeout atomically
+            with self._lock:
+                should_proceed = False
+                if self._state == CircuitState.OPEN:
+                    if (self.last_failure_time and
+                        time.time() - self.last_failure_time > self.timeout_seconds):
+                        # Transition to HALF_OPEN atomically
+                        self._state = CircuitState.HALF_OPEN
+                        should_proceed = True
+                    else:
+                        raise ConnectionError("Circuit breaker is OPEN - service unavailable")
                 else:
-                    raise ConnectionError("Circuit breaker is OPEN - service unavailable")
+                    should_proceed = True
 
             try:
                 result = await operation(*args, **kwargs)
 
-                # Success handling
-                if self._state == CircuitState.HALF_OPEN:
-                    self._state = CircuitState.CLOSED
-                    self.failure_count = 0
-                elif self._state == CircuitState.CLOSED:
-                    # Reset failure count on success in closed state
-                    self.failure_count = max(0, self.failure_count - 1)
+                # CRITICAL FIX: Success handling with atomic state updates
+                with self._lock:
+                    if self._state == CircuitState.HALF_OPEN:
+                        self._state = CircuitState.CLOSED
+                        self.failure_count = 0
+                    elif self._state == CircuitState.CLOSED:
+                        # Reset failure count on success in closed state
+                        self.failure_count = max(0, self.failure_count - 1)
 
                 return result
 
             except self.expected_exception as e:
-                self.failure_count += 1
-                self.last_failure_time = time.time()
+                # CRITICAL FIX: Failure handling with atomic state updates
+                with self._lock:
+                    self.failure_count += 1
+                    self.last_failure_time = time.time()
 
-                # Check if we should open the circuit
-                if self.failure_count >= self.failure_threshold:
-                    self._state = CircuitState.OPEN
-                elif self._state == CircuitState.HALF_OPEN:
-                    # Any failure in half-open returns to open
-                    self._state = CircuitState.OPEN
+                    # Check if we should open the circuit
+                    if self.failure_count >= self.failure_threshold:
+                        self._state = CircuitState.OPEN
+                    elif self._state == CircuitState.HALF_OPEN:
+                        # Any failure in half-open returns to open
+                        self._state = CircuitState.OPEN
 
                 raise
 
