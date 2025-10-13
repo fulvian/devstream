@@ -526,8 +526,10 @@ class SessionStartHook:
             "phase": "session_start"
         })
 
-        # Display previous session summary (if available)
-        await self.display_previous_summary()
+  # Display previous session summary (if available)
+        # TEMPORARILY DISABLED: Commented out to prevent summary display in multi-session scenarios
+        # await self.display_previous_summary()
+        # TODO: Re-enable when single-session workflow or manual summary retrieval is needed
 
         # Get session ID
         session_id = self.get_session_id()
