@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
 from cchooks import safe_create_context, PostToolUseContext
 from devstream_base import DevStreamHookBase, FeedbackLevel
-from mcp_client import get_mcp_client
+from unified_client import get_unified_client
 from ollama_client import OllamaEmbeddingClient
 from sqlite_vec_helper import get_db_connection_with_vec
 from rate_limiter import (
@@ -69,7 +69,7 @@ class PostToolUseHook:
 
     def __init__(self):
         self.base = DevStreamHookBase("post_tool_use")
-        self.mcp_client = get_mcp_client()
+        self.unified_client = get_unified_client()
 
         # Initialize Ollama client for embedding generation
         self.ollama_client = OllamaEmbeddingClient()
@@ -288,11 +288,10 @@ class PostToolUseHook:
                 f"files_monitored={status['monitored_files_count']}"
             )
 
-            # For backward compatibility, still call MCP checkpoint but with enhanced context
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_trigger_checkpoint",
-                {"reason": "real_time_file_capture"}
+            # Use unified client for checkpoint with automatic backend selection
+            result = await self.unified_client.trigger_checkpoint(
+                reason="real_time_file_capture",
+                hook_name="post_tool_use"
             )
 
             if result:
@@ -458,21 +457,16 @@ class PostToolUseHook:
                 f"({len(topics)} topics, {len(entities)} entities)"
             )
 
-            # FASE 4.4: Wrap MCP call with retry logic
-            async def _store_via_mcp():
-                return await self.base.safe_mcp_call(
-                    self.mcp_client,
-                    "devstream_store_memory",
-                    {
-                        "content": memory_content,
-                        "content_type": content_type,
-                        "keywords": keywords
-                    }
-                )
-
+            # FASE 4.4: Use unified client with built-in retry and fallback logic
             result = await self.retry_with_backoff(
-                f"MCP memory storage ({Path(file_path).name})",
-                _store_via_mcp
+                f"Memory storage ({Path(file_path).name})",
+                lambda: self.unified_client.store_memory(
+                    content=memory_content,
+                    content_type=content_type,
+                    keywords=keywords,
+                    session_id=session_id,
+                    hook_name="post_tool_use"
+                )
             )
 
             if not result:
@@ -732,7 +726,7 @@ class PostToolUseHook:
         """
         Get current active session ID from work_sessions table.
 
-        Memory Bank Pattern: Active session tracking for context preservation.
+        Context7 Pattern: Use ConnectionManager for thread-safe database access
 
         Returns:
             Current session ID if found, None otherwise
@@ -741,25 +735,26 @@ class PostToolUseHook:
             Queries for most recent active session (status='active')
         """
         try:
-            import aiosqlite
+            # Use ConnectionManager from unified client for thread-safe access
+            connection_manager = self.unified_client._get_direct_client().connection_manager
 
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
+            with connection_manager.get_connection() as conn:
+                cursor = conn.execute(
                     """
                     SELECT id FROM work_sessions
                     WHERE status = 'active'
                     ORDER BY started_at DESC
                     LIMIT 1
                     """
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        session_id = row[0]
-                        self.base.debug_log(f"Active session: {session_id[:8]}...")
-                        return session_id
+                )
+                row = cursor.fetchone()
+                if row:
+                    session_id = row[0]
+                    self.base.debug_log(f"Active session: {session_id[:8]}...")
+                    return session_id
 
-                    self.base.debug_log("No active session found")
-                    return None
+                self.base.debug_log("No active session found")
+                return None
 
         except Exception as e:
             self.base.debug_log(f"Failed to get session ID: {e}")
@@ -769,7 +764,7 @@ class PostToolUseHook:
         """
         Get current active_files list from session.
 
-        Context7 Pattern: Read-only helper using aiosqlite async with.
+        Context7 Pattern: Use ConnectionManager for thread-safe database access
 
         Args:
             session_id: Session identifier
@@ -778,21 +773,22 @@ class PostToolUseHook:
             List of active file paths (empty list if session not found)
         """
         try:
-            import aiosqlite
+            # Use ConnectionManager for thread-safe access
+            connection_manager = self.unified_client._get_direct_client().connection_manager
 
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
+            with connection_manager.get_connection() as conn:
+                cursor = conn.execute(
                     "SELECT active_files FROM work_sessions WHERE id = ?",
                     (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
+                )
+                row = cursor.fetchone()
 
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return []
+                if not row:
+                    self.base.debug_log(f"Session not found: {session_id[:8]}...")
+                    return []
 
-                    # Parse JSON (handle NULL case)
-                    return json.loads(row[0]) if row[0] else []
+                # Parse JSON (handle NULL case)
+                return json.loads(row[0]) if row[0] else []
 
         except Exception as e:
             self.base.debug_log(f"Failed to get active files: {e}")
@@ -1450,14 +1446,12 @@ class PostToolUseHook:
                 # Store a test record to verify the hook works
                 test_content = f"PostToolUse fallback mode test at {datetime.now().isoformat()}"
 
-                result = await self.base.safe_mcp_call(
-                    self.mcp_client,
-                    "devstream_store_memory",
-                    {
-                        "content": test_content,
-                        "content_type": "code",
-                        "keywords": ["post_tool_use", "fallback", "test", session_id[:8]]
-                    }
+                result = await self.unified_client.store_memory(
+                    content=test_content,
+                    content_type="code",
+                    keywords=["post_tool_use", "fallback", "test", session_id[:8]],
+                    session_id=session_id,
+                    hook_name="post_tool_use_fallback"
                 )
 
                 if result:

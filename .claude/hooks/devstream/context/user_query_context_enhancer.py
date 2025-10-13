@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 from cchooks import safe_create_context, UserPromptSubmitContext
 from devstream_base import DevStreamHookBase, FeedbackLevel
 from context7_client import Context7Client
-from mcp_client import get_mcp_client
+from unified_client import get_unified_client
 
 # Agent Auto-Delegation imports (with graceful degradation)
 try:
@@ -59,8 +59,8 @@ class UserPromptSubmitHook:
 
     def __init__(self):
         self.base = DevStreamHookBase("user_prompt_submit")
-        self.mcp_client = get_mcp_client()
-        self.context7 = Context7Client(self.mcp_client)
+        self.unified_client = get_unified_client()
+        self.context7 = Context7Client(self.unified_client)
 
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher = None
@@ -149,14 +149,11 @@ class UserPromptSubmitHook:
         try:
             self.base.debug_log(f"Searching DevStream memory: {user_input[:50]}...")
 
-            # Search memory via MCP
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_search_memory",
-                {
-                    "query": user_input,
-                    "limit": 3
-                }
+            # Search memory via unified client
+            result = await self.unified_client.search_memory(
+                query=user_input,
+                limit=3,
+                hook_name="user_query_context_enhancer"
             )
 
             if not result or not result.get("results"):
@@ -333,14 +330,11 @@ Cancel"""
 
             # Log delegation event
             try:
-                await self.base.safe_mcp_call(
-                    self.mcp_client,
-                    "devstream_store_memory",
-                    {
-                        "content": f"Agent delegation: {assessment.suggested_agent} (confidence: {assessment.confidence:.2f}). User query: {user_input[:200]}",
-                        "content_type": "decision",
-                        "keywords": ["agent-delegation", "auto-routing", "confidence-based"]
-                    }
+                await self.unified_client.store_memory(
+                    content=f"Agent delegation: {assessment.suggested_agent} (confidence: {assessment.confidence:.2f}). User query: {user_input[:200]}",
+                    content_type="decision",
+                    keywords=["agent-delegation", "auto-routing", "confidence-based"],
+                    hook_name="user_query_context_enhancer_delegation"
                 )
             except Exception as e:
                 self.base.debug_log(f"Failed to log delegation event: {e}")

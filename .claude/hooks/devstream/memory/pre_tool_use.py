@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # Add devstream hooks dir
 
 from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
-from mcp_client import get_mcp_client
+from unified_client import get_unified_client
 from rate_limiter import memory_rate_limiter, has_memory_capacity
 
 # Module-level cache for memory search results
@@ -68,7 +68,7 @@ class PreToolUseHook:
 
     def __init__(self):
         self.base = DevStreamHookBase("pre_tool_use")
-        self.mcp_client = get_mcp_client()
+        self.unified_client = get_unified_client()
 
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher: Optional[PatternMatcher] = None
@@ -454,11 +454,13 @@ class PreToolUseHook:
 
             self.base.debug_log(f"Memory cache MISS, searching: {query[:50]}...")
 
-            # Search memory via MCP with rate limiting
+            # Search memory via unified client with rate limiting
             async with memory_rate_limiter:
-                result = await self.mcp_client.search_memory(
+                result = await self.unified_client.search_memory(
                     query=query,
-                    limit=limit
+                    content_type=None,
+                    limit=limit,
+                    hook_name="pre_tool_use"
                 )
 
             if not result or not result.get("results"):
@@ -603,11 +605,12 @@ class PreToolUseHook:
                 complexity.lower()
             ]
 
-            # Store in memory via MCP
-            await self.mcp_client.store_memory(
+            # Store in memory via unified client
+            await self.unified_client.store_memory(
                 content=content,
                 content_type="decision",
-                keywords=keywords
+                keywords=keywords,
+                hook_name="pre_tool_use_delegation"
             )
 
             self.base.debug_log(f"Delegation decision logged to memory: @{agent}")

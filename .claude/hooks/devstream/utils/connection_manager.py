@@ -194,16 +194,27 @@ class ConnectionManager:
 
         Returns:
             sqlite3.Connection for current thread
+
+        Raises:
+            sqlite3.Error: If connection pool limit exceeded
         """
         thread_id = threading.get_ident()
 
-        # Check if thread already has a connection
-        if not hasattr(self._local, 'connection') or self._local.connection is None:
-            # Create new connection for this thread
-            self._local.connection = self._create_connection()
+        with self._pool_lock:
+            # Check if thread already has a connection
+            if not hasattr(self._local, 'connection') or self._local.connection is None:
+                # Enforce connection pool limit
+                if len(self._active_connections) >= self.MAX_CONNECTIONS_PER_PROCESS:
+                    self._stats["pool_limit_hits"] += 1
+                    raise sqlite3.Error(
+                        f"Connection pool limit reached: {len(self._active_connections)}/"
+                        f"{self.MAX_CONNECTIONS_PER_PROCESS}"
+                    )
 
-            # Track active connection with metadata
-            with self._pool_lock:
+                # Create new connection for this thread
+                self._local.connection = self._create_connection()
+
+                # Track active connection with metadata
                 current_time = time.time()
                 self._active_connections[thread_id] = (
                     self._local.connection,
@@ -212,11 +223,10 @@ class ConnectionManager:
                 )
                 self._stats["total_connections_created"] += 1
 
-            self.logger.debug(f"Thread {thread_id} got new connection")
+                self.logger.debug(f"Thread {thread_id} got new connection")
 
-        else:
-            # Update last_used timestamp for existing connection
-            with self._pool_lock:
+            else:
+                # Update last_used timestamp for existing connection
                 if thread_id in self._active_connections:
                     conn, created_at, _ = self._active_connections[thread_id]
                     self._active_connections[thread_id] = (
@@ -225,8 +235,8 @@ class ConnectionManager:
                         time.time()  # Update last_used
                     )
 
-        # Health check and recycling
-        self._maybe_recycle_connection()
+            # Health check and recycling (now atomic with metadata update)
+            self._maybe_recycle_connection_atomic()
 
         return self._local.connection
 
@@ -294,9 +304,9 @@ class ConnectionManager:
             self.logger.warning(f"Health check failed: {e}")
             return False
 
-    def _maybe_recycle_connection(self) -> None:
+    def _maybe_recycle_connection_atomic(self) -> None:
         """
-        Check if current thread's connection needs recycling.
+        Check if current thread's connection needs recycling (called within lock).
 
         Recycles connection if:
         - Connection age > CONNECTION_MAX_AGE_SECONDS
@@ -307,34 +317,57 @@ class ConnectionManager:
         if not hasattr(self._local, 'connection') or self._local.connection is None:
             return
 
-        with self._pool_lock:
-            if thread_id not in self._active_connections:
-                return
+        if thread_id not in self._active_connections:
+            return
 
-            conn, created_at, last_used = self._active_connections[thread_id]
-            current_time = time.time()
-            age = current_time - created_at
+        conn, created_at, last_used = self._active_connections[thread_id]
+        current_time = time.time()
+        age = current_time - created_at
 
-            # Check if connection needs recycling
-            should_recycle = False
-            recycle_reason = ""
+        # Check if connection needs recycling
+        should_recycle = False
+        recycle_reason = ""
 
-            if age > self.CONNECTION_MAX_AGE_SECONDS:
+        if age > self.CONNECTION_MAX_AGE_SECONDS:
+            should_recycle = True
+            recycle_reason = f"age {age:.0f}s > {self.CONNECTION_MAX_AGE_SECONDS}s"
+
+        # Periodic health check (every HEALTH_CHECK_INTERVAL)
+        if (current_time - last_used) > self.HEALTH_CHECK_INTERVAL:
+            self._stats["total_health_checks"] += 1
+            if not self._health_check_connection(conn):
                 should_recycle = True
-                recycle_reason = f"age {age:.0f}s > {self.CONNECTION_MAX_AGE_SECONDS}s"
-
-            # Periodic health check (every HEALTH_CHECK_INTERVAL)
-            if (current_time - last_used) > self.HEALTH_CHECK_INTERVAL:
-                self._stats["total_health_checks"] += 1
-                if not self._health_check_connection(conn):
-                    should_recycle = True
-                    recycle_reason = "health check failed"
-                    self._stats["total_health_check_failures"] += 1
+                recycle_reason = "health check failed"
+                self._stats["total_health_check_failures"] += 1
 
         if should_recycle:
             self.logger.info(f"Recycling connection for thread {thread_id}: {recycle_reason}")
-            self.close_thread_connection()
+            # Close connection without acquiring lock (we're already inside it)
+            self._close_thread_connection_no_lock(thread_id)
             self._stats["total_connections_recycled"] += 1
+
+    def _close_thread_connection_no_lock(self, thread_id: int) -> None:
+        """
+        Close connection for specific thread without acquiring lock.
+        Used internally when already holding the lock.
+        """
+        if thread_id in self._active_connections:
+            conn, _, _ = self._active_connections[thread_id]
+            try:
+                conn.close()
+                self.logger.debug(f"Closed connection for thread {thread_id}")
+            except Exception as e:
+                self.logger.warning(f"Error closing connection: {e}")
+            finally:
+                del self._active_connections[thread_id]
+
+    def _maybe_recycle_connection(self) -> None:
+        """
+        Check if current thread's connection needs recycling (legacy method).
+
+        This method is deprecated but kept for compatibility.
+        """
+        self._maybe_recycle_connection_atomic()
 
     def close_thread_connection(self) -> None:
         """
