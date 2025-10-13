@@ -1,29 +1,33 @@
 # GitHub Branch Protection Rules for DevStream
 # Repository: devstream
-# Single developer project with basic protections
+# Single developer project - MINIMAL PROTECTIONS (Opzione B)
+#
+# Configurazione:
+# ✅ Force push disabilitati (sicurezza base)
+# ✅ Cancellazioni disabilitate (sicurezza base)
+# ❌ NO PR obbligatori (workflow semplice)
+# ❌ NO enforce admins (massima flessibilità)
+#
+# Workflow: git add → git commit → git push (diretto a main)
 
 branches:
   - name: main
     protection:
-      # Prevenire modifiche distruttive
-      allow_force_pushes: false
-      allow_deletions: false
+      # Protezioni minime essenziali
+      allow_force_pushes: false      # Protegge da git push --force accidentale
+      allow_deletions: false          # Protegge da eliminazione accidentale del branch
 
-      # Pull request requirements (soft per sviluppatore singolo)
-      required_pull_request_reviews:
-        required_approving_review_count: 1
-        dismiss_stale_reviews: false
-        require_code_owner_reviews: false
-        require_last_push_approval: false
-        dismissal_restrictions: null
+      # NO PR obbligatori (rimossi per workflow semplice)
+      required_pull_request_reviews: null
 
-      # Status checks (disabilitati - non hai CI/CD ancora)
+      # NO status checks (non necessari per solo developer)
       required_status_checks: null
 
-      # Applica regole anche all'admin (importante!)
-      enforce_admins: true
+      # NO enforce admins (admin può bypassare se necessario)
+      enforce_admins: false
 
-      # Altre opzioni
+      # Altre opzioni (flessibilità massima)
       required_conversation_resolution: false
       lock_branch: false
       allow_fork_syncing: true
+      block_creations: false

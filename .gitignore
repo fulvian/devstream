@@ -137,6 +137,20 @@ Thumbs.db
 scratch/
 testing/
 
+# Test files in root (temporary development)
+test_*.py
+test_*.js
+test_*.ts
+test_*.md
+test_*.json
+test_*.txt
+
+# Embedding test files
+embedding_*.json
+
+# Strange version files (likely pip install artifacts)
+=*.*.*
+
 # Obsolete directories (to be removed)
 deployment/
 sqlite:/
