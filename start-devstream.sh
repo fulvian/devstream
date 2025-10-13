@@ -440,8 +440,40 @@ check_prerequisites() {
   print_status "✅ All critical prerequisites met"
 }
 
+# Function to check Direct DB Architecture (NEW)
+check_direct_db_architecture() {
+  print_status "Checking Direct DB Architecture..."
+
+  # Check if feature flag is enabled
+  local direct_db_enabled=false
+  if [ -f "$PROJECT_ROOT/.env.devstream" ]; then
+    if grep -q "DEVSTREAM_FEATURE_DIRECT_DB_ENABLED=true" "$PROJECT_ROOT/.env.devstream"; then
+      direct_db_enabled=true
+    fi
+  fi
+
+  if [ "$direct_db_enabled" = true ]; then
+    print_feature "✅ Direct DB Architecture: ENABLED"
+    print_info "   Using SQLite direct connections via Python hooks"
+    print_info "   MCP server is NOT required for core functionality"
+    return 0
+  else
+    print_feature "⚠️  Direct DB Architecture: DISABLED (legacy mode)"
+    print_info "   MCP server will be started for compatibility"
+    return 1
+  fi
+}
+
 # Function to start MCP server
 start_mcp_server() {
+  # Check if Direct DB is enabled
+  if check_direct_db_architecture; then
+    print_status "✅ Direct DB Architecture active - MCP server not needed"
+    return 0
+  fi
+
+  print_warning "⚠️  Starting MCP Server in legacy mode (Direct DB disabled)"
+  print_info "   Consider enabling Direct DB for better performance"
   print_status "Starting DevStream MCP Server..."
 
   cd "$MCP_SERVER_DIR"
