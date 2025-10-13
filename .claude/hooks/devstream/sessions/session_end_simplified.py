@@ -31,7 +31,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 # Add project paths
-project_root = Path(__file__).parent.parent.parent.parent
+project_root = Path(__file__).parent.parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / ".claude"))
 
