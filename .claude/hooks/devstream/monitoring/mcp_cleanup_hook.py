@@ -22,6 +22,10 @@ import structlog
 # Setup structured logging
 logger = structlog.get_logger("mcp_cleanup_hook")
 
+# Wrong path detection constants
+CORRECT_DB_PATH = "/Users/fulvioventura/devstream/data/devstream.db"
+WRONG_DB_PATH_PATTERN = "mcp-devstream-server/data/devstream.db"
+
 
 class MCPCleanupHook:
     """Cleanup hook to prevent zombie MCP processes."""
@@ -31,7 +35,9 @@ class MCPCleanupHook:
         self.mcp_server_path = self.project_root / "mcp-devstream-server" / "dist" / "index.js"
         self.max_instances = 2  # Allow max 2 instances
         self.log_file = self.project_root / ".claude" / "logs" / "devstream" / "mcp_cleanup_hook.jsonl"
+        self.wrong_path_log = self.project_root / ".claude" / "logs" / "devstream" / "wrong-path-detections.log"
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self.wrong_path_log.parent.mkdir(parents=True, exist_ok=True)
 
     async def get_mcp_process_count(self) -> int:
         """
@@ -139,6 +145,76 @@ class MCPCleanupHook:
             logger.error("Cleanup failed", error=str(e))
             return {"killed_count": 0, "remaining_count": 0, "status": "error", "error": str(e)}
 
+    def detect_wrong_path_usage(self, cmd_line: str) -> bool:
+        """
+        Detect if MCP process is using wrong database path.
+
+        Args:
+            cmd_line: Full command line of the process
+
+        Returns:
+            True if wrong path detected, False otherwise
+        """
+        return WRONG_DB_PATH_PATTERN in cmd_line
+
+    def log_wrong_path_detection(self, pid: int, cmd_line: str) -> None:
+        """
+        Log detection of wrong path usage for monitoring.
+
+        Args:
+            pid: Process ID
+            cmd_line: Full command line of the process
+        """
+        logger.warning(
+            "Wrong database path detected in MCP process",
+            pid=pid,
+            command_line=cmd_line,
+            wrong_path=WRONG_DB_PATH_PATTERN,
+            correct_path=CORRECT_DB_PATH,
+            detection_time=datetime.now().isoformat()
+        )
+
+        # Append to dedicated wrong-path log
+        with open(self.wrong_path_log, "a") as f:
+            f.write(f"{datetime.now().isoformat()} | PID {pid} | WRONG PATH | {cmd_line}\n")
+
+    async def get_mcp_processes_with_details(self) -> List[Dict[str, Any]]:
+        """
+        Get detailed information about running MCP processes.
+
+        Returns:
+            List of dictionaries with process details
+        """
+        try:
+            # Get all MCP processes with full command lines
+            result = subprocess.run(
+                ["pgrep", "-af", str(self.mcp_server_path)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if result.returncode != 0:
+                return []
+
+            processes = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    parts = line.split(None, 1)
+                    if len(parts) == 2:
+                        pid, cmd = parts
+                        processes.append({
+                            "pid": int(pid),
+                            "command_line": cmd,
+                            "wrong_path": self.detect_wrong_path_usage(cmd)
+                        })
+
+            return processes
+
+        except Exception as e:
+            logger.error("Failed to get MCP process details", error=str(e))
+            return []
+
     async def run_cleanup(self) -> Dict[str, Any]:
         """
         Run cleanup check and log results.
@@ -147,35 +223,83 @@ class MCPCleanupHook:
             Cleanup result dictionary
         """
         start_time = datetime.utcnow()
-        initial_count = await self.get_mcp_process_count()
+
+        # Get detailed process information
+        processes = await self.get_mcp_processes_with_details()
+        initial_count = len(processes)
+
+        # Check for wrong path usage
+        wrong_path_processes = [p for p in processes if p["wrong_path"]]
+        wrong_path_count = len(wrong_path_processes)
 
         result = {
             "timestamp": start_time.isoformat() + "Z",
             "initial_process_count": initial_count,
-            "cleanup_required": initial_count > self.max_instances
+            "wrong_path_count": wrong_path_count,
+            "cleanup_required": initial_count > self.max_instances or wrong_path_count > 0
         }
 
-        if initial_count > self.max_instances:
+        # Log wrong path detections
+        for proc in wrong_path_processes:
+            self.log_wrong_path_detection(proc["pid"], proc["command_line"])
+
+        # Kill wrong path processes immediately (high priority)
+        wrong_path_killed = 0
+        for proc in wrong_path_processes:
+            try:
+                subprocess.run(
+                    ["kill", "-9", str(proc["pid"])],
+                    check=True,
+                    timeout=2
+                )
+                logger.critical(
+                    "Killed MCP process using wrong database path",
+                    pid=proc["pid"],
+                    command_line=proc["command_line"]
+                )
+                wrong_path_killed += 1
+            except Exception as e:
+                logger.error(
+                    "Failed to kill wrong-path process",
+                    pid=proc["pid"],
+                    error=str(e)
+                )
+
+        # Update process count after wrong-path kills
+        if wrong_path_killed > 0:
+            await asyncio.sleep(1)  # Give processes time to terminate
+            processes = await self.get_mcp_processes_with_details()
+            current_count = len(processes)
+        else:
+            current_count = initial_count
+
+        # Continue with normal cleanup if still too many processes
+        if current_count > self.max_instances:
             cleanup_result = await self.kill_excess_processes()
             result.update(cleanup_result)
-
-            # Log to file
-            import json
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(result) + "\n")
-
-            logger.info(
-                "MCP cleanup executed",
-                initial_count=initial_count,
-                killed=cleanup_result["killed_count"],
-                remaining=cleanup_result["remaining_count"]
-            )
         else:
             result.update({
-                "killed_count": 0,
-                "remaining_count": initial_count,
-                "status": "ok"
+                "killed_count": wrong_path_killed,
+                "remaining_count": current_count,
+                "status": "wrong_paths_cleaned" if wrong_path_killed > 0 else "ok"
             })
+
+        # Add wrong path cleanup info to result
+        result["wrong_path_killed"] = wrong_path_killed
+
+        # Log to file
+        import json
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(result) + "\n")
+
+        logger.info(
+            "MCP cleanup executed",
+            initial_count=initial_count,
+            wrong_path_count=wrong_path_count,
+            wrong_path_killed=wrong_path_killed,
+            killed=result.get("killed_count", 0),
+            remaining=result.get("remaining_count", 0)
+        )
 
         return result
 

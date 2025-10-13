@@ -467,6 +467,47 @@ start_mcp_server() {
     fi
   fi
 
+  # ============================================================================
+  # Pre-Launch MCP Configuration Validation
+  # ============================================================================
+
+  print_status "Validating MCP configuration before launch..."
+
+  # Extract DEVSTREAM_DB_PATH from .mcp.json
+  if [ -f "$PROJECT_ROOT/.mcp.json" ]; then
+    MCP_DB_PATH=$(grep "DEVSTREAM_DB_PATH" "$PROJECT_ROOT/.mcp.json" | sed 's/.*": "//;s/".*//')
+
+    # Validate it's NOT the wrong path
+    if [[ "$MCP_DB_PATH" == *"mcp-devstream-server/data/devstream.db"* ]]; then
+      print_error "❌ CRITICAL: .mcp.json contains WRONG database path!"
+      print_error "   Found: $MCP_DB_PATH"
+      print_error "   Expected: /Users/fulvioventura/devstream/data/devstream.db"
+      print_error ""
+      print_error "This indicates Claude Code configuration cache issue."
+      print_error "SOLUTION: Restart Claude Code application completely (Cmd+Q then relaunch)."
+      print_error ""
+      exit 1
+    fi
+
+    # Validate correct path exists
+    if [ ! -f "$MCP_DB_PATH" ]; then
+      print_error "❌ ERROR: Database file not found at: $MCP_DB_PATH"
+      exit 1
+    fi
+
+    # Validate database size (correct DB should be ~500MB)
+    DB_SIZE=$(stat -f%z "$MCP_DB_PATH" 2>/dev/null || stat -c%s "$MCP_DB_PATH" 2>/dev/null)
+    if [ "$DB_SIZE" -lt 50000000 ]; then  # Less than 50MB is suspicious
+      print_warning "⚠️  WARNING: Database size is only $(numfmt --to=iec $DB_SIZE 2>/dev/null || echo $DB_SIZE bytes)"
+      print_warning "   Expected ~500MB for production database"
+      print_warning "   Verify you're using the correct database path"
+    fi
+
+    print_status "✅ MCP configuration validated - Path: $MCP_DB_PATH ($(numfmt --to=iec $DB_SIZE 2>/dev/null || echo $DB_SIZE bytes))"
+  else
+    print_warning "⚠️  .mcp.json file not found - skipping configuration validation"
+  fi
+
   # Start production server in background with memory optimization flags
   # Context7 best practice: Increase heap size and expose GC for long-running Node.js processes
   nohup node --max-old-space-size=8192 --expose-gc start-production.js > "$PROJECT_ROOT/devstream-server.log" 2>&1 &
