@@ -1170,6 +1170,16 @@ def hybrid_search(
 | PreCompact | `.claude/hooks/devstream/sessions/pre_compact.py` | Before /compact | Save summary pre-compaction | ⚠️ **DISABLED** (2025-10-12) |
 | SessionStart | `.claude/hooks/devstream/sessions/session_start.py` | Session startup | Display previous summary | ⚠️ **DISABLED** (2025-10-12) |
 
+### Direct Database Access Points
+
+| Component | Access Method | Tools | Purpose | Status |
+|-----------|---------------|-------|---------|--------|
+| Task Management | Direct MCP | `mcp__devstream__devstream_*` | Task lifecycle | ✅ Active |
+| Memory System | Direct MCP | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
+| Implementation Plans | Direct MCP | `mcp__devstream__devstream_*` | Plan management | ✅ Active |
+| Vector Search | Direct DB + Ollama | N/A | Memory retrieval | ✅ Active |
+| Session Tracking | Direct DB | N/A | Cross-session | ✅ Active |
+
 ### Cross-Session Summary System
 
 <notice type="system_disabled">
@@ -1178,36 +1188,45 @@ def hybrid_search(
 **Re-enable**: Set `DEVSTREAM_HOOK_SESSIONSTART=true`, `DEVSTREAM_HOOK_SESSION_END=true`, `DEVSTREAM_HOOK_PRE_COMPACT=true`
 </notice>
 
-### MCP Server Integration
+### Direct Database Integration (v2.2.0+)
 
-<integration type="mcp_server">
-**Location**: `mcp-devstream-server/`  
-**Port**: 3000
+<integration type="direct_db">
+**Architecture**: Direct SQLite database connection (MCP server eliminated)
 
-**Tools**:
-- Task Management: `devstream_create_task`, `devstream_update_task`, `devstream_list_tasks`
-- Memory System: `devstream_store_memory`, `devstream_search_memory`
-- **v2.2.0 NEW**: `devstream_create_implementation_plan`, `devstream_get_implementation_plan`, `devstream_update_implementation_plan`, `devstream_list_implementation_plans`
+**Database**: `data/devstream.db` (sqlite-vec enabled)
 
-**Config** (.claude/mcp_servers.json):
-```json
-{
-  "devstream": {
-    "command": "node",
-    "args": ["mcp-devstream-server/dist/index.js"],
-    "env": {"DEVSTREAM_DB_PATH": "data/devstream.db"}
-  }
-}
-```
+**Direct MCP Tools** (no server required):
+- Task Management: `mcp__devstream__devstream_create_task`, `mcp__devstream__devstream_update_task`, `mcp__devstream__devstream_list_tasks`
+- Memory System: `mcp__devstream__devstream_store_memory`, `mcp__devstream__devstream_search_memory`
+- Implementation Plans: `mcp__devstream__devstream_create_implementation_plan`, `mcp__devstream__devstream_get_implementation_plan`, `mcp__devstream__devstream_update_implementation_plan`, `mcp__devstream__devstream_list_implementation_plans`
+- Memory Operations: `mcp__devstream__devstream_trigger_checkpoint`
+
+**Key Benefits**:
+- ✅ Eliminated MCP server dependency
+- ✅ Direct database access (faster, more reliable)
+- ✅ Reduced system complexity
+- ✅ Lower memory footprint
+- ✅ Better error handling
+
+**Database Schema**:
+- `tasks` - Task lifecycle management
+- `memory` - Semantic memory with vector embeddings
+- `implementation_plans` - Model-specific implementation plans
+- `sessions` - Cross-session tracking
 </integration>
 
-### Implementation Plans System (v2.2.0)
+### Implementation Plans System (v2.2.0+)
 
 <integration type="implementation_plans">
-**Database Schema**: `implementation_plans` table with model-specific storage
+**Architecture**: Direct database integration with dual storage pattern
+
+**Database Schema**: `implementation_plans` table
+- Direct SQLite access via `mcp__devstream__devstream_*` tools
+- Full metadata, task linkage, model type tracking
+- No MCP server dependency
 
 **Dual Storage Pattern**:
-- **Database**: SQLite with full metadata, task linkage, model type tracking
+- **Database**: Direct SQLite storage with full metadata
 - **Filesystem**: `docs/development/plan/piano_[task-slug].md` for human readability
 
 **Model-Specific Templates**:
@@ -1215,16 +1234,27 @@ def hybrid_search(
 - **Sonnet 4.5**: `templates/implementation-plan-sonnet45.md` (architectural)
 - **Handoff**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
 
-**Strategic Choice Gate**: Interactive model selection at Step 5 with auto plan generation  
+**Direct DB Tools**:
+- `mcp__devstream__devstream_create_implementation_plan` - Create new plan
+- `mcp__devstream__devstream_get_implementation_plan` - Retrieve plan by task ID
+- `mcp__devstream__devstream_update_implementation_plan` - Update existing plan
+- `mcp__devstream__devstream_list_implementation_plans` - List all plans
+
+**Strategic Choice Gate**: Interactive model selection at Step 5 with auto plan generation
 **Hook Integration**: `implementation_plan_generator.py` automates at Step 4
 </integration>
 
 ### Environment Configuration (.env.devstream)
 
 ```bash
-# Memory System (MANDATORY)
+# Core System (MANDATORY)
 DEVSTREAM_MEMORY_ENABLED=true
 DEVSTREAM_MEMORY_FEEDBACK_LEVEL=minimal
+
+# Database (MANDATORY - Direct DB Architecture)
+DEVSTREAM_DB_PATH=data/devstream.db
+DEVSTREAM_DIRECT_DB_ENABLED=true
+DEVSTREAM_MCP_SERVER_ENABLED=false
 
 # Context7 (MANDATORY)
 DEVSTREAM_CONTEXT7_ENABLED=true
@@ -1236,37 +1266,58 @@ DEVSTREAM_CONTEXT_INJECTION_ENABLED=true
 DEVSTREAM_CONTEXT_MAX_TOKENS=2000
 DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5
 
-# Tier-Based Delegation (v2.2.0 - MANDATORY)
+# Tier-Based Delegation (v2.2.0+ - MANDATORY)
 DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true
 DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95
 DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70
 DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true
 
-# Database (MANDATORY)
-DEVSTREAM_DB_PATH=data/devstream.db
+# Implementation Plans (v2.2.0+ - MANDATORY)
+DEVSTREAM_IMPLEMENTATION_PLANS_ENABLED=true
+DEVSTREAM_DUAL_STORAGE_ENABLED=true
+
+# Session Management (v2.2.0+)
+DEVSTREAM_HOOK_SESSIONSTART=false    # Disabled to prevent auto-compacting interference
+DEVSTREAM_HOOK_SESSION_END=false     # Disabled to prevent auto-compacting interference
+DEVSTREAM_HOOK_PRE_COMPACT=false     # Disabled to prevent auto-compacting interference
 
 # Logging (RECOMMENDED)
 DEVSTREAM_LOG_LEVEL=INFO
 DEVSTREAM_LOG_PATH=~/.claude/logs/devstream/
+
+# Vector Search (MANDATORY)
+DEVSTREAM_VECTOR_SEARCH_ENABLED=true
+DEVSTREAM_VECTOR_EMBEDDINGS_MODEL=gemma3  # Ollama model
+DEVSTREAM_VECTOR_DB_ENABLED=true
 ```
 </system_integration>
 
 ---
 
 <document_metadata>
-**Version**: 2.2.0 (Protocol v2.2.0 - Strategic Choice Gate + Implementation Plans)  
-**Last Updated**: 2025-10-09  
-**Status**: ✅ Production Ready - Protocol v2.2.0 Complete
+**Version**: 2.2.0+ (Protocol v2.2.0 - Direct DB Architecture)
+**Last Updated**: 2025-10-14
+**Status**: ✅ Production Ready - Direct DB Architecture Complete
 
-**Key Changes v2.2.0**:
+**Key Changes v2.2.0+**:
+- ✅ **Direct Database Architecture** - MCP server eliminated, direct SQLite access
 - ✅ Task creation moved to Step 1 (prevents data loss)
 - ✅ Implementation plans with model-specific templates
 - ✅ Strategic Choice Gate at Step 5 (cost optimization)
 - ✅ GLM-4.6 handoff workflow for session switching
 - ✅ Dual storage pattern (DB + filesystem) for plans
+- ✅ Enhanced vector search with sqlite-vec integration
+- ✅ Simplified configuration with direct DB tools
 
-**Methodology**: Research-Driven Development with Context7  
-**Enforcement**: Automatic via Hook System + MCP Integration + Auto-Delegation + Strategic Choice Gate
+**Architecture Migration**:
+- ❌ ~~MCP devstream server~~ (eliminated)
+- ✅ Direct SQLite database (`data/devstream.db`)
+- ✅ Direct MCP tools (`mcp__devstream__devstream_*`)
+- ✅ Enhanced performance and reliability
+- ✅ Reduced system complexity
+
+**Methodology**: Research-Driven Development with Context7
+**Enforcement**: Automatic via Hook System + Direct DB Integration + Auto-Delegation + Strategic Choice Gate
 </document_metadata>
 
 ---
