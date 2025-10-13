@@ -70,6 +70,7 @@ export class QueryAnalyzer {
   private idfCache: Map<string, number> = new Map();
   private corpusSize: number = 0;
   private initialized: boolean = false;
+  private initializing: boolean = false;  // NEW: Track initialization in progress
 
   constructor(private database: DevStreamDatabase) {}
 
@@ -79,6 +80,24 @@ export class QueryAnalyzer {
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+
+    // NEW: Thread-safe initialization - prevent race conditions
+    if (this.initializing) {
+      console.warn('⚠️ QueryAnalyzer: Initialization already in progress, waiting...');
+      // Wait for initialization to complete (poll with timeout)
+      let attempts = 0;
+      const maxAttempts = 50; // 5 seconds max wait
+      while (this.initializing && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      if (this.initialized) {
+        return;
+      }
+      console.warn('⚠️ QueryAnalyzer: Initialization timeout, retrying...');
+    }
+
+    this.initializing = true;
 
     try {
       // Get total document count
@@ -108,7 +127,18 @@ export class QueryAnalyzer {
 
     } catch (error) {
       console.error('❌ QueryAnalyzer initialization failed:', error);
-      this.initialized = true; // Mark as initialized anyway to avoid repeated attempts
+      // NEW: Enhanced error handling for concurrent access
+      if (error instanceof Error && error.message.includes('database is locked')) {
+        console.warn('⚠️ QueryAnalyzer: Database lock detected, using fallback mode');
+        // Use minimal initialization when database is locked
+        this.corpusSize = 1;
+        this.initialized = true;
+      } else {
+        this.initialized = true; // Mark as initialized anyway to avoid repeated attempts
+      }
+    } finally {
+      // NEW: Always clear initializing flag
+      this.initializing = false;
     }
   }
 
@@ -120,6 +150,12 @@ export class QueryAnalyzer {
     const termFrequencies = new Map<string, number>();
 
     try {
+      // NEW: Add retry logic for database lock scenarios
+      const maxRetries = 3;
+      let retryCount = 0;
+
+      while (retryCount <= maxRetries) {
+        try {
       // Sample recent documents for IDF calculation (performance optimization)
       const sampleSize = Math.min(1000, this.corpusSize);
       const documents = await this.database.query<{ content: string }>(
@@ -143,8 +179,23 @@ export class QueryAnalyzer {
         }
       }
 
+        // NEW: Success - break retry loop
+        break;
+
+      } catch (error) {
+        retryCount++;
+        if (retryCount > maxRetries || !(error instanceof Error && error.message.includes('database is locked'))) {
+          throw error;
+        }
+        console.warn(`⚠️ QueryAnalyzer: Database lock (attempt ${retryCount}/${maxRetries}), retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 200 * retryCount)); // Exponential backoff
+      }
+    }
+
     } catch (error) {
       console.error('❌ Term frequency calculation failed:', error);
+      // NEW: Return empty map instead of failing completely
+      return new Map<string, number>();
     }
 
     return termFrequencies;
