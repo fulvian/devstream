@@ -31,32 +31,65 @@ class WorkSession:
     Work session data model.
 
     Represents a complete work session with all tracking data.
+    Simplified to match existing 'sessions' table schema.
     """
     id: str
-    plan_id: Optional[str]
-    user_id: Optional[str]
-    session_name: Optional[str]
-    context_window_size: Optional[int]
     tokens_used: int
     status: str
-    context_summary: Optional[str]
-    active_tasks: List[str]
-    completed_tasks: List[str]
     started_at: datetime
-    last_activity_at: datetime
     ended_at: Optional[datetime]
+    files_modified: int = 0
+    tasks_completed: int = 0
+    metadata: Optional[str] = None
+
+    # Additional fields that can be stored in metadata JSON
+    @property
+    def plan_id(self) -> Optional[str]:
+        """Extract plan_id from metadata if available."""
+        if self.metadata:
+            import json
+            try:
+                data = json.loads(self.metadata)
+                return data.get('plan_id')
+            except:
+                return None
+        return None
+
+    @property
+    def session_name(self) -> Optional[str]:
+        """Extract session_name from metadata if available."""
+        if self.metadata:
+            import json
+            try:
+                data = json.loads(self.metadata)
+                return data.get('session_name')
+            except:
+                return None
+        return None
+
+    @property
+    def context_summary(self) -> Optional[str]:
+        """Extract context_summary from metadata if available."""
+        if self.metadata:
+            import json
+            try:
+                data = json.loads(self.metadata)
+                return data.get('context_summary')
+            except:
+                return None
+        return None
 
 
 class WorkSessionManager:
     """
     Work Session Manager for DevStream session lifecycle management.
 
-    Manages work_sessions table CRUD operations using Context7-validated
+    Manages sessions table CRUD operations using Context7-validated
     aiosqlite async patterns and structlog context binding.
 
     Key Features:
     - Async connection management with context managers
-    - Session state tracking in work_sessions table
+    - Session state tracking in sessions table
     - Automatic context binding for log inheritance
     - Graceful error handling with structured logging
 
@@ -122,10 +155,9 @@ class WorkSessionManager:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """
-                SELECT id, plan_id, user_id, session_name, context_window_size,
-                       tokens_used, status, context_summary, active_tasks,
-                       completed_tasks, started_at, last_activity_at, ended_at
-                FROM work_sessions
+                SELECT id, tokens_used, status, started_at, ended_at,
+                       files_modified, tasks_completed, metadata
+                FROM sessions
                 WHERE id = ?
                 """,
                 (session_id,)
@@ -135,25 +167,15 @@ class WorkSessionManager:
                 if row is None:
                     return None
 
-                # Parse JSON fields
-                import json
-                active_tasks = json.loads(row['active_tasks']) if row['active_tasks'] else []
-                completed_tasks = json.loads(row['completed_tasks']) if row['completed_tasks'] else []
-
                 return WorkSession(
                     id=row['id'],
-                    plan_id=row['plan_id'],
-                    user_id=row['user_id'],
-                    session_name=row['session_name'],
-                    context_window_size=row['context_window_size'],
                     tokens_used=row['tokens_used'],
                     status=row['status'],
-                    context_summary=row['context_summary'],
-                    active_tasks=active_tasks,
-                    completed_tasks=completed_tasks,
                     started_at=datetime.fromisoformat(row['started_at']),
-                    last_activity_at=datetime.fromisoformat(row['last_activity_at']),
-                    ended_at=datetime.fromisoformat(row['ended_at']) if row['ended_at'] else None
+                    ended_at=datetime.fromisoformat(row['ended_at']) if row['ended_at'] else None,
+                    files_modified=row['files_modified'],
+                    tasks_completed=row['tasks_completed'],
+                    metadata=row['metadata']
                 )
 
     # Session lifecycle methods will be implemented in next tasks
@@ -188,34 +210,35 @@ class WorkSessionManager:
         try:
             # Prepare data
             now = datetime.now().isoformat()
-            active_tasks_json = json.dumps([])
-            completed_tasks_json = json.dumps([])
+
+            # Store additional fields in metadata JSON
+            metadata = {}
+            if plan_id:
+                metadata['plan_id'] = plan_id
+            if session_name:
+                metadata['session_name'] = session_name
+            if context_window_size:
+                metadata['context_window_size'] = context_window_size
+
+            metadata_json = json.dumps(metadata) if metadata else None
 
             # Context7 pattern: async with for connection management + explicit commit
-            # NOTE: Don't use "await" here - __aenter__ handles await internally
             async with self._get_connection() as db:
                 await db.execute(
                     """
-                    INSERT INTO work_sessions (
-                        id, plan_id, user_id, session_name, context_window_size,
-                        tokens_used, status, context_summary, active_tasks,
-                        completed_tasks, started_at, last_activity_at, ended_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO sessions (
+                        id, tokens_used, status, started_at, files_modified,
+                        tasks_completed, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
-                        plan_id,
-                        None,  # user_id (can be set later)
-                        session_name,
-                        context_window_size,
                         0,  # tokens_used starts at 0
                         'active',
-                        None,  # context_summary (populated on end)
-                        active_tasks_json,
-                        completed_tasks_json,
                         now,  # started_at
-                        now,  # last_activity_at
-                        None  # ended_at (NULL until session ends)
+                        0,  # files_modified
+                        0,  # tasks_completed
+                        metadata_json
                     )
                 )
                 await db.commit()  # Explicit commit (Context7 pattern)
@@ -225,18 +248,13 @@ class WorkSessionManager:
             # Return created session
             return WorkSession(
                 id=session_id,
-                plan_id=plan_id,
-                user_id=None,
-                session_name=session_name,
-                context_window_size=context_window_size,
                 tokens_used=0,
                 status='active',
-                context_summary=None,
-                active_tasks=[],
-                completed_tasks=[],
                 started_at=datetime.fromisoformat(now),
-                last_activity_at=datetime.fromisoformat(now),
-                ended_at=None
+                ended_at=None,
+                files_modified=0,
+                tasks_completed=0,
+                metadata=metadata_json
             )
 
         except aiosqlite.IntegrityError as e:
@@ -252,7 +270,7 @@ class WorkSessionManager:
 
         Logic:
         1. Try to get existing session from database
-        2. If found: UPDATE last_activity_at to NOW()
+        2. If found: return existing session (sessions table doesn't have last_activity_at)
         3. If not found: Call create_session() to create new one
 
         Args:
@@ -268,26 +286,9 @@ class WorkSessionManager:
         existing_session = await self.get_session(session_id)
 
         if existing_session is not None:
-            # Session exists - update last_activity_at
-            now = datetime.now().isoformat()
-
-            async with self._get_connection() as db:
-                await db.execute(
-                    """
-                    UPDATE work_sessions
-                    SET last_activity_at = ?
-                    WHERE id = ?
-                    """,
-                    (now, session_id)
-                )
-                await db.commit()
-
+            # Session exists - return it
             self.logger.info(f"Resumed existing work session: {session_id}")
-
-            # Update last_activity_at in returned object
-            existing_session.last_activity_at = datetime.fromisoformat(now)
             return existing_session
-
         else:
             # Session doesn't exist - create new one
             self.logger.info(f"Session {session_id} not found, creating new session")
@@ -300,9 +301,8 @@ class WorkSessionManager:
         self,
         session_id: str,
         tokens_delta: int = 0,
-        active_tasks: Optional[List[str]] = None,
-        completed_tasks: Optional[List[str]] = None,
-        active_files: Optional[List[str]] = None
+        tasks_completed_delta: int = 0,
+        files_modified_delta: int = 0
     ) -> bool:
         """
         Update session progress metrics.
@@ -310,9 +310,8 @@ class WorkSessionManager:
         Args:
             session_id: Session to update
             tokens_delta: Token count increment (added to existing tokens_used)
-            active_tasks: Current active tasks list (replaces existing)
-            completed_tasks: Current completed tasks list (replaces existing)
-            active_files: Current active files list (replaces existing)
+            tasks_completed_delta: Tasks completed increment
+            files_modified_delta: Files modified increment
 
         Returns:
             bool: True if update successful
@@ -320,34 +319,30 @@ class WorkSessionManager:
         Raises:
             aiosqlite.Error: If database operation fails
         """
-        import json
-
-        now = datetime.now().isoformat()
-
         # Build UPDATE query dynamically based on what's provided
-        updates = ["last_activity_at = ?"]
-        params = [now]
+        updates = []
+        params = []
 
         if tokens_delta != 0:
             updates.append("tokens_used = tokens_used + ?")
             params.append(tokens_delta)
 
-        if active_tasks is not None:
-            updates.append("active_tasks = ?")
-            params.append(json.dumps(active_tasks))
+        if tasks_completed_delta != 0:
+            updates.append("tasks_completed = tasks_completed + ?")
+            params.append(tasks_completed_delta)
 
-        if completed_tasks is not None:
-            updates.append("completed_tasks = ?")
-            params.append(json.dumps(completed_tasks))
+        if files_modified_delta != 0:
+            updates.append("files_modified = files_modified + ?")
+            params.append(files_modified_delta)
 
-        if active_files is not None:
-            updates.append("active_files = ?")
-            params.append(json.dumps(active_files))
+        if not updates:
+            # Nothing to update
+            return True
 
         # Add session_id for WHERE clause
         params.append(session_id)
 
-        query = f"UPDATE work_sessions SET {', '.join(updates)} WHERE id = ?"
+        query = f"UPDATE sessions SET {', '.join(updates)} WHERE id = ?"
 
         async with self._get_connection() as db:
             cursor = await db.execute(query, params)
@@ -370,7 +365,7 @@ class WorkSessionManager:
         End work session and mark as completed.
 
         Updates status='completed', sets ended_at timestamp,
-        and optionally stores context summary.
+        and optionally stores context summary in metadata.
 
         Args:
             session_id: Session to end
@@ -384,17 +379,36 @@ class WorkSessionManager:
         """
         now = datetime.now().isoformat()
 
+        # Get existing session to preserve metadata
+        existing_session = await self.get_session(session_id)
+        if existing_session is None:
+            self.logger.warning(f"No session found to end: {session_id}")
+            return False
+
+        # Parse existing metadata and add context_summary
+        import json
+        metadata = {}
+        if existing_session.metadata:
+            try:
+                metadata = json.loads(existing_session.metadata)
+            except:
+                pass
+
+        if context_summary:
+            metadata['context_summary'] = context_summary
+
+        metadata_json = json.dumps(metadata) if metadata else None
+
         async with self._get_connection() as db:
             cursor = await db.execute(
                 """
-                UPDATE work_sessions
+                UPDATE sessions
                 SET status = ?,
                     ended_at = ?,
-                    context_summary = ?,
-                    last_activity_at = ?
+                    metadata = ?
                 WHERE id = ?
                 """,
-                ('completed', now, context_summary, now, session_id)
+                ('completed', now, metadata_json, session_id)
             )
             await db.commit()
 

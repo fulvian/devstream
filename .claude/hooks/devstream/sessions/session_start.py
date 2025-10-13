@@ -561,7 +561,7 @@ async def main():
     if results["success"]:
         print(f"✅ Session initialized: {results['session_id']}")
         if results.get("session_created"):
-            print("   📝 New session created in work_sessions table")
+            print("   📝 New session created in sessions table")
         elif results.get("session_resumed"):
             print("   🔄 Existing session resumed")
     else:
