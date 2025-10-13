@@ -410,49 +410,67 @@ class SimplifiedSessionEndHook:
             structlog.contextvars.clear_contextvars()
 
 
+async def _get_full_summary(session_id: str) -> Optional[str]:
+    """
+    Get the full session summary (not just preview).
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Full summary markdown or None if not available
+    """
+    try:
+        # Try to get the summary from memory if it was stored
+        # For now, regenerate the full summary
+        from .session_summary import SessionSummary
+
+        # Create a temporary SessionSummary to generate the full summary
+        db_path = project_root / "data" / "devstream.db"
+        session_manager = await SessionManager.get_instance(str(db_path))
+        session_summary = SessionSummary(session_manager)
+
+        return await session_summary.generate_summary(session_id)
+
+    except Exception as e:
+        logger.error(f"Failed to get full summary for {session_id}: {e}")
+        return None
+
+
 async def main():
     """Main entry point for the SessionEnd hook."""
     hook = SimplifiedSessionEndHook()
     results = await hook.run_hook()
 
-    # Output results based on cchooks patterns
+    # Output results - ALWAYS use readable format to show summary
     if results["success"]:
-        if CCHOOKS_AVAILABLE:
-            # Use cchooks output pattern if available
-            output = {
-                "decision": "allow",
-                "reason": f"Session ended: {results['session_id']}"
-            }
+        print(f"✅ Session ended: {results['session_id']}")
 
-            # Add warnings if any
-            if results.get("warnings"):
-                output["warnings"] = results["warnings"]
+        if results.get("session_ended"):
+            print("   📝 Session marked as completed")
 
-            print(json.dumps(output))
-        else:
-            # Fallback output
-            print(f"✅ Session ended: {results['session_id']}")
+        if results.get("tracking_stopped"):
+            print("   📊 Tracking stopped")
 
-            if results.get("session_ended"):
-                print("   📝 Session marked as completed")
+        if results.get("summary_generated"):
+            print("   📄 Summary generated")
 
-            if results.get("tracking_stopped"):
-                print("   📊 Tracking stopped")
+        if results.get("summary_stored"):
+            print("   💾 Summary stored in memory")
 
-            if results.get("summary_generated"):
-                print("   📄 Summary generated")
+        # Show warnings if any
+        if results.get("warnings"):
+            print("   ⚠️  Warnings:")
+            for warning in results["warnings"]:
+                print(f"      - {warning}")
 
-            if results.get("summary_stored"):
-                print("   💾 Summary stored in memory")
-
-            # Show warnings if any
-            if results.get("warnings"):
-                print("   ⚠️  Warnings:")
-                for warning in results["warnings"]:
-                    print(f"      - {warning}")
-
-            # Show summary preview if available
-            if results.get("summary_preview"):
+        # Show full summary if available
+        if results.get("summary_preview"):
+            # Get the full summary instead of just preview
+            full_summary = await _get_full_summary(results['session_id'])
+            if full_summary:
+                print(f"\n📋 SESSION SUMMARY:\n{full_summary}")
+            else:
                 print(f"\n📋 Summary Preview:\n{results['summary_preview']}")
 
         sys.exit(0)

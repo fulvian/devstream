@@ -1079,8 +1079,8 @@ main() {
       # Start MCP server
       start_mcp_server
 
-      # Start monitoring daemons (NEW - Automatic monitoring)
-      start_monitors
+      # Start monitoring daemons (DISABLED - Preventing zombie spreading)
+      # start_monitors
 
       # Show server status
       show_server_status
