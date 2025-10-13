@@ -21,14 +21,16 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { DevStreamDatabase } from './database.js';
 import { closeDatabasePool } from './core/database-pool.js';
+import { ProcessManager } from './core/process-manager.js';
+import { getSessionManager } from './core/session-manager.js';
 import { TaskTools } from './tools/tasks.js';
 import { PlanTools } from './tools/plans.js';
 import { MemoryTools } from './tools/memory.js';
 import { ImplementationPlanTools } from './tools/implementation-plans.js';
 import { initializeOllamaClient } from './ollama-client.js';
 import { AutoSaveService } from './services/auto-save.js';
-// Health server disabled for stability - HTTP transport causes conflicts with stdio
-// import { HealthServer } from './health-server.js';
+import { HealthServer } from './health-server.js';
+import fs from 'fs';
 
 /**
  * Main MCP Server class for DevStream integration
@@ -51,10 +53,10 @@ class DevStreamMcpServer {
   private memoryTools: MemoryTools;
   private implementationPlanTools: ImplementationPlanTools;
   private autoSaveService: AutoSaveService;
-  // Health server disabled for stability - HTTP transport causes conflicts with stdio
-  // private healthServer: HealthServer;
+  private healthServer: HealthServer;
   private heartbeatInterval?: NodeJS.Timeout;
   private logLevel: string = 'info';
+  private sessionManager: ReturnType<typeof getSessionManager> | null = null;
 
   constructor(dbPath: string) {
     // Initialize MCP server
@@ -99,8 +101,8 @@ class DevStreamMcpServer {
       enabled: true
     });
 
-    // Health server disabled for stability - HTTP transport causes conflicts with stdio
-    // this.healthServer = new HealthServer(this.database);
+    // Initialize health monitoring server (Phase 4.2)
+    this.healthServer = new HealthServer(this.database);
 
     this.setupHandlers();
   }
@@ -475,6 +477,16 @@ class DevStreamMcpServer {
   }
 
   /**
+   * Get current session ID for PostToolUse hook compatibility
+   */
+  async getCurrentSessionId(): Promise<string> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager not initialized');
+    }
+    return await this.sessionManager.getCurrentOrCreateSession();
+  }
+
+  /**
    * Trigger immediate checkpoint for all active tasks
    *
    * Context7 Pattern: Exposes AutoSaveService checkpoint functionality via MCP.
@@ -523,6 +535,13 @@ class DevStreamMcpServer {
     // Initialize database connection (sqlite-vec loaded automatically)
     await this.database.initialize();
 
+    // Initialize session manager (Fase 2.2)
+    this.sessionManager = getSessionManager(this.database);
+
+    // Ensure we have an active session
+    const sessionId = await this.sessionManager.getCurrentOrCreateSession();
+    console.error(`📋 MCP session ready: ${sessionId}`);
+
     // Verify vector search availability
     const vectorStatus = this.database.getVectorSearchStatus();
     if (vectorStatus) {
@@ -555,7 +574,7 @@ class DevStreamMcpServer {
     console.error(`   PID: ${process.pid}`);
     console.error(`   Transport: stdio`);
     console.error(`   Database: ${dbPath}`);
-    console.error(`   Health server: DISABLED (stdio-only for stability)`);
+    console.error(`   Health server: Starting on HTTP port (separate from MCP stdio)`);
 
     // Start heartbeat logging (every 5 minutes)
     this.heartbeatInterval = setInterval(() => {
@@ -574,8 +593,15 @@ class DevStreamMcpServer {
         console.error('⚠️ Continuing without auto-save - manual checkpoints still available');
       });
 
-    // Health server disabled for stability - HTTP transport causes conflicts with stdio
-    console.error('ℹ️ Health server: DISABLED (stdio-only operation for improved stability)');
+    // Start health monitoring server (Phase 4.2) - non-blocking to prevent startup delay
+    this.healthServer.start()
+      .then(() => {
+        console.error('✅ Health monitoring server started successfully');
+      })
+      .catch((error) => {
+        console.error('⚠️ Failed to start health monitoring server:', error instanceof Error ? error.message : 'Unknown error');
+        console.error('⚠️ Continuing without health monitoring - MCP functionality unaffected');
+      });
   }
 
   /**
@@ -602,7 +628,18 @@ class DevStreamMcpServer {
         console.error('  ✅ Heartbeat timer stopped');
       }
 
-      // Step 2: Stop auto-save service (graceful shutdown)
+      // Step 2: End current session
+      if (this.sessionManager) {
+        console.error('  └─ Ending current session...');
+        try {
+          await this.sessionManager.endCurrentSession();
+          console.error('  ✅ Session ended');
+        } catch (error) {
+          console.error('  ⚠️ Error ending session:', error instanceof Error ? error.message : 'Unknown error');
+        }
+      }
+
+      // Step 3: Stop auto-save service (graceful shutdown)
       console.error('  └─ Stopping auto-save service...');
       try {
         await this.autoSaveService.stop();
@@ -611,10 +648,16 @@ class DevStreamMcpServer {
         console.error('  ⚠️ Error stopping auto-save service:', error instanceof Error ? error.message : 'Unknown error');
       }
 
-      // Health server disabled for stability - no HTTP server to stop
-      console.error('  ℹ️ Health server: DISABLED (no HTTP server to stop)');
+      // Step 4: Stop health monitoring server (graceful shutdown)
+      console.error('  └─ Stopping health monitoring server...');
+      try {
+        await this.healthServer.stop();
+        console.error('  ✅ Health monitoring server stopped');
+      } catch (error) {
+        console.error('  ⚠️ Error stopping health monitoring server:', error instanceof Error ? error.message : 'Unknown error');
+      }
 
-      // Step 3: Close DatabasePool (Context7 Piscina Pattern - Graceful Shutdown)
+      // Step 5: Close DatabasePool (Context7 Piscina Pattern - Graceful Shutdown)
       // Waits for pending tasks to complete before destroying workers
       // This MUST happen before database close to allow in-flight queries to finish
       console.error('  └─ Closing database worker pool...');
@@ -625,7 +668,7 @@ class DevStreamMcpServer {
         console.error('  ⚠️ Error closing database pool:', error instanceof Error ? error.message : 'Unknown error');
       }
 
-      // Step 4: Close database connection (direct connection for sqlite-vec)
+      // Step 6: Close database connection (direct connection for sqlite-vec)
       console.error('  └─ Closing database connection...');
       try {
         await this.database.close();
@@ -654,6 +697,13 @@ class DevStreamMcpServer {
  * Main entry point
  */
 async function main() {
+  // Process lock enforcement (Fase 1.2)
+  const lockAcquired = await ProcessManager.acquireLock();
+  if (!lockAcquired) {
+    console.error('❌ Another MCP server instance is running. Exiting.');
+    process.exit(1);
+  }
+
   // Get database path from command line argument OR environment variable
   // Priority: CLI arg > DEVSTREAM_DB_PATH env var
   const dbPath = process.argv[2] || process.env.DEVSTREAM_DB_PATH;
@@ -668,6 +718,33 @@ async function main() {
     console.error('Current values:');
     console.error(`  process.argv[2]: ${process.argv[2] || '(not set)'}`);
     console.error(`  DEVSTREAM_DB_PATH: ${process.env.DEVSTREAM_DB_PATH || '(not set)'}`);
+    process.exit(1);
+  }
+
+  // Database path validation (Fase 1.4)
+  function validateDatabasePath(path: string): boolean {
+    // Check if database exists and is the correct one
+    if (!fs.existsSync(path)) {
+      console.error(`❌ Database file not found: ${path}`);
+      return false;
+    }
+
+    const stats = fs.statSync(path);
+    const sizeMB = stats.size / (1024 * 1024);
+
+    // Correct database should be ~500MB, wrong one is ~56KB
+    if (sizeMB < 100) {
+      console.error(`❌ Database size too small: ${sizeMB.toFixed(2)}MB (expected ~500MB)`);
+      console.error(`   This indicates the wrong database file is being used`);
+      return false;
+    }
+
+    console.error(`✅ Database validated: ${path} (${sizeMB.toFixed(0)}MB)`);
+    return true;
+  }
+
+  if (!validateDatabasePath(dbPath)) {
+    ProcessManager.cleanup('database-validation-failed');
     process.exit(1);
   }
 

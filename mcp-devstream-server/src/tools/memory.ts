@@ -48,122 +48,131 @@ export class MemoryTools {
     try {
       const input = StoreMemoryInputSchema.parse(args);
 
-      // Generate memory ID
-      const memoryId = this.generateId();
+      // Implementation with retry logic (Fase 3.3)
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // Generate memory ID
+          const memoryId = this.generateId();
 
-      // Determine content format based on content type
-      const contentFormat = this.getContentFormat(input.content_type, input.content);
+          // Determine content format based on content type
+          const contentFormat = this.getContentFormat(input.content_type, input.content);
 
-      // Calculate importance score based on content type and length
-      const importanceScore = this.calculateImportanceScore(input.content_type, input.content);
+          // Calculate importance score based on content type and length
+          const importanceScore = this.calculateImportanceScore(input.content_type, input.content);
 
-      // Context7 pattern: Generate embedding automatically for all content with metrics
-      console.error(`🧠 Generating embedding for content (${input.content.length} chars)...`);
-      const embedding = await MetricsCollector.trackEmbeddingGeneration(
-        this.ollamaClient.getDefaultModel(),
-        async () => await this.ollamaClient.generateEmbedding(input.content)
-      );
+          // Context7 pattern: Generate embedding automatically for all content with metrics
+          console.error(`🧠 Generating embedding for content (${input.content.length} chars)...`);
+          const embedding = await MetricsCollector.trackEmbeddingGeneration(
+            this.ollamaClient.getDefaultModel(),
+            async () => await this.ollamaClient.generateEmbedding(input.content)
+          );
 
-      let embeddingJson: string | null = null;
-      let embeddingModel: string | null = null;
-      let embeddingDimension: number | null = null;
+              let embeddingJson: string | null = null;
+          let embeddingModel: string | null = null;
+          let embeddingDimension: number | null = null;
 
-      // DEBUG: Check embedding value
-      console.error(`🔍 DEBUG: embedding type=${typeof embedding}, isArray=${Array.isArray(embedding)}, value=${embedding ? 'truthy' : 'falsy'}`);
-
-      if (embedding) {
-        embeddingJson = JSON.stringify(embedding);
-        embeddingModel = this.ollamaClient.getDefaultModel();
-        embeddingDimension = embedding.length;
-        console.error(`✅ Embedding generated: ${embeddingDimension} dimensions using ${embeddingModel}`);
-        console.error(`🔍 DEBUG: embeddingJson length=${embeddingJson?.length}, first 100 chars=${embeddingJson?.substring(0, 100)}`);
-      } else {
-        console.warn(`⚠️ Embedding generation failed - storing without vector search capability`);
-        console.error(`🔍 DEBUG: embedding is ${embedding === null ? 'NULL' : embedding === undefined ? 'UNDEFINED' : 'falsy but not null/undefined'}`);
-      }
-
-      // Context7 Pattern: Use UTC timestamps for timezone-aware storage
-      const now = new Date().toISOString();
-
-      // Store in semantic memory with embedding (Context7 pattern: complete schema with metrics + UTC timestamps)
-      const result = await MetricsCollector.trackDatabaseOperation('memory_storage', async () =>
-        await this.database.execute(`
-          INSERT INTO semantic_memory (
-            id, content, content_type, content_format, keywords,
-            embedding, embedding_model, embedding_dimension,
-            relevance_score, access_count, context_snapshot,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          memoryId,
-          input.content,
-          input.content_type,
-          contentFormat,
-          JSON.stringify(input.keywords),
-          embeddingJson,
-          embeddingModel,
-          embeddingDimension,
-          importanceScore, // Use as relevance_score
-          0,
-          JSON.stringify({
-            stored_via: 'mcp_server',
-            timestamp: now,
-            content_length: input.content.length,
-            source: 'mcp_user_input',
-            embedding_status: embedding ? 'generated' : 'failed'
-          }),
-          now,  // created_at (UTC ISO format)
-          now   // updated_at (UTC ISO format)
-        ])
-      );
-
-      // Track memory storage in metrics
-      memoryStorageCounter.inc({
-        content_type: input.content_type,
-        has_embedding: embedding ? 'true' : 'false'
-      });
-
-      // Context7 Pattern: Trigger-based sync (NO manual sync)
-      // The sync_embedding_update trigger automatically handles vec0 sync when embedding is inserted.
-      // This ensures consistency and eliminates the risk of desync between semantic_memory and vec_semantic_memory.
-      // Trigger workflow:
-      //   1. INSERT with embedding (lines 79-108) → embedding stored as JSON
-      //   2. Trigger detects UPDATE OF embedding → converts JSON to BLOB via vec_f32()
-      //   3. Trigger inserts into vec_semantic_memory
-      //   4. Trigger cleans up JSON (saves ~327 MB)
-      console.error('✅ Embedding stored - trigger will handle vec0 sync automatically');
-
-      // Context7 pattern: Return structured output for modern MCP clients + text for backwards compatibility
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `✅ **Memory Stored Successfully**\n\n` +
-                  `📝 **Content Type**: ${input.content_type}\n` +
-                  `📊 **Importance Score**: ${importanceScore.toFixed(2)}\n` +
-                  `🏷️ **Keywords**: ${input.keywords.length > 0 ? input.keywords.join(', ') : 'None'}\n` +
-                  `📍 **Source**: mcp_user_input\n` +
-                  `🆔 **Memory ID**: \`${memoryId}\`\n` +
-                  `🧠 **Embedding**: ${embedding ? `✅ Generated (${embeddingDimension}D, ${embeddingModel})` : '❌ Failed'}\n\n` +
-                  `💾 **Content Preview**: ${input.content.substring(0, 100)}${input.content.length > 100 ? '...' : ''}\n\n` +
-                  `The information has been stored in DevStream semantic memory${embedding ? ' with vector search capability' : ' (text-only, vector search unavailable)'} and can be retrieved using search queries.`
+          // Generate embedding if Ollama is available
+          try {
+            // Embedding generation code...
+            if (embedding) {
+              embeddingJson = JSON.stringify(embedding);
+              embeddingModel = this.ollamaClient.getDefaultModel();
+              embeddingDimension = embedding.length;
+              console.error(`✅ Embedding generated: ${embeddingDimension} dimensions using ${embeddingModel}`);
+            } else {
+              console.warn(`⚠️ Embedding generation failed (attempt ${attempt}): ${embedding}`);
+              // Continue without embedding if embedding fails
+            }
+          } catch (embeddingError) {
+            console.error(`⚠️ Embedding generation failed (attempt ${attempt}):`, embeddingError);
+            // Continue without embedding if embedding fails
           }
-        ],
-        // MCP 2025-06-18 Structured Output (Context7-compliant)
-        structuredContent: {
-          success: true,
-          memory_id: memoryId,
-          content_type: input.content_type,
-          importance_score: importanceScore,
-          embedding_generated: !!embedding,
-          embedding_model: embeddingModel,
-          embedding_dimensions: embeddingDimension,
-          keywords: input.keywords,
-          content_length: input.content.length,
-          source: 'mcp_user_input',
-          timestamp: new Date().toISOString()
+
+          // Context7 Pattern: Use UTC timestamps for timezone-aware storage
+          const now = new Date().toISOString();
+
+          // Store in semantic memory with embedding
+          const result = await MetricsCollector.trackDatabaseOperation('memory_storage', async () =>
+            await this.database.execute(`
+              INSERT INTO semantic_memory (
+                id, content, content_type, content_format, keywords,
+                embedding, embedding_model, embedding_dimension,
+                relevance_score, access_count, context_snapshot,
+                created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              memoryId,
+              input.content,
+              input.content_type,
+              contentFormat,
+              JSON.stringify(input.keywords),
+              embeddingJson,
+              embeddingModel,
+              embeddingDimension,
+              importanceScore, // Use as relevance_score
+              0,
+              JSON.stringify({
+                stored_via: 'mcp_server',
+                timestamp: now,
+                content_length: input.content.length,
+                source: 'mcp_user_input',
+                embedding_status: embedding ? 'generated' : 'failed'
+              }),
+              now,  // created_at (UTC ISO format)
+              now   // updated_at (UTC ISO format)
+            ])
+          );
+
+          // Track memory storage in metrics
+          memoryStorageCounter.inc({
+            content_type: input.content_type,
+            has_embedding: embedding ? 'true' : 'false'
+          });
+
+          // Context7 Pattern: Trigger-based sync
+          console.error('✅ Embedding stored - trigger will handle vec0 sync automatically');
+
+          // Context7 pattern: Return structured output for modern MCP clients + text for backwards compatibility
+          const successResponse = {
+            content: [
+              {
+                type: 'text',
+                text: `✅ **Memory Stored Successfully**\n\n` +
+                      `📝 **Content Type**: ${input.content_type}\n` +
+                      `📊 **Importance Score**: ${importanceScore.toFixed(2)}\n` +
+                      `🏷️ **Keywords**: ${input.keywords.length > 0 ? input.keywords.join(', ') : 'None'}\n` +
+                      `📍 **Source**: mcp_user_input\n` +
+                      `🆔 **Memory ID**: \`${memoryId}\`\n` +
+                      `🧠 **Embedding**: ${embedding ? `✅ Generated (${embeddingDimension}D, ${embeddingModel})` : '❌ Failed'}\n\n` +
+                      `💾 **Content Preview**: ${input.content.substring(0, 100)}${input.content.length > 100 ? '...' : ''}\n\n` +
+                      `The information has been stored in DevStream semantic memory${embedding ? ' with vector search capability' : ' (text-only, vector search unavailable)'} and can be retrieved using search queries.`
+              }
+            ],
+            // MCP 2025-06-18 Structured Output (Context7-compliant)
+            structuredContent: {
+              success: true,
+              memory_id: memoryId,
+              content_type: input.content_type,
+              importance_score: importanceScore,
+              embedding_generated: !!embedding,
+              embedding_model: embeddingModel,
+              embedding_dimensions: embeddingDimension,
+              keywords: input.keywords,
+              content_length: input.content.length,
+              source: 'mcp_user_input',
+              timestamp: new Date().toISOString()
+            }
+          };
+
+          // Return success response and break out of retry loop
+          return successResponse;
+
+        } catch (dbError) {
+          console.error(`❌ Database operation failed (attempt ${attempt}):`, dbError);
+          if (attempt === 3) throw dbError;
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
         }
-      };
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -171,7 +180,7 @@ export class MemoryTools {
         content: [
           {
             type: 'text',
-            text: `❌ Error storing memory: ${errorMessage}`
+            text: `❌ Failed to store memory: ${errorMessage}`
           }
         ]
       };
