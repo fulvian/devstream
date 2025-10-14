@@ -329,6 +329,22 @@ load_devstream_config() {
   # Verify Context7 is enabled
   if [ "${DEVSTREAM_CONTEXT7_ENABLED:-true}" = "true" ]; then
     print_feature "✅ Context7 Integration: ENABLED"
+
+    # Show Direct Client Hybrid Architecture status
+    local direct_mode="${DEVSTREAM_CONTEXT7_DIRECT_ENABLED:-false}"
+    local fallback="${DEVSTREAM_CONTEXT7_MCP_FALLBACK:-true}"
+
+    if [ "$direct_mode" = "true" ]; then
+      print_info "  🚀 Direct Client: ENABLED (bypass MCP for performance)"
+    elif [ "$direct_mode" = "rollout" ]; then
+      print_info "  🔄 Direct Client: ROLLOUT mode (10% gradual rollout)"
+    else
+      print_info "  📡 MCP Mode: ENABLED (traditional MCP server)"
+    fi
+
+    if [ "$fallback" = "true" ] && [ "$direct_mode" != "false" ]; then
+      print_info "  🛡️  MCP Fallback: ENABLED (graceful degradation)"
+    fi
   else
     print_warning "⚠️  Context7 Integration: DISABLED"
   fi
