@@ -285,8 +285,7 @@ class AdvancedMLModel:
     '''
 
     def __init__(self, n_estimators: int = 100, max_depth: int = 10, random_state: int = 42):
-        """
-        Initialize the advanced ML model with configurable parameters.
+        """Initialize the advanced ML model with configurable parameters.
 
         Args:
             n_estimators: Number of trees in the random forest
