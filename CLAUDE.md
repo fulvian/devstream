@@ -18,6 +18,8 @@ DevStream combines 4 core systems:
 4. **Hook Automation** - PreToolUse, PostToolUse, UserPromptSubmit via cchooks
 
 **Operation Mode**: Fully automatic - hooks execute without manual intervention.
+
+**Database Architecture**: Direct DB (v2.2.0+) - Native SQLite access with `mcp__devstream__devstream_*` tools as the primary interface. MCP server eliminated for enhanced performance and reliability.
 </system_architecture>
 
 ---
@@ -1174,9 +1176,9 @@ def hybrid_search(
 
 | Component | Access Method | Tools | Purpose | Status |
 |-----------|---------------|-------|---------|--------|
-| Task Management | Direct MCP | `mcp__devstream__devstream_*` | Task lifecycle | ✅ Active |
-| Memory System | Direct MCP | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
-| Implementation Plans | Direct MCP | `mcp__devstream__devstream_*` | Plan management | ✅ Active |
+| Task Management | Direct DB | `mcp__devstream__devstream_*` | Task lifecycle | ✅ Active |
+| Memory System | Direct DB | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
+| Implementation Plans | Direct DB | `mcp__devstream__devstream_*` | Plan management | ✅ Active |
 | Vector Search | Direct DB + Ollama | N/A | Memory retrieval | ✅ Active |
 | Session Tracking | Direct DB | N/A | Cross-session | ✅ Active |
 
@@ -1191,19 +1193,25 @@ def hybrid_search(
 ### Direct Database Integration (v2.2.0+)
 
 <integration type="direct_db">
-**Architecture**: Direct SQLite database connection (MCP server eliminated)
+**Architecture**: Direct SQLite database connection (Direct DB Architecture)
+
+**IMPORTANT**: This system uses **Direct DB Architecture**, NOT MCP server architecture.
+- **Direct DB**: Native SQLite access via `mcp__devstream__devstream_*` tools (current)
+- **MCP Server**: Eliminated in v2.2.0+ for performance and reliability
+
+**Primary Interface**: All database operations use Direct DB tools (`mcp__devstream__devstream_*`) - this is the default and only supported method.
 
 **Database**: `data/devstream.db` (sqlite-vec enabled)
 
-**Direct MCP Tools** (no server required):
+**Direct DB Tools** (no server required):
 - Task Management: `mcp__devstream__devstream_create_task`, `mcp__devstream__devstream_update_task`, `mcp__devstream__devstream_list_tasks`
 - Memory System: `mcp__devstream__devstream_store_memory`, `mcp__devstream__devstream_search_memory`
 - Implementation Plans: `mcp__devstream__devstream_create_implementation_plan`, `mcp__devstream__devstream_get_implementation_plan`, `mcp__devstream__devstream_update_implementation_plan`, `mcp__devstream__devstream_list_implementation_plans`
 - Memory Operations: `mcp__devstream__devstream_trigger_checkpoint`
 
 **Key Benefits**:
-- ✅ Eliminated MCP server dependency
-- ✅ Direct database access (faster, more reliable)
+- ✅ **Direct DB Architecture** - No server dependency, direct SQLite access
+- ✅ Native database access (faster, more reliable)
 - ✅ Reduced system complexity
 - ✅ Lower memory footprint
 - ✅ Better error handling
@@ -1223,7 +1231,7 @@ def hybrid_search(
 **Database Schema**: `implementation_plans` table
 - Direct SQLite access via `mcp__devstream__devstream_*` tools
 - Full metadata, task linkage, model type tracking
-- No MCP server dependency
+- Direct DB Architecture (no server dependency)
 
 **Dual Storage Pattern**:
 - **Database**: Direct SQLite storage with full metadata
@@ -1234,7 +1242,7 @@ def hybrid_search(
 - **Sonnet 4.5**: `templates/implementation-plan-sonnet45.md` (architectural)
 - **Handoff**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
 
-**Direct DB Tools**:
+**Direct DB Tools** (Primary Interface):
 - `mcp__devstream__devstream_create_implementation_plan` - Create new plan
 - `mcp__devstream__devstream_get_implementation_plan` - Retrieve plan by task ID
 - `mcp__devstream__devstream_update_implementation_plan` - Update existing plan
@@ -1254,6 +1262,7 @@ DEVSTREAM_MEMORY_FEEDBACK_LEVEL=minimal
 # Database (MANDATORY - Direct DB Architecture)
 DEVSTREAM_DB_PATH=data/devstream.db
 DEVSTREAM_DIRECT_DB_ENABLED=true
+# MCP server is disabled by default - Direct DB is the primary interface
 DEVSTREAM_MCP_SERVER_ENABLED=false
 
 # Context7 (MANDATORY)
@@ -1310,14 +1319,14 @@ DEVSTREAM_VECTOR_DB_ENABLED=true
 - ✅ Simplified configuration with direct DB tools
 
 **Architecture Migration**:
-- ❌ ~~MCP devstream server~~ (eliminated)
-- ✅ Direct SQLite database (`data/devstream.db`)
-- ✅ Direct MCP tools (`mcp__devstream__devstream_*`)
+- ❌ ~~MCP devstream server~~ (eliminated - Direct DB Architecture)
+- ✅ Direct SQLite database (`data/devstream.db`) - Primary storage
+- ✅ Direct DB tools (`mcp__devstream__devstream_*`) - Primary interface
 - ✅ Enhanced performance and reliability
 - ✅ Reduced system complexity
 
 **Methodology**: Research-Driven Development with Context7
-**Enforcement**: Automatic via Hook System + Direct DB Integration + Auto-Delegation + Strategic Choice Gate
+**Enforcement**: Automatic via Hook System + Direct DB Architecture + Auto-Delegation + Strategic Choice Gate
 </document_metadata>
 
 ---
