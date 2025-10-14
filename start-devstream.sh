@@ -589,9 +589,19 @@ start_mcp_server() {
 validate_database_config() {
   print_status "Validating database configuration..."
 
-  local db_path="$PROJECT_ROOT/data/devstream.db"
+  local db_path=""
   local config_file="$HOME/.claude/config.json"
   local validation_passed=true
+
+  # Check for .devstream directory first
+  if [ -d "$PROJECT_ROOT/.devstream" ]; then
+    local db_path="$PROJECT_ROOT/.devstream/db/devstream.db"
+    print_info "Multi-project mode: Using project database at $db_path"
+  else
+    # Fallback to legacy single-project mode
+    local db_path="$PROJECT_ROOT/data/devstream.db"
+    print_info "Legacy mode: Using single-project database at $db_path"
+  fi
 
   # Check if database exists
   if [ ! -f "$db_path" ]; then
