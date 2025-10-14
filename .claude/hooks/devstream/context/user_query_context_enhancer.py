@@ -372,16 +372,13 @@ Cancel"""
         # Generate enforcement prompt
         enforcement_prompt = self.generate_enforcement_prompt(complexity)
 
-        # Store enforcement event in memory
+        # Store enforcement event in memory via unified_client (with embedding generation)
         try:
-            await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_store_memory",
-                {
-                    "content": f"Protocol enforcement triggered: {complexity['triggers']}. User input: {user_input[:200]}",
-                    "content_type": "decision",
-                    "keywords": ["protocol-enforcement", "complexity-analysis", "workflow-gate"]
-                }
+            await self.unified_client.store_memory(
+                content=f"Protocol enforcement triggered: {complexity['triggers']}. User input: {user_input[:200]}",
+                content_type="decision",
+                keywords=["protocol-enforcement", "complexity-analysis", "workflow-gate"],
+                hook_name="user_query_context_enhancer_enforcement"
             )
         except Exception as e:
             self.base.debug_log(f"Failed to log enforcement event: {e}")

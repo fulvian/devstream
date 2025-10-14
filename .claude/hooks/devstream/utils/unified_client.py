@@ -667,22 +667,36 @@ class UnifiedClient:
         hook_name: str = "unknown"
     ) -> Dict[str, Any]:
         """
-        Store memory via Direct DB only - MCP DEPRECATED.
+        Store memory via Direct DB with automatic embedding generation.
 
         Args:
             content: Content to store
-            content_type: Type of content
+            content_type: Type of content (code, documentation, context, output, error, decision, learning)
             keywords: Associated keywords
             session_id: Session identifier
             hook_name: Name of the calling hook
 
         Returns:
-            Dictionary with storage result
+            Dictionary with storage result and embedding metadata
         """
-        # Direct DB operation only - MCP DEPRECATED
+        # Direct DB operation with automatic embedding generation
         async def direct_store():
             client = self._get_direct_client()
-            return await client.store_memory(content, content_type, keywords, session_id)
+            result = await client.store_memory(content, content_type, keywords, session_id)
+
+            # Log embedding generation success
+            if result.get("embedding_generated", False):
+                self.logger.info(
+                    f"✅ Embedding generated via {hook_name}: "
+                    f"format={result.get('embedding_format')}, "
+                    f"dimensions={result.get('embedding_dimension')}"
+                )
+            else:
+                self.logger.warning(
+                    f"⚠️ Embedding generation failed via {hook_name}: graceful degradation"
+                )
+
+            return result
 
         return await self._execute_with_fallback(
             operation_name="store_memory",

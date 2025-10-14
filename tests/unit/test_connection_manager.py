@@ -170,7 +170,8 @@ class TestConnectionPooling:
         # Stats should track limit enforcement
         stats = manager.get_stats()
         assert "max_connections" in stats
-        assert stats["max_connections"] == 10  # Default MAX_CONNECTIONS_PER_PROCESS
+        # Dynamic pool sizing (10-20 connections based on system resources)
+        assert 10 <= stats["max_connections"] <= 20, f"Unexpected max_connections: {stats['max_connections']}"
 
 
 class TestHealthChecks:
