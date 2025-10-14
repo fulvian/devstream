@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from cachetools import cached, LRUCache
 import hashlib
+import string
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
@@ -34,6 +35,110 @@ from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
 from unified_client import get_unified_client
 from rate_limiter import memory_rate_limiter, has_memory_capacity
+
+# SQL Injection Protection Constants
+SQL_INJECTION_PATTERNS = [
+    # Basic SQL injection patterns
+    r'(?i)\b(union|select|insert|update|delete|drop|create|alter|exec|execute)\b',
+    r'(?i)\b(or|and)\s+\d+\s*=\s*\d+',  # OR 1=1
+    r'(?i)\b(or|and)\s+["\'][^"\']*["\']?\s*=\s*["\'][^"\']*["\']?',  # OR 'x'='x (improved)
+    r'["\']\s*(?:or|and)\s+["\'][^"\']*["\']?\s*=\s*["\'][^"\']*["\']?',  # OR in quotes (edge case)'
+    r'(?i)--.*$',  # SQL comments
+    r'(?i);.*$',   # Multiple statements
+    r'(?i)/\*.*\*/',  # Block comments
+    r'["\']\s*/\*.*\*/',  # Block comment after quote
+    # Advanced injection patterns
+    r'(?i)\b(waitfor|delay|sleep)\b',
+    r'(?i)\b(benchmark|sleep)\s*\(',
+    r'(?i)\b(information_schema|sysobjects|syscolumns)\b',
+    r'(?i)\b(xp_|sp_)\w+',  # Extended stored procedures
+    # String-based injection patterns
+    r'["\'].*?(union|select|insert|update|delete).*?["\']',
+    r'["\'].*?[;].*?(union|select|insert|update|delete)',
+    # Hex/char encoding patterns
+    r'(?i)0x[0-9a-f]+',
+    r'(?i)char\s*\(',
+    r'(?i)ascii\s*\(',
+    # Time-based injection patterns
+    r'(?i)\b(waitfor\s+delay|sleep\s*\(|benchmark\s*\()',
+]
+
+# SQL safe characters (alphanumeric, spaces, basic punctuation)
+SQL_SAFE_CHARS = set(string.ascii_letters + string.digits + ' ._-:')
+
+def _sanitize_query_elements(elements: List[str]) -> List[str]:
+    """
+    Context7-compliant SQL injection protection for query elements.
+
+    Implements OWASP best practices:
+    1. Pattern-based detection of SQL injection attempts
+    2. Character-level validation (whitelist approach)
+    3. Input sanitization and length limits
+    4. Defense-in-depth with multiple validation layers
+
+    Args:
+        elements: List of string elements extracted from code analysis
+
+    Returns:
+        Sanitized list of elements safe for SQL query construction
+
+    Security Notes:
+        - Uses whitelist approach (only safe characters allowed)
+        - Detects common SQL injection patterns
+        - Applies length limits to prevent buffer overflows
+        - Logs potential attacks for security monitoring
+    """
+    if not elements:
+        return []
+
+    sanitized_elements = []
+
+    for element in elements:
+        if not element or not isinstance(element, str):
+            continue
+
+        original_element = element
+        attack_detected = False
+
+        # Layer 1: Pattern-based detection (OWASP best practice)
+        for pattern in SQL_INJECTION_PATTERNS:
+            if re.search(pattern, element):
+                attack_detected = True
+                break
+
+        if attack_detected:
+            # Log potential attack (security monitoring)
+            print(f"⚠️  SQL injection attempt detected and blocked: {element[:100]}...", file=sys.stderr)
+            continue
+
+        # Layer 2: Character-level validation (whitelist approach)
+        # Only allow safe characters: alphanumeric, spaces, basic punctuation
+        sanitized = ''.join(
+            char for char in element
+            if char in SQL_SAFE_CHARS
+        )
+
+        # Layer 3: Length validation (prevent buffer overflows)
+        if len(sanitized) > 100:  # Reasonable limit for identifiers
+            sanitized = sanitized[:100]
+
+        # Layer 4: Empty/meaningless element filtering
+        if len(sanitized.strip()) < 2:  # Minimum meaningful length
+            continue
+
+        # Layer 5: Final safety check (defense in depth)
+        # Verify no dangerous patterns survived sanitization
+        is_safe = True
+        for pattern in SQL_INJECTION_PATTERNS:
+            if re.search(pattern, sanitized):
+                is_safe = False
+                break
+
+        if is_safe and sanitized.strip():
+            sanitized_elements.append(sanitized.strip())
+
+    # Limit total number of elements to prevent query bloating
+    return sanitized_elements[:10]
 
 # Module-level cache for memory search results
 # Cache key: hash(query + limit + content_type)
@@ -278,8 +383,9 @@ class PreToolUseHook:
             types = re.findall(type_pattern, content, re.MULTILINE)
             elements.extend(types[:5])
 
-        # Build query with code structure
-        query = " ".join(elements)
+        # Build query with code structure (SECURE - SQL injection protection)
+        sanitized_elements = _sanitize_query_elements(elements)
+        query = " ".join(sanitized_elements)
 
         # Fallback to content prefix if no elements extracted
         if len(query) < 50:
