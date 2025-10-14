@@ -252,8 +252,12 @@ class SimplifiedSessionStartHook:
                 }
             })
 
-            # Store session start event in memory
-            if self.session_summary:
+            # Store session start event in memory only if session summary is enabled
+            # Check environment variable to respect .env.devstream configuration
+            import os
+            session_summary_enabled = os.environ.get('DEVSTREAM_HOOK_SESSIONSTART', 'true').lower() == 'true'
+
+            if self.session_summary and session_summary_enabled:
                 await self.session_summary.store_summary_in_memory(
                     session_id,
                     f"# Session Started\n\nSession ID: {session_id}\nStarted: {session.started_at.isoformat()}\nStatus: {session.status}"
