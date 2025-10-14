@@ -8,6 +8,7 @@ import sys
 import os
 import tempfile
 import stat
+import asyncio
 from pathlib import Path
 import time
 import threading
@@ -211,10 +212,9 @@ async def test_concurrent_secure_writes():
         temp_dir = Path(temp_dir)
 
         results = []
-        errors = []
 
-        def worker_task(worker_id: int) -> Dict[str, Any]:
-            """Worker task that performs secure atomic writes."""
+        async def worker_task(worker_id: int) -> Dict[str, Any]:
+            """Async worker task that performs secure atomic writes."""
             try:
                 start_time = time.time()
 
@@ -223,7 +223,7 @@ async def test_concurrent_secure_writes():
                 content = f"Worker {worker_id} secure content at {time.time()}"
 
                 # Perform secure write
-                success = asyncio.run(write_atomic(test_file, content))
+                success = await write_atomic(test_file, content)
 
                 # Verify results
                 if success:
@@ -269,32 +269,30 @@ async def test_concurrent_secure_writes():
         num_workers = 10
         print(f"Launching {num_workers} concurrent secure write workers...")
 
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = {executor.submit(worker_task, i): i for i in range(num_workers)}
+        # Create all async tasks
+        tasks = [worker_task(i) for i in range(num_workers)]
 
-            for future in as_completed(futures):
-                worker_id = futures[future]
-                try:
-                    result = future.result(timeout=10.0)
-                    results.append(result)
+        # Execute all tasks concurrently
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                    if result['success'] and result['write_success']:
-                        print(f"✅ Worker {result['worker_id']}: Success "
-                              f"(exists: {result['file_exists']}, "
-                              f"content: {result['content_match']}, "
-                              f"secure: {result['secure_permissions']}, "
-                              f"duration: {result['duration']:.3f}s)")
-                    else:
-                        print(f"❌ Worker {result['worker_id']}: Failed - {result.get('reason', 'unknown')}")
-                        errors.append(result)
+        # Process results
+        successful_workers = []
+        failed_workers = []
 
-                except Exception as e:
-                    print(f"❌ Worker {worker_id}: Exception - {e}")
-                    errors.append({'worker_id': worker_id, 'error': str(e), 'error_type': 'Timeout'})
-
-        # Analyze results
-        successful_workers = [r for r in results if r.get('success') and r.get('write_success')]
-        failed_workers = [r for r in results if not r.get('success') or not r.get('write_success')]
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"❌ Worker exception: {result}")
+                failed_workers.append({'error': str(result), 'error_type': type(result).__name__})
+            elif result.get('success') and result.get('write_success'):
+                successful_workers.append(result)
+                print(f"✅ Worker {result['worker_id']}: Success "
+                      f"(exists: {result['file_exists']}, "
+                      f"content: {result['content_match']}, "
+                      f"secure: {result['secure_permissions']}, "
+                      f"duration: {result['duration']:.3f}s)")
+            else:
+                print(f"❌ Worker {result.get('worker_id', 'unknown')}: Failed - {result.get('reason', 'unknown')}")
+                failed_workers.append(result)
 
         print(f"\n📊 Concurrent Test Results:")
         print(f"   Successful workers: {len(successful_workers)}/{num_workers}")
