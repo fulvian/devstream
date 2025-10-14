@@ -27,10 +27,79 @@ from datetime import datetime
 import uuid
 import logging
 
-# Import DevStream utilities
+# Import DevStream utilities with Context7-compliant fallback
 sys.path.append(str(Path(__file__).parent))
-from connection_manager import ConnectionManager
-from logger import get_devstream_logger
+try:
+    # Try relative import first (when run as module)
+    from .connection_manager import ConnectionManager
+    from .logger import get_devstream_logger
+except ImportError:
+    try:
+        # Fallback to absolute import (when run as script)
+        from connection_manager import ConnectionManager
+        from logger import get_devstream_logger
+    except ImportError as e:
+        # Final fallback - define dummy classes for graceful degradation
+        import logging
+        print(f"⚠️  DevStream: connection_manager/logger unavailable, using fallback: {e}", file=sys.stderr)
+
+        def get_devstream_logger(name):
+            class DummyLogger:
+                def __init__(self, name):
+                    self.logger = logging.getLogger(name)
+                    self.disabled = True
+                def log_direct_call(self, *args, **kwargs):
+                    pass
+                def warning(self, msg, **kwargs):
+                    self.logger.warning(msg)
+                def error(self, msg, **kwargs):
+                    self.logger.error(msg)
+                def info(self, msg, **kwargs):
+                    self.logger.info(msg)
+                def debug(self, msg, **kwargs):
+                    self.logger.debug(msg)
+            return DummyLogger(name)
+
+        class ConnectionManager:
+            def __init__(self, db_path):
+                self.db_path = db_path
+                self.disabled = True
+
+            @classmethod
+            def get_instance(cls, db_path):
+                return cls(db_path)
+
+            def get_connection(self):
+                class DummyConnection:
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *args):
+                        pass
+                    def execute(self, *args, **kwargs):
+                        return DummyCursor()
+                    def commit(self):
+                        pass
+                    def rollback(self):
+                        pass
+                return DummyConnection()
+
+            def _get_thread_connection(self):
+                return self.get_connection().__enter__()
+
+            def get_stats(self):
+                return {"active_connections": 0, "disabled": True}
+
+        class DummyCursor:
+            def __init__(self):
+                self.closed = False
+            def execute(self, *args, **kwargs):
+                return self
+            def fetchone(self):
+                return None
+            def fetchall(self):
+                return []
+            def close(self):
+                pass
 
 
 class DatabaseException(Exception):

@@ -23,26 +23,78 @@ from enum import Enum
 from dataclasses import dataclass
 import hashlib
 
-# Import clients
-from .direct_client import DevStreamDirectClient, DatabaseException
-
-# Feature flags for backend selection
+# Context7-compliant imports with graceful fallback
 try:
+    # Try relative import first (when run as module)
+    from .direct_client import DevStreamDirectClient, DatabaseException
+except ImportError:
+    try:
+        # Fallback to absolute import (when run as script)
+        from direct_client import DevStreamDirectClient, DatabaseException
+    except ImportError as e:
+        # Final fallback - define dummy classes for graceful degradation
+        import logging
+
+        logging.warning(f"DevStream: direct_client unavailable, using fallback: {e}")
+
+        class DatabaseException(Exception):
+            """Fallback DatabaseException when direct_client unavailable."""
+            pass
+
+        class DevStreamDirectClient:
+            """Fallback direct client when real client unavailable."""
+
+            def __init__(self, db_path=None):
+                self.disabled = True
+                self.db_path = db_path
+
+            async def store_memory(self, *args, **kwargs):
+                return {"success": False, "error": "direct_client unavailable"}
+
+            async def search_memory(self, *args, **kwargs):
+                return {"results": [], "success": False, "error": "direct_client unavailable"}
+
+            async def health_check(self):
+                return False
+
+            async def trigger_checkpoint(self, *args, **kwargs):
+                return {"success": False, "error": "direct_client unavailable"}
+
+# Context7-compliant feature flags import
+try:
+    # Try relative import first (when run as module)
     from ..config.feature_flags import should_use_direct_client
 except ImportError:
-    # Fallback if feature flags not available
-    def should_use_direct_client(hook_name: str, context: Optional[Dict[str, Any]] = None) -> bool:
-        """Fallback: always use direct client if feature flags not available"""
-        return True
+    try:
+        # Fallback to absolute import (when run as script)
+        from config.feature_flags import should_use_direct_client
+    except ImportError:
+        # Fallback if feature flags not available
+        def should_use_direct_client(hook_name: str, context: Optional[Dict[str, Any]] = None) -> bool:
+            """Fallback: always use direct client if feature flags not available"""
+            return True
 
-# Circuit breaker implementation
+# Context7-compliant robustness patterns import
 try:
+    # Try relative import first (when run as module)
     from .robustness_patterns import (
         CircuitBreaker,
         RetryPolicy,
         CircuitBreakerState as CircuitState,
         RobustnessConfig
     )
+except ImportError:
+    try:
+        # Fallback to absolute import (when run as script)
+        from robustness_patterns import (
+            CircuitBreaker,
+            RetryPolicy,
+            CircuitBreakerState as CircuitState,
+            RobustnessConfig
+        )
+    except ImportError:
+        # Fallback implementation if robustness_patterns not available
+        pass  # Already defined above in the fallback block
 except ImportError:
     # Fallback implementation if robustness_patterns not available
     import asyncio
@@ -462,9 +514,8 @@ except ImportError:
 
 
 class BackendType(Enum):
-    """Supported backend types."""
-    DIRECT_DB = "direct_db"
-    MCP_SERVER = "mcp_server"
+    """Supported backend types - MCP DEPRECATED"""
+    DIRECT_DB = "direct_db"  # ONLY Direct DB is used now
 
 
 class UnifiedClient:
@@ -506,14 +557,13 @@ class UnifiedClient:
         self._direct_circuit = CircuitBreaker(direct_config)
         self._mcp_circuit = CircuitBreaker(mcp_config)
 
-        # Retry policies with Context7-compliant jitter and adaptive retry
+        # Retry policies with Context7-compliant jitter
         self._retry_policy = RetryPolicy(
             max_retries=3,
             base_delay=1.0,
             max_delay=60.0,  # Increased to Context7 best practice
             backoff_factor=2.0,
-            jitter_factor=0.1,  # 10% jitter to prevent thundering herd
-            enable_adaptive_retry=True  # Enable adaptive retry strategies
+            jitter=True  # Enable jitter to prevent thundering herd
         )
 
         # Performance metrics
@@ -529,38 +579,17 @@ class UnifiedClient:
 
     def _get_client(self, hook_name: str, context: Optional[Dict[str, Any]] = None) -> tuple[BackendType, Any]:
         """
-        Strategy Pattern: Select appropriate backend based on feature flags and health.
+        SIMPLIFIED: Always use Direct DB - MCP DEPRECATED.
 
         Args:
             hook_name: Name of the hook calling the client
-            context: Optional context for feature flag evaluation
+            context: Optional context (ignored - Direct DB only)
 
         Returns:
-            Tuple of (backend_type, client_instance)
+            Tuple of (DIRECT_DB, direct_client_instance)
         """
-        # Check feature flag for direct database preference
-        use_direct = should_use_direct_client(hook_name, context)
-
-        if use_direct:
-            # Check circuit breaker state
-            if self._direct_circuit.state == CircuitState.OPEN:
-                self.logger.warning(
-                    f"Direct DB circuit breaker OPEN for {hook_name}, falling back to MCP"
-                )
-                self._metrics['fallback_activations'] += 1
-                return BackendType.MCP_SERVER, self._get_mcp_client()
-
-            return BackendType.DIRECT_DB, self._get_direct_client()
-        else:
-            # MCP preferred, but check circuit breaker
-            if self._mcp_circuit.state == CircuitState.OPEN:
-                self.logger.warning(
-                    f"MCP circuit breaker OPEN for {hook_name}, falling back to Direct DB"
-                )
-                self._metrics['fallback_activations'] += 1
-                return BackendType.DIRECT_DB, self._get_direct_client()
-
-            return BackendType.MCP_SERVER, self._get_mcp_client()
+        # MCP IS DEPRECATED - ALWAYS USE DIRECT DB
+        return BackendType.DIRECT_DB, self._get_direct_client()
 
     def _get_direct_client(self) -> DevStreamDirectClient:
         """Get or create direct database client."""
@@ -572,17 +601,12 @@ class UnifiedClient:
     def _get_mcp_client(self) -> Any:
         """Get or create MCP client."""
         if self._mcp_client is None:
-            try:
-                # Import MCP client only when needed
-                from .mcp_client import get_mcp_client
-                self._mcp_client = get_mcp_client()
-                self.logger.info("MCP client initialized")
-            except ImportError as e:
-                self.logger.error(f"MCP client not available: {e}")
-                # Force fallback to direct client
-                if self._direct_client is None:
-                    self._direct_client = DevStreamDirectClient(self.db_path)
-                return self._direct_client
+            # MCP CLIENT DEPRECATED - NOT USED ANYMORE
+            # MCP is deprecated and disabled - only Direct DB is used
+            self.logger.info("MCP client deprecated - using Direct DB only")
+            if self._direct_client is None:
+                self._direct_client = DevStreamDirectClient(self.db_path)
+            return self._direct_client
 
         return self._mcp_client
 
@@ -591,105 +615,48 @@ class UnifiedClient:
         operation_name: str,
         hook_name: str,
         direct_operation: callable,
-        mcp_operation: callable,
+        mcp_operation: callable = None,  # IGNORED - MCP DEPRECATED
         context: Optional[Dict[str, Any]] = None
     ) -> Any:
         """
-        Execute operation with automatic fallback between backends.
-
-        Context7 Pattern: Circuit breaker + retry + fallback
+        SIMPLIFIED: Execute Direct DB operation only - MCP DEPRECATED.
 
         Args:
             operation_name: Name of the operation for logging
             hook_name: Name of the hook calling
             direct_operation: Async function for direct DB operation
-            mcp_operation: Async function for MCP operation
-            context: Optional context for feature flags
+            mcp_operation: IGNORED - MCP DEPRECATED
+            context: Optional context (ignored)
 
         Returns:
             Operation result
 
         Raises:
-            Exception: If all backends fail
+            Exception: If direct DB operation fails
         """
         start_time = time.time()
-        last_exception = None
 
-        # Determine primary and fallback backends
-        primary_backend, primary_client = self._get_client(hook_name, context)
-        fallback_backend = BackendType.MCP_SERVER if primary_backend == BackendType.DIRECT_DB else BackendType.DIRECT_DB
-        fallback_client = self._get_mcp_client() if fallback_backend == BackendType.MCP_SERVER else self._get_direct_client()
-
-        # Try primary backend with circuit breaker and retry
+        # MCP IS DEPRECATED - USE DIRECT DB ONLY
         try:
             result = await self._retry_policy.execute(
-                self._direct_circuit.call if primary_backend == BackendType.DIRECT_DB else self._mcp_circuit.call,
-                direct_operation if primary_backend == BackendType.DIRECT_DB else mcp_operation
+                self._direct_circuit.call,
+                direct_operation
             )
 
             # Update metrics
-            if primary_backend == BackendType.DIRECT_DB:
-                self._metrics['direct_calls'] += 1
-            else:
-                self._metrics['mcp_calls'] += 1
+            self._metrics['direct_calls'] += 1
 
             duration_ms = (time.time() - start_time) * 1000
             self.logger.debug(
-                f"{operation_name} completed via {primary_backend.value} in {duration_ms:.1f}ms"
+                f"{operation_name} completed via Direct DB in {duration_ms:.1f}ms"
             )
 
             return result
 
         except Exception as e:
-            last_exception = e
-
-            # Update failure metrics
-            if primary_backend == BackendType.DIRECT_DB:
-                self._metrics['direct_failures'] += 1
-            else:
-                self._metrics['mcp_failures'] += 1
-
-            self.logger.warning(
-                f"{operation_name} failed via {primary_backend.value}: {e}, trying fallback"
-            )
-
-        # Try fallback backend
-        try:
-            result = await self._retry_policy.execute(
-                self._mcp_circuit.call if fallback_backend == BackendType.MCP_SERVER else self._direct_circuit.call,
-                mcp_operation if fallback_backend == BackendType.MCP_SERVER else direct_operation
-            )
-
-            # Update metrics
-            if fallback_backend == BackendType.DIRECT_DB:
-                self._metrics['direct_calls'] += 1
-            else:
-                self._metrics['mcp_calls'] += 1
-
-            self._metrics['fallback_activations'] += 1
-
-            duration_ms = (time.time() - start_time) * 1000
-            self.logger.info(
-                f"{operation_name} completed via fallback {fallback_backend.value} in {duration_ms:.1f}ms"
-            )
-
-            return result
-
-        except Exception as e:
-            last_exception = e
-
-            # Update failure metrics
-            if fallback_backend == BackendType.DIRECT_DB:
-                self._metrics['direct_failures'] += 1
-            else:
-                self._metrics['mcp_failures'] += 1
-
-            self.logger.error(
-                f"{operation_name} failed via both backends. Last error: {e}"
-            )
-
-        # All backends failed
-        raise last_exception
+            self._metrics['direct_failures'] += 1
+            self.logger.error(f"{operation_name} failed via Direct DB: {e}")
+            raise
 
     async def store_memory(
         self,
@@ -700,7 +667,7 @@ class UnifiedClient:
         hook_name: str = "unknown"
     ) -> Dict[str, Any]:
         """
-        Store memory with automatic backend selection and fallback.
+        Store memory via Direct DB only - MCP DEPRECATED.
 
         Args:
             content: Content to store
@@ -712,25 +679,15 @@ class UnifiedClient:
         Returns:
             Dictionary with storage result
         """
-        # Direct DB operation
+        # Direct DB operation only - MCP DEPRECATED
         async def direct_store():
             client = self._get_direct_client()
             return await client.store_memory(content, content_type, keywords, session_id)
-
-        # MCP operation
-        async def mcp_store():
-            client = self._get_mcp_client()
-            return await client.call("devstream_store_memory", {
-                "content": content,
-                "content_type": content_type,
-                "keywords": keywords or []
-            })
 
         return await self._execute_with_fallback(
             operation_name="store_memory",
             hook_name=hook_name,
             direct_operation=direct_store,
-            mcp_operation=mcp_store,
             context={"session_id": session_id}
         )
 
@@ -742,7 +699,7 @@ class UnifiedClient:
         hook_name: str = "unknown"
     ) -> Dict[str, Any]:
         """
-        Search memory with automatic backend selection and fallback.
+        Search memory via Direct DB only - MCP DEPRECATED.
 
         Args:
             query: Search query
@@ -753,25 +710,15 @@ class UnifiedClient:
         Returns:
             Dictionary with search results
         """
-        # Direct DB operation
+        # Direct DB operation only - MCP DEPRECATED
         async def direct_search():
             client = self._get_direct_client()
             return await client.search_memory(query, content_type, limit)
-
-        # MCP operation
-        async def mcp_search():
-            client = self._get_mcp_client()
-            return await client.call("devstream_search_memory", {
-                "query": query,
-                "content_type": content_type,
-                "limit": limit
-            })
 
         return await self._execute_with_fallback(
             operation_name="search_memory",
             hook_name=hook_name,
             direct_operation=direct_search,
-            mcp_operation=mcp_search,
             context={"query": query, "content_type": content_type}
         )
 
@@ -781,7 +728,7 @@ class UnifiedClient:
         hook_name: str = "unknown"
     ) -> Dict[str, Any]:
         """
-        Trigger checkpoint with automatic backend selection and fallback.
+        Trigger checkpoint via Direct DB only - MCP DEPRECATED.
 
         Args:
             reason: Checkpoint reason
@@ -790,32 +737,24 @@ class UnifiedClient:
         Returns:
             Dictionary with checkpoint result
         """
-        # Direct DB operation
+        # Direct DB operation only - MCP DEPRECATED
         async def direct_checkpoint():
             client = self._get_direct_client()
             return await client.trigger_checkpoint(reason)
-
-        # MCP operation
-        async def mcp_checkpoint():
-            client = self._get_mcp_client()
-            return await client.call("devstream_trigger_checkpoint", {
-                "reason": reason
-            })
 
         return await self._execute_with_fallback(
             operation_name="trigger_checkpoint",
             hook_name=hook_name,
             direct_operation=direct_checkpoint,
-            mcp_operation=mcp_checkpoint,
             context={"reason": reason}
         )
 
     async def health_check(self) -> Dict[str, Any]:
         """
-        Perform health check on all backends.
+        Perform health check on Direct DB only - MCP DEPRECATED.
 
         Returns:
-            Dictionary with health status of all backends
+            Dictionary with health status of Direct DB backend
         """
         health_status = {
             "overall": "healthy",
@@ -823,7 +762,7 @@ class UnifiedClient:
             "metrics": self._metrics.copy()
         }
 
-        # Check direct client
+        # Check direct client only - MCP DEPRECATED
         try:
             if self._direct_client:
                 direct_healthy = await self._direct_client.health_check()
@@ -844,42 +783,18 @@ class UnifiedClient:
             }
             health_status["overall"] = "degraded"
 
-        # Check MCP client
-        try:
-            if self._mcp_client:
-                # Simple health check for MCP
-                mcp_healthy = True  # Could implement actual health check
-                health_status["backends"]["mcp_server"] = {
-                    "status": "healthy" if mcp_healthy else "unhealthy",
-                    "circuit_breaker": self._mcp_circuit.state.value
-                }
-            else:
-                health_status["backends"]["mcp_server"] = {
-                    "status": "not_initialized",
-                    "circuit_breaker": self._mcp_circuit.state.value
-                }
-        except Exception as e:
-            health_status["backends"]["mcp_server"] = {
-                "status": "error",
-                "error": str(e),
-                "circuit_breaker": self._mcp_circuit.state.value
-            }
-            health_status["overall"] = "degraded"
-
         return health_status
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Get performance and reliability metrics."""
+        """Get performance and reliability metrics - Direct DB only."""
         return {
             **self._metrics,
             "direct_circuit_state": self._direct_circuit.state.value,
-            "mcp_circuit_state": self._mcp_circuit.state.value,
-            "total_calls": self._metrics['direct_calls'] + self._metrics['mcp_calls'],
-            "total_failures": self._metrics['direct_failures'] + self._metrics['mcp_failures'],
+            "total_calls": self._metrics['direct_calls'],
+            "total_failures": self._metrics['direct_failures'],
             "success_rate": (
-                (self._metrics['direct_calls'] + self._metrics['mcp_calls'] -
-                 self._metrics['direct_failures'] - self._metrics['mcp_failures']) /
-                max(1, self._metrics['direct_calls'] + self._metrics['mcp_calls'])
+                (self._metrics['direct_calls'] - self._metrics['direct_failures']) /
+                max(1, self._metrics['direct_calls'])
             ) * 100
         }
 

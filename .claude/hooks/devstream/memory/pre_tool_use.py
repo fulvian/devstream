@@ -33,7 +33,40 @@ sys.path.insert(0, str(Path(__file__).parent.parent))  # Add devstream hooks dir
 
 from cchooks import safe_create_context, PreToolUseContext
 from devstream_base import DevStreamHookBase
-from unified_client import get_unified_client
+
+# Context7-compliant robust import with fallback for unified_client
+try:
+    # Try relative import first (when run as module)
+    from .unified_client import get_unified_client
+except ImportError:
+    try:
+        # Fallback to absolute import (when run as script)
+        from unified_client import get_unified_client
+    except ImportError as e:
+        # Final fallback - create dummy client that gracefully degrades
+        # Context7-compliant: variable scope fixed by moving print inside except block
+        error_message = str(e)
+
+        def get_unified_client():
+            class DummyUnifiedClient:
+                def __init__(self):
+                    self.disabled = True
+
+                async def search_memory(self, *args, **kwargs):
+                    return None
+
+                async def store_memory(self, *args, **kwargs):
+                    return None
+
+                async def health_check(self):
+                    return {"backends": {}, "overall": "disabled"}
+
+                async def trigger_checkpoint(self, *args, **kwargs):
+                    return None
+
+            return DummyUnifiedClient()
+
+        print(f"⚠️  DevStream: unified_client unavailable, using fallback: {error_message}", file=sys.stderr)
 from rate_limiter import memory_rate_limiter, has_memory_capacity
 
 # SQL Injection Protection Constants
