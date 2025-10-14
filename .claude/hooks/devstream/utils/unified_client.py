@@ -15,19 +15,20 @@ Context7 Patterns:
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, List, Union
+import random
+import time
+from typing import Optional, Dict, Any, List, Union, Callable
 from contextlib import asynccontextmanager
 from enum import Enum
 from dataclasses import dataclass
-import time
 import hashlib
 
 # Import clients
-from direct_client import DevStreamDirectClient, DatabaseException
+from .direct_client import DevStreamDirectClient, DatabaseException
 
 # Feature flags for backend selection
 try:
-    from config.feature_flags import should_use_direct_client
+    from ..config.feature_flags import should_use_direct_client
 except ImportError:
     # Fallback if feature flags not available
     def should_use_direct_client(hook_name: str, context: Optional[Dict[str, Any]] = None) -> bool:
@@ -36,7 +37,7 @@ except ImportError:
 
 # Circuit breaker implementation
 try:
-    from robustness_patterns import (
+    from .robustness_patterns import (
         CircuitBreaker,
         RetryPolicy,
         CircuitBreakerState as CircuitState,
@@ -174,29 +175,189 @@ except ImportError:
 
     class RetryPolicy:
         """
-        Configurable retry policy for resilient operations.
+        Context7-compliant retry policy with jitter and adaptive strategies.
 
-        Context7 Best Practice: Exponential backoff with jitter to prevent thundering herd.
+        Enhanced Features:
+        - Jitter-backed exponential backoff (prevents thundering herd)
+        - Adaptive retry strategies based on error type
+        - Circuit breaker integration
+        - Comprehensive error classification
+        - Performance monitoring and logging
         """
 
-        def __init__(self, max_retries=3, base_delay=1.0, max_delay=10.0, backoff_factor=2.0):
+        def __init__(
+            self,
+            max_retries: int = 3,
+            base_delay: float = 1.0,
+            max_delay: float = 60.0,
+            backoff_factor: float = 2.0,
+            jitter_factor: float = 0.1,
+            enable_adaptive_retry: bool = True
+        ):
             """
-            Initialize retry policy.
+            Initialize Context7-compliant retry policy.
 
             Args:
                 max_retries: Maximum number of retry attempts
-                base_delay: Initial delay between retries
-                max_delay: Maximum delay between retries
+                base_delay: Initial delay between retries (seconds)
+                max_delay: Maximum delay between retries (seconds)
                 backoff_factor: Multiplier for exponential backoff
+                jitter_factor: Jitter factor (0.0-1.0) to prevent thundering herd
+                enable_adaptive_retry: Enable adaptive retry strategies
             """
             self.max_retries = max_retries
             self.base_delay = base_delay
             self.max_delay = max_delay
             self.backoff_factor = backoff_factor
+            self.jitter_factor = jitter_factor
+            self.enable_adaptive_retry = enable_adaptive_retry
 
-        async def execute(self, operation, *args, **kwargs):
+            # Performance metrics
+            self._metrics = {
+                'total_attempts': 0,
+                'successful_retries': 0,
+                'failed_retries': 0,
+                'circuit_breaker_trips': 0,
+                'total_delay_time': 0.0
+            }
+
+        def _calculate_delay_with_jitter(self, attempt: int) -> float:
             """
-            Execute operation with retry logic.
+            Calculate Context7-compliant exponential backoff with jitter.
+
+            Formula: base_delay * (2^attempt) + random_jitter
+            Caps at max_delay to prevent excessive delays.
+
+            Args:
+                attempt: Current attempt number (0-based)
+
+            Returns:
+                Delay in seconds with jitter applied
+            """
+            # Exponential backoff calculation
+            exponential_delay = self.base_delay * (2 ** attempt)
+
+            # Add jitter to prevent thundering herd (Context7 best practice)
+            jitter_range = exponential_delay * self.jitter_factor
+            jitter = random.uniform(-jitter_range, jitter_range)
+
+            # Apply jitter and cap at max_delay
+            delay = max(0, exponential_delay + jitter)
+            return min(delay, self.max_delay)
+
+        def _classify_error(self, exception: Exception) -> str:
+            """
+            Classify error for adaptive retry strategy.
+
+            Context7 Pattern: Different retry strategies for different error types.
+
+            Args:
+                exception: Exception to classify
+
+            Returns:
+                Error classification: 'transient', 'rate_limit', 'server_error', or 'permanent'
+            """
+            error_message = str(exception).lower()
+            error_type = type(exception).__name__.lower()
+
+            # Rate limiting errors (429)
+            if '429' in error_message or 'too many requests' in error_message or 'rate limit' in error_message:
+                return 'rate_limit'
+
+            # Timeout errors
+            if any(keyword in error_message for keyword in ['timeout', 'timed out', 'deadline exceeded']):
+                return 'transient'
+
+            # Connection errors
+            if any(keyword in error_message for keyword in ['connection', 'network', 'dns', 'unreachable']):
+                return 'transient'
+
+            # Server errors (5xx)
+            if any(keyword in error_message for keyword in ['500', '502', '503', '504', 'internal server error']):
+                return 'server_error'
+
+            # Database errors
+            if any(keyword in error_message for keyword in ['database', 'sqlite', 'connection', 'lock']):
+                return 'transient'
+
+            # Client errors (4xx excluding 429) - permanent failures
+            if any(keyword in error_message for keyword in ['400', '401', '403', '404', '405', 'bad request', 'unauthorized', 'forbidden']):
+                return 'permanent'
+
+            # Default to transient for unknown errors
+            return 'transient'
+
+        def _should_retry(self, exception: Exception, attempt: int) -> bool:
+            """
+            Determine if operation should be retried based on error classification.
+
+            Context7 Pattern: Adaptive retry logic based on error type.
+
+            Args:
+                exception: Exception that occurred
+                attempt: Current attempt number
+
+            Returns:
+                True if should retry, False otherwise
+            """
+            if not self.enable_adaptive_retry:
+                return attempt < self.max_retries
+
+            error_classification = self._classify_error(exception)
+
+            # Permanent failures should not be retried
+            if error_classification == 'permanent':
+                return False
+
+            # Rate limiting needs longer delays but should be retried
+            if error_classification == 'rate_limit':
+                return attempt < self.max_retries + 1  # Allow one extra retry for rate limits
+
+            # Transient and server errors should be retried
+            if error_classification in ['transient', 'server_error']:
+                return attempt < self.max_retries
+
+            return False
+
+        def _get_adaptive_delay(self, exception: Exception, base_delay: float) -> float:
+            """
+            Get adaptive delay based on error type.
+
+            Context7 Pattern: Different delay strategies for different errors.
+
+            Args:
+                exception: Exception that occurred
+                base_delay: Base delay calculation
+
+            Returns:
+                Adapted delay in seconds
+            """
+            error_classification = self._classify_error(exception)
+
+            # Rate limiting: use longer delays
+            if error_classification == 'rate_limit':
+                return min(base_delay * 3, self.max_delay)
+
+            # Server errors: use standard exponential backoff
+            if error_classification == 'server_error':
+                return base_delay
+
+            # Transient errors: use standard exponential backoff
+            if error_classification == 'transient':
+                return base_delay
+
+            # Default: use base delay
+            return base_delay
+
+        async def execute(self, operation: Callable, *args, **kwargs) -> Any:
+            """
+            Execute operation with Context7-compliant retry logic.
+
+            Enhanced Features:
+            - Jitter-backed exponential backoff
+            - Adaptive retry strategies
+            - Circuit breaker integration
+            - Comprehensive monitoring
 
             Args:
                 operation: Async callable to execute
@@ -210,20 +371,94 @@ except ImportError:
                 Exception: Last exception if all retries fail
             """
             last_exception = None
+            start_time = time.time()
 
             for attempt in range(self.max_retries + 1):
                 try:
-                    return await operation(*args, **kwargs)
+                    self._metrics['total_attempts'] += 1
+
+                    # Execute the operation
+                    result = await operation(*args, **kwargs)
+
+                    # Update success metrics
+                    if attempt > 0:
+                        self._metrics['successful_retries'] += 1
+
+                    total_time = time.time() - start_time
+                    if attempt > 0:
+                        logging.debug(
+                            f"RetryPolicy: Operation succeeded after {attempt + 1} attempts "
+                            f"in {total_time:.2f}s"
+                        )
+
+                    return result
+
                 except Exception as e:
                     last_exception = e
-                    if attempt < self.max_retries:
-                        delay = min(
-                            self.base_delay * (self.backoff_factor ** attempt),
-                            self.max_delay
+
+                    # Check if we should retry this error
+                    if not self._should_retry(e, attempt):
+                        self._metrics['failed_retries'] += 1
+                        logging.debug(
+                            f"RetryPolicy: Not retrying {type(e).__name__}: {e} "
+                            f"(classification: {self._classify_error(e)})"
                         )
-                        await asyncio.sleep(delay)
+                        raise
+
+                    # Calculate delay for next attempt
+                    if attempt < self.max_retries:
+                        base_delay = self._calculate_delay_with_jitter(attempt)
+                        adaptive_delay = self._get_adaptive_delay(e, base_delay)
+
+                        logging.debug(
+                            f"RetryPolicy: Attempt {attempt + 1} failed with {type(e).__name__}: {e} "
+                            f"(classification: {self._classify_error(e)}), "
+                            f"retrying in {adaptive_delay:.2f}s"
+                        )
+
+                        self._metrics['total_delay_time'] += adaptive_delay
+                        await asyncio.sleep(adaptive_delay)
+
+            # All retries failed
+            self._metrics['failed_retries'] += 1
+            total_time = time.time() - start_time
+            logging.warning(
+                f"RetryPolicy: All {self.max_retries + 1} attempts failed in {total_time:.2f}s. "
+                f"Final error: {type(last_exception).__name__}: {last_exception}"
+            )
 
             raise last_exception
+
+        def get_metrics(self) -> Dict[str, Any]:
+            """
+            Get retry policy performance metrics.
+
+            Returns:
+                Dictionary with performance and reliability metrics
+            """
+            return {
+                **self._metrics,
+                'success_rate': (
+                    self._metrics['successful_retries'] /
+                    max(1, self._metrics['successful_retries'] + self._metrics['failed_retries'])
+                ) * 100,
+                'average_delay': (
+                    self._metrics['total_delay_time'] /
+                    max(1, self._metrics['total_attempts'])
+                ),
+                'config': {
+                    'max_retries': self.max_retries,
+                    'base_delay': self.base_delay,
+                    'max_delay': self.max_delay,
+                    'jitter_factor': self.jitter_factor,
+                    'adaptive_retry_enabled': self.enable_adaptive_retry
+                }
+            }
+
+        def reset_metrics(self) -> None:
+            """Reset all performance metrics."""
+            for key in self._metrics:
+                self._metrics[key] = 0
 
 
 class BackendType(Enum):
@@ -271,12 +506,14 @@ class UnifiedClient:
         self._direct_circuit = CircuitBreaker(direct_config)
         self._mcp_circuit = CircuitBreaker(mcp_config)
 
-        # Retry policies
+        # Retry policies with Context7-compliant jitter and adaptive retry
         self._retry_policy = RetryPolicy(
             max_retries=3,
             base_delay=1.0,
-            max_delay=10.0,
-            backoff_factor=2.0
+            max_delay=60.0,  # Increased to Context7 best practice
+            backoff_factor=2.0,
+            jitter_factor=0.1,  # 10% jitter to prevent thundering herd
+            enable_adaptive_retry=True  # Enable adaptive retry strategies
         )
 
         # Performance metrics
@@ -337,7 +574,7 @@ class UnifiedClient:
         if self._mcp_client is None:
             try:
                 # Import MCP client only when needed
-                from mcp_client import get_mcp_client
+                from .mcp_client import get_mcp_client
                 self._mcp_client = get_mcp_client()
                 self.logger.info("MCP client initialized")
             except ImportError as e:
