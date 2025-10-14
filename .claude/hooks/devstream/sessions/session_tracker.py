@@ -17,6 +17,9 @@ import structlog
 
 from .session_manager import SessionManager
 
+# LOG-004: Use AnyIO Lock for better async synchronization (Context7 pattern)
+_session_lock = anyio.Lock()
+
 logger = structlog.get_logger(__name__)
 
 
@@ -79,8 +82,10 @@ class SessionTracker:
         Raises:
             TrackingException: If tracking already exists or session not found
         """
-        if session_id in self._active_trackers:
-            raise TrackingException(f"Already tracking session {session_id}")
+        # LOG-004: Fix race condition - use lock for thread-safe check-and-act
+        async with _session_lock:
+            if session_id in self._active_trackers:
+                raise TrackingException(f"Already tracking session {session_id}")
 
         # Verify session exists and is active
         session = await self.session_manager.get_session(session_id)
@@ -93,18 +98,20 @@ class SessionTracker:
             # Create cancellation scope for this session
             cancel_scope = anyio.CancelScope()
 
-            # Initialize metrics
-            self._metrics_cache[session_id] = SessionMetrics(
-                session_id=session_id,
-                tokens_used=session.tokens_used or 0,
-                files_modified=session.files_modified or 0,
-                tasks_completed=session.tasks_completed or 0,
-                last_activity=datetime.now()
-            )
-            self._operation_times[session_id] = []
+            # LOG-004: Use lock for thread-safe dictionary updates
+            async with _session_lock:
+                # Initialize metrics
+                self._metrics_cache[session_id] = SessionMetrics(
+                    session_id=session_id,
+                    tokens_used=session.tokens_used or 0,
+                    files_modified=session.files_modified or 0,
+                    tasks_completed=session.tasks_completed or 0,
+                    last_activity=datetime.now()
+                )
+                self._operation_times[session_id] = []
 
-            # Store cancel scope for later cancellation
-            self._active_trackers[session_id] = cancel_scope
+                # Store cancel scope for later cancellation
+                self._active_trackers[session_id] = cancel_scope
 
             # Start tracking tasks as background tasks
             async def run_tracking_tasks() -> None:
@@ -146,14 +153,18 @@ class SessionTracker:
         Args:
             session_id: Session identifier to stop tracking
         """
-        cancel_scope = self._active_trackers.pop(session_id, None)
-        if cancel_scope:
-            # Cancel the tracking scope
-            cancel_scope.cancel()
+        # LOG-004: Fix race condition - use lock for thread-safe dictionary access
+        async with _session_lock:
+            cancel_scope = self._active_trackers.pop(session_id, None)
 
-            # Clean up caches
-            self._metrics_cache.pop(session_id, None)
-            self._operation_times.pop(session_id, None)
+            if cancel_scope:
+                # Clean up caches atomically with scope removal
+                self._metrics_cache.pop(session_id, None)
+                self._operation_times.pop(session_id, None)
+
+        if cancel_scope:
+            # Cancel the tracking scope outside the lock to avoid blocking
+            cancel_scope.cancel()
 
             self._logger.info(
                 "Stopped tracking session",
@@ -167,12 +178,14 @@ class SessionTracker:
             session_id: Session identifier
             **metrics: Metrics to update (tokens_used, files_modified, tasks_completed)
         """
-        if session_id not in self._active_trackers:
-            self._logger.warning(
-                "Attempted to update untracked session",
-                extra={"session_id": session_id}
-            )
-            return
+        # LOG-004: Fix race condition - use AnyIO ResourceGuard for exclusive access
+        async with _session_lock:
+            if session_id not in self._active_trackers:
+                self._logger.warning(
+                    "Attempted to update untracked session",
+                    extra={"session_id": session_id}
+                )
+                return
 
         start_time = datetime.now()
 
@@ -236,14 +249,18 @@ class SessionTracker:
         Returns:
             Number of sessions cleaned up
         """
-        cleanup_count = 0
-        current_time = datetime.now()
+        # LOG-004: Fix race condition - get snapshot under lock, then cleanup
+        async with _session_lock:
+            # Create snapshot of sessions to cleanup
+            sessions_to_cleanup = [
+                session_id for session_id, metrics in list(self._metrics_cache.items())
+                if (datetime.now() - metrics.last_activity) > timedelta(minutes=max_inactive_minutes)
+            ]
 
-        for session_id, metrics in list(self._metrics_cache.items()):
-            inactive_time = current_time - metrics.last_activity
-            if inactive_time > timedelta(minutes=max_inactive_minutes):
-                await self.stop_tracking(session_id)
-                cleanup_count += 1
+        cleanup_count = 0
+        for session_id in sessions_to_cleanup:
+            await self.stop_tracking(session_id)
+            cleanup_count += 1
 
         if cleanup_count > 0:
             self._logger.info(

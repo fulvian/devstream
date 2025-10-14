@@ -528,7 +528,20 @@ class PreToolUseHook:
                         docs_sections.append(f"### {lib.title()} ({library_id})\n\n{docs}")
 
                 except Exception as e:
-                    self.base.debug_log(f"Failed to retrieve docs for {lib}: {e}")
+                    # LOG-003: Fix silent Context7 failures - provide clear feedback per library
+                    self.base.warning_feedback(f"Context7 failed for {lib}: {str(e)[:80]}")
+                    self.base.debug_log(f"Context7 library {lib} retrieval failed - full error: {e}")
+
+                    # Log specific library failure to memory
+                    try:
+                        await self.unified_client.store_memory(
+                            content=f"Context7 library-specific failure - library: {lib}, error: {str(e)}",
+                            content_type="error",
+                            keywords=["context7-failure", "log-003", lib, "debugging"],
+                            hook_name="pre_tool_use_context7_library_failure"
+                        )
+                    except:
+                        pass  # Non-blocking
                     continue
 
             if not docs_sections:
@@ -543,9 +556,23 @@ class PreToolUseHook:
             return formatted
 
         except Exception as e:
-            self.base.debug_log(f"Context7 direct retrieval failed: {e}")
+            # LOG-003: Fix silent Context7 failures - provide clear user feedback
+            self.base.warning_feedback(f"Context7 direct retrieval failed: {str(e)[:100]}")
+            self.base.debug_log(f"Context7 direct retrieval failed - full error: {e}")
+
+            # Log to memory for debugging (non-blocking)
+            try:
+                libraries = self._detect_libraries(content, file_path)
+                await self.unified_client.store_memory(
+                    content=f"Context7 failure detected - libraries: {', '.join(libraries)}, error: {str(e)}",
+                    content_type="error",
+                    keywords=["context7-failure", "log-003", "debugging"],
+                    hook_name="pre_tool_use_context7_failure"
+                )
+            except:
+                pass  # Non-blocking, don't fail the whole operation
+
             # Fallback to advisory pattern on failure
-            libraries = self._detect_libraries(content, file_path)
             self.current_file_path = file_path  # Store for fallback
             return await self._emit_context7_advisory_fallback(libraries)
 

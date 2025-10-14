@@ -403,13 +403,14 @@ except ImportError:
 
         async def execute(self, operation: Callable, *args, **kwargs) -> Any:
             """
-            Execute operation with Context7-compliant retry logic.
+            Execute operation with Context7-compliant retry logic and proper exception chaining.
 
             Enhanced Features:
             - Jitter-backed exponential backoff
             - Adaptive retry strategies
             - Circuit breaker integration
             - Comprehensive monitoring
+            - LOG-005: Proper exception chaining with py-buzz patterns
 
             Args:
                 operation: Async callable to execute
@@ -420,8 +421,10 @@ except ImportError:
                 Result of operation
 
             Raises:
-                Exception: Last exception if all retries fail
+                Exception: Enhanced exception with full context and retry history
             """
+            # LOG-005: Track retry history for proper exception chaining
+            retry_history = []
             last_exception = None
             start_time = time.time()
 
@@ -447,6 +450,13 @@ except ImportError:
 
                 except Exception as e:
                     last_exception = e
+                    retry_history.append({
+                        'attempt': attempt + 1,
+                        'exception_type': type(e).__name__,
+                        'exception_message': str(e),
+                        'classification': self._classify_error(e),
+                        'timestamp': time.time()
+                    })
 
                     # Check if we should retry this error
                     if not self._should_retry(e, attempt):
@@ -455,7 +465,8 @@ except ImportError:
                             f"RetryPolicy: Not retrying {type(e).__name__}: {e} "
                             f"(classification: {self._classify_error(e)})"
                         )
-                        raise
+                        # LOG-005: Raise with enhanced context
+                        raise self._create_enhanced_exception(e, retry_history, start_time)
 
                     # Calculate delay for next attempt
                     if attempt < self.max_retries:
@@ -471,7 +482,7 @@ except ImportError:
                         self._metrics['total_delay_time'] += adaptive_delay
                         await asyncio.sleep(adaptive_delay)
 
-            # All retries failed
+            # All retries failed - LOG-005: Create enhanced exception with full context
             self._metrics['failed_retries'] += 1
             total_time = time.time() - start_time
             logging.warning(
@@ -479,7 +490,73 @@ except ImportError:
                 f"Final error: {type(last_exception).__name__}: {last_exception}"
             )
 
-            raise last_exception
+            raise self._create_enhanced_exception(last_exception, retry_history, start_time)
+
+        def _create_enhanced_exception(self, original_exception: Exception, retry_history: list, start_time: float) -> Exception:
+            """
+            Create enhanced exception with proper context using Context7 py-buzz patterns.
+
+            Args:
+                original_exception: The original exception that caused the failure
+                retry_history: List of retry attempts with details
+                start_time: When the operation started
+
+            Returns:
+                Enhanced exception with full context and retry history
+            """
+            # LOG-005: Apply Context7 py-buzz pattern for exception chaining
+            total_time = time.time() - start_time
+
+            # Create detailed error message with retry context
+            error_details = (
+                f"Operation failed after {self.max_retries + 1} attempts in {total_time:.2f}s. "
+                f"Original error: {type(original_exception).__name__}: {original_exception}. "
+                f"Retry history: {self._format_retry_history(retry_history)}. "
+                f"Policy: max_retries={self.max_retries}, jitter_factor={self.jitter_factor}, "
+                f"adaptive_retry={self.enable_adaptive_retry}"
+            )
+
+            # Create enhanced exception that preserves the original
+            enhanced_exception = type(original_exception)(
+                error_details
+            )
+
+            # Set proper exception chaining (Context7 best practice)
+            enhanced_exception.__cause__ = original_exception
+            enhanced_exception.__context__ = getattr(original_exception, '__context__', None)
+
+            # Add retry history as attribute for debugging
+            enhanced_exception.retry_history = retry_history
+            enhanced_exception.total_time = total_time
+            enhanced_exception.retry_policy_config = {
+                'max_retries': self.max_retries,
+                'jitter_factor': self.jitter_factor,
+                'adaptive_retry': self.enable_adaptive_retry,
+                'backoff_factor': self.backoff_factor
+            }
+
+            return enhanced_exception
+
+        def _format_retry_history(self, retry_history: list) -> str:
+            """
+            Format retry history for error messages using Context7 patterns.
+
+            Args:
+                retry_history: List of retry attempt details
+
+            Returns:
+                Formatted string with retry history
+            """
+            if not retry_history:
+                return "no retries"
+
+            history_parts = []
+            for attempt in retry_history[-3:]:  # Show last 3 attempts to avoid message bloat
+                history_parts.append(
+                    f"attempt_{attempt['attempt']}({attempt['classification']})"
+                )
+
+            return " → ".join(history_parts)
 
         def get_metrics(self) -> Dict[str, Any]:
             """

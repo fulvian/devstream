@@ -81,6 +81,39 @@ class LoggerAdapter(LoggerInterface):
             api_calls=api_calls
         )
 
+    def log_direct_call(
+        self,
+        operation: str,
+        parameters: Dict[str, Any],
+        success: bool,
+        duration_ms: float,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None
+    ) -> None:
+        """Log direct database call with Context7 structured logging."""
+        if hasattr(self._logger, 'log_direct_call'):
+            self._logger.log_direct_call(
+                operation=operation,
+                parameters=parameters,
+                success=success,
+                duration_ms=duration_ms,
+                result=result,
+                error=error
+            )
+        else:
+            # Fallback to standard logging
+            if success:
+                self.info(f"Direct DB operation {operation} completed in {duration_ms:.2f}ms",
+                        extra={"operation": operation, "duration_ms": duration_ms, **parameters})
+            else:
+                self.error(f"Direct DB operation {operation} failed in {duration_ms:.2f}ms: {error}",
+                          extra={"operation": operation, "duration_ms": duration_ms, "error": error, **parameters})
+
+    @property
+    def logger(self):
+        """Access to underlying logger for compatibility."""
+        return self._logger
+
 
 class PathValidatorAdapter:
     """
