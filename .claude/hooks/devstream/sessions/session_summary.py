@@ -6,6 +6,7 @@ propagation using Context7 structlog patterns.
 """
 
 import json
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
@@ -548,7 +549,7 @@ class SessionSummary:
         return insights
 
     async def store_summary_in_memory(self, session_id: str, summary: str) -> bool:
-        """Store summary in memory system (placeholder for MCP integration).
+        """Store summary in memory system using Direct DB.
 
         Args:
             session_id: Session identifier
@@ -558,28 +559,32 @@ class SessionSummary:
             True if stored successfully, False otherwise
         """
         try:
-            # This would integrate with MCP memory system
-            # For now, just log the storage
+            # Use Direct DB system instead of deprecated MCP
+            sys.path.append('.claude/hooks/devstream/utils')
+            from direct_client import get_direct_client
+
+            client = get_direct_client()
+            result = await client.store_memory(
+                content=summary,
+                content_type="session_summary",
+                keywords=[f"session_{session_id}", "summary", "devstream"],
+                session_id=session_id
+            )
+
             self._logger.info(
-                "Session summary stored in memory",
+                "Session summary stored in Direct DB memory",
                 extra={
                     "session_id": session_id,
-                    "summary_length": len(summary)
+                    "summary_length": len(summary),
+                    "memory_id": result.get("memory_id") if result else None
                 }
             )
 
-            # TODO: Integrate with MCP memory storage
-            # mcp__devstream__devstream_store_memory(
-            #     content=summary,
-            #     content_type="session_summary",
-            #     keywords=[f"session_{session_id}", "summary", "devstream"],
-            # )
-
-            return True
+            return result and result.get("success", False)
 
         except Exception as e:
             self._logger.error(
-                "Failed to store summary in memory",
+                "Failed to store summary in Direct DB memory",
                 extra={"session_id": session_id, "error": str(e)}
             )
             return False

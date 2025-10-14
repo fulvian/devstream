@@ -82,46 +82,39 @@ def test_command_frontmatter_valid_and_complete():
 
 def test_mcp_tool_references_correct():
     """
-    Verify MCP tool references are correct and not deprecated.
+    Verify MCP devstream tools are correctly deprecated (MCP system disabled).
 
     Validates:
-    - Contains mcp__devstream__devstream_store_memory
-    - Contains mcp__devstream__devstream_search_memory
-    - No typos in tool name
-    - No deprecated tool references
+    - NO mcp__devstream__devstream_* tool references (MCP system disabled)
+    - Context7 tools still enabled
+    - Direct DB system is used instead of MCP
     """
     content = COMMAND_FILE.read_text()
-
-    # Expected tool names
-    expected_tools = [
-        'mcp__devstream__devstream_store_memory',
-        'mcp__devstream__devstream_search_memory'
-    ]
-
-    # Assert both expected tools reference exist
-    for expected_tool in expected_tools:
-        assert expected_tool in content, \
-            f"Expected MCP tool '{expected_tool}' not found in command file"
 
     # Find all MCP tool references
     mcp_tools = re.findall(r'mcp__[a-z_]+__[a-z_]+', content)
 
-    # Assert at least two tool references
-    assert len(mcp_tools) >= 2, f"Expected at least 2 MCP tool references, found {len(mcp_tools)}"
-
-    # Assert all tool references are valid (no typos)
-    valid_tools = [
+    # MCP devstream tools should NOT be present (system disabled)
+    deprecated_devstream_tools = [
         'mcp__devstream__devstream_store_memory',
-        'mcp__devstream__devstream_search_memory'
+        'mcp__devstream__devstream_search_memory',
+        'mcp__devstream__devstream_create_task',
+        'mcp__devstream__devstream_list_tasks',
+        'mcp__devstream__devstream_update_task'
     ]
-    for tool in mcp_tools:
-        assert tool in valid_tools, f"Unknown or misspelled MCP tool: {tool}"
 
-    # Assert no deprecated tools
-    deprecated_tools = ['mcp__devstream__store_memory', 'mcp__devstream__search_memory']
-    for deprecated in deprecated_tools:
-        assert deprecated not in content, \
-            f"Deprecated tool '{deprecated}' found - use 'mcp__devstream__devstream_*' instead"
+    for deprecated_tool in deprecated_devstream_tools:
+        assert deprecated_tool not in content, \
+            f"Deprecated MCP devstream tool '{deprecated_tool}' found - MCP system disabled, use Direct DB instead"
+
+    # Context7 tools should still be enabled
+    context7_tools = [tool for tool in mcp_tools if 'context7' in tool]
+    assert len(context7_tools) >= 1, "Context7 MCP tools should still be enabled"
+
+    # Assert Direct DB system is mentioned instead
+    direct_db_indicators = ['direct', 'database', 'sqlite', 'Direct DB']
+    has_direct_db = any(indicator.lower() in content.lower() for indicator in direct_db_indicators)
+    assert has_direct_db, "Direct DB system should be mentioned as replacement for MCP devstream"
 
 
 def test_workflow_instructions_complete():
