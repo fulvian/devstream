@@ -861,32 +861,40 @@ class DevStreamDirectClient:
                 return self._fts_search(conn, query, content_type, limit)
 
             try:
-                # Use sqlite-vec knn syntax with k parameter instead of LIMIT
-                sql = """
-                    SELECT
-                        sm.id, sm.content, sm.content_type, sm.keywords,
-                        sm.created_at, sm.access_count, sm.importance_score
-                    FROM vec_semantic_memory AS vec
-                    JOIN semantic_memory sm ON vec.memory_id = sm.id
-                    WHERE vec.embedding MATCH ?
-                    ORDER BY distance
-                    LIMIT ?
-                """
-
-                params: List[Union[str, int]] = [f"[{query_embedding}]", limit]
-
+                # Use sqlite-vec knn syntax with correct schema (FIXED)
+                # vec_semantic_memory has: embedding float[768], content_type PARTITION KEY, +memory_id TEXT, +content_preview TEXT
+                # For partition keys, we can filter directly in the WHERE clause
                 if content_type:
                     sql = """
                         SELECT
                             sm.id, sm.content, sm.content_type, sm.keywords,
-                            sm.created_at, sm.access_count, sm.importance_score
-                        FROM vec_semantic_memory AS vec
-                        JOIN semantic_memory sm ON vec.memory_id = sm.id
-                        WHERE vec.embedding MATCH ? AND sm.content_type = ?
-                        ORDER BY distance
+                            sm.created_at, sm.access_count, sm.importance_score,
+                            knn.distance
+                        FROM vec_semantic_memory AS knn
+                        JOIN semantic_memory sm ON knn.memory_id = sm.id
+                        WHERE knn.embedding MATCH ? AND knn.content_type = ? AND k = ?
+                        ORDER BY knn.distance
                         LIMIT ?
                     """
-                    params = [f"[{query_embedding}]", content_type, limit]
+                    params = [f"[{query_embedding}]", content_type, limit, limit]
+                else:
+                    # For general queries without content_type filter, use CTE approach
+                    sql = """
+                        WITH knn_matches AS (
+                            SELECT memory_id, distance
+                            FROM vec_semantic_memory
+                            WHERE embedding MATCH ? AND k = ?
+                        )
+                        SELECT
+                            sm.id, sm.content, sm.content_type, sm.keywords,
+                            sm.created_at, sm.access_count, sm.importance_score,
+                            knn.distance
+                        FROM knn_matches
+                        JOIN semantic_memory sm ON knn_matches.memory_id = sm.id
+                        ORDER BY knn.distance
+                        LIMIT ?
+                    """
+                    params = [f"[{query_embedding}]", limit, limit]
 
                 cursor = vec_conn.execute(sql, params)
                 rows = cursor.fetchall()
@@ -895,6 +903,11 @@ class DevStreamDirectClient:
                 results = []
                 for row in rows:
                     result = dict(row)
+                    # Handle distance field gracefully (may not exist in all query types)
+                    if 'distance' not in result:
+                        # Remove distance reference from SELECT if it doesn't exist
+                        pass  # Keep result as-is without distance
+
                     # Parse keywords JSON if needed
                     if result.get('keywords') and isinstance(result['keywords'], str):
                         try:
