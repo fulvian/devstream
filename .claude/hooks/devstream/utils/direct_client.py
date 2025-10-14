@@ -37,21 +37,40 @@ from datetime import datetime
 import uuid
 import logging
 
-# Import DevStream utilities with Context7-compliant fallback
+# Import DevStream utilities with Context7-compliant dependency injection
 sys.path.append(str(Path(__file__).parent))
 try:
-    # Try relative import first (when run as module)
-    from .connection_manager import ConnectionManager
-    from .logger import get_devstream_logger
-except ImportError:
+    # Try service interfaces first (Context7 dependency injection)
+    from service_interfaces import service_locator
+    from logger_adapter import initialize_service_locator
+    # Initialize service locator if not already done
+    initialize_service_locator()
+
+    # Get services through dependency injection
+    logger_service = service_locator.get_service('logger')
+
+    # Import connection manager (it will use dependency injection internally)
+    from connection_manager import ConnectionManager
+
+except (KeyError, ImportError) as e:
+    # Fallback to legacy imports if service locator not available
+    import logging
+    print(f"⚠️  DevStream: Service locator unavailable, using legacy fallback: {e}", file=sys.stderr)
+
     try:
-        # Fallback to absolute import (when run as script)
-        from connection_manager import ConnectionManager
-        from logger import get_devstream_logger
-    except ImportError as e:
-        # Final fallback - define dummy classes for graceful degradation
-        import logging
-        print(f"⚠️  DevStream: connection_manager/logger unavailable, using fallback: {e}", file=sys.stderr)
+        # Try relative import first (when run as module)
+        from .connection_manager import ConnectionManager
+        from .logger import get_devstream_logger
+        logger_service = get_devstream_logger('direct_client')
+    except ImportError:
+        try:
+            # Fallback to absolute import (when run as script)
+            from connection_manager import ConnectionManager
+            from logger import get_devstream_logger
+            logger_service = get_devstream_logger('direct_client')
+        except ImportError as e:
+            # Final fallback - define dummy classes for graceful degradation
+            print(f"⚠️  DevStream: connection_manager/logger unavailable, using dummy fallback: {e}", file=sys.stderr)
 
         def get_devstream_logger(name):
             class DummyLogger:
@@ -317,7 +336,7 @@ class DevStreamDirectClient:
             # Initialize connection manager with official path
             self.connection_manager = ConnectionManager.get_instance(official_db_path)
             self.db_path = self.connection_manager.db_path
-            self.logger = get_devstream_logger('direct_client')
+            self.logger = logger_service
 
             # Verify database schema compatibility
             self._verify_database_schema()

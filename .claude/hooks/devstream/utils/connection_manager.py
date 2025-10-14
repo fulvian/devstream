@@ -29,10 +29,14 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 import logging
 
-# Import path validator for security
+# Import service interfaces for dependency injection (Context7 pattern)
 import sys
 sys.path.append(str(Path(__file__).parent))
-from path_validator import validate_db_path, PathValidationError
+from service_interfaces import (
+    service_locator,
+    PathValidatorInterface,
+    LoggerInterface
+)
 
 
 class ConnectionManager:
@@ -117,7 +121,7 @@ class ConnectionManager:
         if not ConnectionManager._initializing and ConnectionManager._instance is not None:
             raise RuntimeError("Use ConnectionManager.get_instance() instead")
 
-        # Validate database path
+        # Validate database path using dependency injection
         if db_path is None:
             import os
             raw_path = os.getenv('DEVSTREAM_DB_PATH', 'data/devstream.db')
@@ -125,8 +129,10 @@ class ConnectionManager:
             raw_path = db_path
 
         try:
-            self.db_path = validate_db_path(raw_path)
-        except PathValidationError as e:
+            # Context7: Use injected path validator service
+            path_validator = service_locator.get_service('path_validator')
+            self.db_path = path_validator.validate_db_path(raw_path)
+        except Exception as e:
             # Allow official DevStream database path even if outside current subdirectory
             if raw_path == "data/devstream.db" or raw_path.endswith("/data/devstream.db"):
                 import os
@@ -140,9 +146,16 @@ class ConnectionManager:
                     project_root = current_dir.parent.parent.parent.parent
                     self.db_path = str(project_root / raw_path)
 
-                self.logger.warning(
-                    f"Using official DevStream database path outside subdirectory: {self.db_path}"
-                )
+                # Use fallback logger if service locator not available
+                try:
+                    logger_service = service_locator.get_service('logger')
+                    logger_service.warning(
+                        f"Using official DevStream database path outside subdirectory: {self.db_path}"
+                    )
+                except KeyError:
+                    logging.warning(
+                        f"Using official DevStream database path outside subdirectory: {self.db_path}"
+                    )
             else:
                 logging.error(f"Database path validation failed: {e}")
                 raise

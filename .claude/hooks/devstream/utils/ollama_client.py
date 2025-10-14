@@ -29,7 +29,10 @@ import psutil
 
 # Add utils to path
 sys.path.append(str(Path(__file__).parent))
-from logger import get_devstream_logger
+from service_interfaces import (
+    service_locator,
+    LoggerInterface
+)
 
 
 class OllamaEmbeddingClient:
@@ -69,8 +72,15 @@ class OllamaEmbeddingClient:
         self.base_url = base_url
         self.timeout = timeout
 
-        self.structured_logger = get_devstream_logger('ollama_client')
-        self.logger = self.structured_logger.logger
+        # Context7: Use dependency injection for logger
+        try:
+            self.logger_service = service_locator.get_service('logger')
+            self.logger = self.logger_service
+        except KeyError:
+            # Fallback to basic logging if service not available
+            import logging
+            self.logger = logging.getLogger('ollama_client')
+            self.logger_service = None
 
         # LRU Embedding Cache Configuration
         self.cache_enabled = os.getenv("DEVSTREAM_EMBEDDING_CACHE_ENABLED", "true").lower() == "true"
