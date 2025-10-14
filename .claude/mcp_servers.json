@@ -6,14 +6,6 @@
       "env": {
         "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
       }
-    },
-    "devstream": {
-      "command": "node",
-      "args": ["${CLAUDE_PROJECT_DIR}/mcp-devstream-server/dist/index.js"],
-      "env": {
-        "DEVSTREAM_DB_PATH": "${CLAUDE_PROJECT_DIR}/data/devstream.db"
-      },
-      "comment": "LEGACY: Only used when DEVSTREAM_DIRECT_DB_ENABLED=false. With Direct DB enabled, MCP server is not started by start-devstream.sh"
     }
   }
 }

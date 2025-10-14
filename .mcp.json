@@ -1,13 +1,3 @@
 {
-  "mcpServers": {
-    "devstream": {
-      "command": "node",
-      "args": ["/Users/fulvioventura/devstream/mcp-devstream-server/dist/index.js", "/Users/fulvioventura/devstream/data/devstream.db"],
-      "env": {
-        "NODE_ENV": "development",
-        "DEBUG": "mcp*",
-        "DEVSTREAM_DB_PATH": "/Users/fulvioventura/devstream/data/devstream.db"
-      }
-    }
-  }
+  "mcpServers": {}
 }
