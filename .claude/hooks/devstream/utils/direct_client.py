@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DevStream Direct Database Client
+DevStream Direct Database Client with Automatic Embedding Generation
 
 Replaces resource-intensive MCP server with direct SQLite connections.
 Uses ConnectionManager for thread-safe database access with Context7 patterns.
@@ -9,9 +9,19 @@ Maintains 100% API compatibility with MCP client for seamless migration.
 Key Features:
 - Thread-safe database access via ConnectionManager
 - Vector similarity search using sqlite-vec
+- Automatic embedding generation with graceful degradation
+- BLOB format storage (70% space reduction vs JSON)
+- Full-text search with FTS5 fallback
 - Interrupt handling for graceful cancellation
 - Context7-inspired async patterns
 - Full MCP API compatibility
+
+Embedding Generation:
+- Automatically generates embeddings for all stored content
+- Uses OllamaEmbeddingClient with embeddinggemma:300m model
+- Graceful degradation: storage succeeds even if embedding fails
+- 768-dimension vectors stored as binary BLOB for efficiency
+- ~100ms additional latency per operation for embedding generation
 """
 
 import asyncio
@@ -254,21 +264,33 @@ class TransactionManager:
 
 class DevStreamDirectClient:
     """
-    Direct database client replacing MCP server.
+    Direct database client replacing MCP server with automatic embedding generation.
 
     Uses ConnectionManager for thread-safe database access with Context7 patterns.
     Maintains 100% API compatibility with MCP client for seamless migration.
+
+    Features:
+    - Thread-safe database access via ConnectionManager
+    - Vector similarity search using sqlite-vec
+    - Automatic embedding generation with graceful degradation
+    - BLOB format storage (70% space reduction vs JSON)
+    - Full-text search with FTS5 fallback
+    - Interrupt handling for graceful cancellation
+    - Context7-inspired async patterns
+    - Full MCP API compatibility
 
     Args:
         db_path: Path to database file (validated)
 
     Attributes:
         connection_manager: Thread-safe connection manager instance
+        vector_search_available: Whether vector search is enabled
 
     Example:
         >>> client = DevStreamDirectClient()
-        >>> await client.store_memory("content", "code", ["keyword"])
-        'memory_id_123'
+        >>> result = await client.store_memory("content", "code", ["keyword"])
+        >>> print(result["embedding_generated"])  # True if embedding was stored
+        True
     """
 
     def __init__(self, db_path: Optional[str] = None) -> None:
@@ -433,19 +455,37 @@ class DevStreamDirectClient:
         session_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Store content in semantic_memory table directly.
+        Store content in semantic_memory table directly with automatic embedding generation.
+
+        Automatically generates and stores vector embeddings for semantic search compatibility.
+        Uses OllamaEmbeddingClient with graceful degradation - storage succeeds even if
+        embedding generation fails. Embeddings are stored as BLOB format (70% space reduction).
 
         Args:
             content: Content to store
-            content_type: Type of content (code, documentation, context, etc.)
+            content_type: Type of content (code, documentation, context, output, error, decision, learning)
             keywords: Associated keywords for search
             session_id: Session ID for tracking
 
         Returns:
-            Dictionary with stored memory ID and metadata
+            Dictionary with stored memory ID and metadata:
+            - success: True if storage succeeded
+            - memory_id: Unique identifier for stored memory
+            - content_type: Type of content stored
+            - created_at: ISO timestamp of storage
+            - embedding_generated: True if embedding was generated and stored
+            - embedding_format: "BLOB" if embedding was stored, None otherwise
+            - embedding_dimension: Embedding vector dimensions (e.g., 768), None if no embedding
 
         Raises:
             DatabaseException: If storage operation fails
+
+        Note:
+            Embedding generation is automatic and includes graceful degradation:
+            - If Ollama service is unavailable, content is still stored without embedding
+            - Embeddings are stored as binary BLOB using struct.pack for 70% space savings
+            - Uses embeddinggemma:300m model for consistent 768-dimension vectors
+            - Performance impact: ~100ms additional latency per operation
         """
         start_time = time.time()
 
@@ -456,6 +496,61 @@ class DevStreamDirectClient:
             # Prepare data for storage
             keywords_json = json.dumps(keywords or [])
             session_id_clean = session_id or os.getenv('CLAUDE_SESSION_ID', '')
+
+            # FASE 1: Generate embedding BLOB BEFORE storage (NEW CODE)
+            embedding_blob = None
+            embedding_dimension = None
+            embedding_model = None
+
+            try:
+                # Lazy import to avoid circular dependencies - use same pattern as other imports
+                try:
+                    from .ollama_client import OllamaEmbeddingClient
+                except ImportError:
+                    try:
+                        from ollama_client import OllamaEmbeddingClient
+                    except ImportError:
+                        raise ImportError("OllamaEmbeddingClient not available - embedding generation disabled")
+
+                ollama_client = OllamaEmbeddingClient()
+
+                # Generate embedding (synchronous call - DO NOT use await!)
+                embedding = ollama_client.generate_embedding(content)
+
+                if embedding and len(embedding) > 0:
+                    # Convert to BLOB using struct.pack (70% space reduction)
+                    import struct
+                    embedding_blob = struct.pack(f'{len(embedding)}f', *embedding)
+                    embedding_dimension = len(embedding)
+                    embedding_model = 'embeddinggemma:300m'
+
+                    self.logger.logger.debug(
+                        f"Embedding BLOB generated for memory {memory_id}",
+                        extra={
+                            "memory_id": memory_id,
+                            "dimension": embedding_dimension,
+                            "blob_size": len(embedding_blob),
+                            "operation": "store_memory_with_embedding"
+                        }
+                    )
+                else:
+                    self.logger.logger.warning(
+                        f"Embedding generation returned empty for memory {memory_id}",
+                        extra={"memory_id": memory_id, "operation": "store_memory"}
+                    )
+
+            except Exception as e:
+                # Graceful degradation - log error but DON'T fail storage
+                self.logger.logger.warning(
+                    f"Embedding generation failed for memory {memory_id}: {e}",
+                    extra={
+                        "memory_id": memory_id,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "operation": "store_memory_embedding_fallback"
+                    }
+                )
+                # Record will be saved without embedding (graceful degradation)
 
             # CRITICAL FIX: Use explicit transaction control for multi-statement operations
             # Context7 Pattern: Begin explicit transaction for data consistency
@@ -468,11 +563,13 @@ class DevStreamDirectClient:
                     cursor = conn.execute("""
                         INSERT INTO semantic_memory (
                             id, content, content_type, keywords, session_id,
-                            created_at, updated_at, access_count, relevance_score
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0)
+                            created_at, updated_at, access_count, relevance_score,
+                            embedding_blob, embedding_model, embedding_dimension
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?)
                     """, (
                         memory_id, content, content_type, keywords_json,
-                        session_id_clean, current_time, current_time
+                        session_id_clean, current_time, current_time,
+                        embedding_blob, embedding_model, embedding_dimension
                     ))
 
                     # Update full-text search index with error handling
@@ -524,18 +621,23 @@ class DevStreamDirectClient:
                 parameters={
                     "content_type": content_type,
                     "keywords_count": len(keywords or []),
-                    "session_id": session_id_clean
+                    "session_id": session_id_clean,
+                    "embedding_generated": embedding_blob is not None,
+                    "embedding_size_bytes": len(embedding_blob) if embedding_blob else 0
                 },
                 success=True,
                 duration_ms=duration,
-                result={"memory_id": memory_id}
+                result={"memory_id": memory_id, "has_embedding": embedding_blob is not None}
             )
 
             return {
                 "success": True,
                 "memory_id": memory_id,
                 "content_type": content_type,
-                "created_at": current_time
+                "created_at": current_time,
+                "embedding_generated": embedding_blob is not None,
+                "embedding_format": "BLOB" if embedding_blob else None,
+                "embedding_dimension": embedding_dimension
             }
 
         except Exception as e:

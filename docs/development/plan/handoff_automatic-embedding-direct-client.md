@@ -5,7 +5,7 @@
 **To**: GLM-4.6 (Precise Execution)
 **Task ID**: `auto-embedding-direct-client-20251014`
 **Implementation Time**: 55 minutes (7 micro-tasks)
-
+**plan**: /Users/fulvioventura/devstream/docs/development/plan/piano_automatic-embedding-direct-client.md
 ---
 
 ## 🎯 Mission Summary
