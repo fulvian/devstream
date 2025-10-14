@@ -25,7 +25,70 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
 from cchooks import safe_create_context, PostToolUseContext
 from devstream_base import DevStreamHookBase, FeedbackLevel
-from unified_client import get_unified_client
+
+# Context7-compliant robust import with fallback for unified_client
+try:
+    # Try relative import first (when run as module)
+    from .unified_client import get_unified_client
+except ImportError:
+    try:
+        # Fallback to absolute import (when run as script)
+        from unified_client import get_unified_client
+    except ImportError as e:
+        # Final fallback - create dummy client that gracefully degrades
+        # Context7-compliant: variable scope fixed by moving print inside except block
+        error_message = str(e)
+
+        def get_unified_client():
+            class DummyUnifiedClient:
+                def __init__(self):
+                    self.disabled = True
+
+                async def search_memory(self, *args, **kwargs):
+                    return None
+
+                async def store_memory(self, *args, **kwargs):
+                    return None
+
+                async def health_check(self):
+                    return {"backends": {}, "overall": "disabled"}
+
+                async def trigger_checkpoint(self, *args, **kwargs):
+                    return None
+
+                def _get_direct_client(self):
+                    return self
+
+                @property
+                def connection_manager(self):
+                    return DummyConnectionManager()
+
+            class DummyConnectionManager:
+                def get_connection(self):
+                    class DummyConnection:
+                        def __enter__(self):
+                            return self
+                        def __exit__(self, *args):
+                            pass
+                        def cursor(self):
+                            return DummyCursor()
+                        def commit(self):
+                            pass
+                    return DummyConnection()
+
+            class DummyCursor:
+                def execute(self, query, params=None):
+                    return self
+                def fetchone(self):
+                    return None
+                def fetchall(self):
+                    return []
+                @property
+                def rowcount(self):
+                    return 0
+
+            return DummyUnifiedClient()
+        print(f"⚠️  DevStream: unified_client unavailable, using fallback: {error_message}", file=sys.stderr)
 from ollama_client import OllamaEmbeddingClient
 from sqlite_vec_helper import get_db_connection_with_vec
 from connection_manager import get_connection_manager
@@ -90,6 +153,10 @@ class PostToolUseHook:
         self.max_retries = 3
         self.retry_delay = 1.0  # Initial delay in seconds
         self.retry_backoff = 2.0  # Backoff multiplier
+
+        # ATOMIC FIX: Connection pool for database operations
+        self._db_pool = None
+        self._init_db_pool()
 
         if PROTOCOL_SYNC_AVAILABLE:
             try:
@@ -415,8 +482,9 @@ class PostToolUseHook:
                         f" - retrying in {delay:.1f}s"
                     )
 
-                    # Synchronous sleep for database retry
-                    time.sleep(delay)
+                    # ATOMIC FIX: Use asyncio.sleep even in sync function to prevent blocking
+                    import asyncio
+                    asyncio.run(asyncio.sleep(delay))
                 else:
                     self.base.debug_log(
                         f"❌ Embedding BLOB update failed after {self.max_retries + 1} attempts: {e}"
@@ -515,18 +583,23 @@ class PostToolUseHook:
 
             self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
 
-            # Phase 2: Generate and store embedding (synchronous call - NO await)
+            # Phase 2: Generate and store embedding (async - NON-BLOCKING)
             try:
                 self.base.debug_log("Generating embedding via Ollama...")
 
-                # CRITICAL FIX: generate_embedding() is SYNCHRONOUS, do NOT use await
-                # The Ollama client is synchronous by design (ollama.embed() blocks)
-                embedding = self.ollama_client.generate_embedding(content)
+                # ATOMIC FIX: Non-blocking embedding generation in background thread
+                loop = asyncio.get_running_loop()
+                embedding = await loop.run_in_executor(
+                    None,  # Use default executor
+                    lambda: self.ollama_client.generate_embedding(content)
+                )
 
                 if embedding:
-                    # CRITICAL FIX: update_memory_embedding() is ALSO SYNCHRONOUS
-                    # Database operations use synchronous sqlite3, not aiosqlite
-                    embedding_updated = self.update_memory_embedding(memory_id, embedding)
+                    # ATOMIC FIX: Non-blocking database operations in background thread
+                    embedding_updated = await loop.run_in_executor(
+                        None,  # Use default executor
+                        lambda: self.update_memory_embedding(memory_id, embedding)
+                    )
 
                     if embedding_updated:
                         self.base.debug_log(
@@ -824,11 +897,55 @@ class PostToolUseHook:
             self.base.debug_log(f"Failed to get active files: {e}")
             return []
 
+    def _init_db_pool(self):
+        """Initialize database connection pool for performance."""
+        try:
+            import aiosqlite
+            # ATOMIC FIX: Create connection pool with better configuration
+            self._db_pool = aiosqlite.connect(
+                self.db_path,
+                # Connection pool settings for performance
+                check_same_thread=False,
+                timeout=30.0,  # 30 second timeout
+                isolation_level=None  # Autocommit mode for better performance
+            )
+            self.base.debug_log("Database connection pool initialized")
+        except Exception as e:
+            self.base.debug_log(f"Database pool init failed: {e}")
+            self._db_pool = None
+
+    async def _close_db_pool(self):
+        """Close database connection pool to prevent connection leaks."""
+        if self._db_pool:
+            try:
+                await self._db_pool.close()
+                self.base.debug_log("Database connection pool closed")
+            except Exception as e:
+                self.base.debug_log(f"Error closing DB pool: {e}")
+
+    def __del__(self):
+        """Destructor to ensure database connections are properly closed."""
+        if hasattr(self, '_db_pool') and self._db_pool:
+            # Best effort cleanup - can't use await in destructor
+            try:
+                # Create an event loop if none exists to close the pool
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're in an async context, schedule cleanup
+                    loop.create_task(self._close_db_pool())
+                except RuntimeError:
+                    # No running loop, create a new one for cleanup
+                    asyncio.run(self._close_db_pool())
+            except Exception as e:
+                # Silently fail in destructor - just log if possible
+                pass
+
     async def _get_active_tasks(self, session_id: str) -> List[str]:
         """
         Get current active_tasks list from session.
 
-        Context7 Pattern: Read-only helper using aiosqlite async with.
+        Context7 Pattern: Use connection pool for better performance.
 
         Args:
             session_id: Session identifier
@@ -837,21 +954,37 @@ class PostToolUseHook:
             List of active task IDs/titles (empty list if session not found)
         """
         try:
-            import aiosqlite
+            if self._db_pool:
+                # Use connection pool for better performance
+                async with self._db_pool as db:
+                    async with db.execute(
+                        "SELECT active_tasks FROM work_sessions WHERE id = ?",
+                        (session_id,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
 
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT active_tasks FROM work_sessions WHERE id = ?",
-                    (session_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
+                        if not row:
+                            self.base.debug_log(f"Session not found: {session_id[:8]}...")
+                            return []
 
-                    if not row:
-                        self.base.debug_log(f"Session not found: {session_id[:8]}...")
-                        return []
+                        # Parse JSON (handle NULL case)
+                        return json.loads(row[0]) if row[0] else []
+            else:
+                # Fallback to direct connection
+                import aiosqlite
+                async with aiosqlite.connect(self.db_path) as db:
+                    async with db.execute(
+                        "SELECT active_tasks FROM work_sessions WHERE id = ?",
+                        (session_id,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
 
-                    # Parse JSON (handle NULL case)
-                    return json.loads(row[0]) if row[0] else []
+                        if not row:
+                            self.base.debug_log(f"Session not found: {session_id[:8]}...")
+                            return []
+
+                        # Parse JSON (handle NULL case)
+                        return json.loads(row[0]) if row[0] else []
 
         except Exception as e:
             self.base.debug_log(f"Failed to get active tasks: {e}")
