@@ -24,8 +24,103 @@ Implementation follows OWASP Input Validation Cheat Sheet:
 """
 
 import os
+import re
+import urllib.parse
+import unicodedata
 from pathlib import Path
 from typing import Optional
+
+
+def is_path_traversal_attack(path: str) -> bool:
+    """
+    Context7-compliant path traversal detection following OWASP best practices.
+
+    Multiple detection layers following defense-in-depth principle:
+    1. URL decoding detection
+    2. Unicode normalization
+    3. Pattern-based detection for encoded variants
+    4. Backward path sequence detection
+
+    This function protects against:
+    - Basic traversal: "../etc/passwd"
+    - URL encoded: "..%2Fetc/passwd"
+    - Double encoded: "..%252Fetc/passwd"
+    - Unicode encoded: "..%c0%afetc/passwd"
+    - Mixed separators: "..\\etc/passwd"
+
+    Args:
+        path: User-provided path to validate
+
+    Returns:
+        True if path traversal attack detected, False otherwise
+    """
+    if not path:
+        return False
+
+    # Layer 1: URL decoding detection (OWASP best practice)
+    try:
+        # Try multiple decoding rounds to detect double encoding
+        decoded_path = path
+        for _ in range(3):  # Prevent infinite loops
+            previous = decoded_path
+            decoded_path = urllib.parse.unquote(decoded_path)
+            if decoded_path == previous:
+                break
+
+        # Check if decoding revealed traversal
+        if ".." in decoded_path:
+            return True
+
+    except Exception:
+        # If decoding fails, be conservative and block
+        if ".." in path:
+            return True
+
+    # Layer 2: Unicode normalization attacks
+    try:
+        normalized = unicodedata.normalize('NFC', path)
+        if ".." in normalized:
+            return True
+    except Exception:
+        pass
+
+    # Layer 3: Pattern-based detection for encoded variants
+    dangerous_patterns = [
+        r'\.\.%2[Ff]',           # URL encoded forward slash
+        r'\.\.%5[Cc]',           # URL encoded backslash
+        r'\.\.%c0%[aA][fF]',     # UTF-8 overlong encoding
+        r'\.\.%e0%80%[aA][fF]',  # UTF-8 overlong encoding variant
+        r'\.\.\\',               # Windows backslash
+        r'\.\.\/',               # Forward slash variant
+        r'%2e%2e%2[fF]',         # Double URL encoded ".."
+        r'%252e%252e%252[fF]',   # Triple URL encoded ".."
+    ]
+
+    for pattern in dangerous_patterns:
+        if re.search(pattern, path, re.IGNORECASE):
+            return True
+
+    # Layer 4: Path normalization with detection
+    try:
+        # Convert to Path object for robust handling
+        p = Path(path)
+
+        # Check for obvious traversal in any component
+        for part in p.parts:
+            if part == "..":
+                return True
+
+        # Try to resolve relative paths safely
+        if not p.is_absolute():
+            # Don't resolve - just check for traversal
+            if any(part == ".." for part in p.parts):
+                return True
+
+    except Exception:
+        # If Path parsing fails, be conservative
+        return ".." in path
+
+    return False
 
 
 class PathValidationError(ValueError):
@@ -112,12 +207,12 @@ def validate_db_path(
     # Canonicalize project root (resolve symlinks)
     canonical_project_root = os.path.realpath(project_root)
     
-    # SECURITY CHECK 1: Block obvious path traversal attempts
-    # Detect ../ sequences BEFORE canonicalization (defense in depth)
-    if ".." in path:
+    # SECURITY CHECK 1: Enhanced path traversal detection (OWASP Context7-compliant)
+    # Multiple detection layers following defense-in-depth principle
+    if is_path_traversal_attack(path):
         raise PathValidationError(
             f"Path traversal detected: {path}. "
-            f"Database paths must not contain '..' sequences. "
+            f"Database paths must not contain path traversal sequences (encoded or literal). "
             f"Valid example: data/devstream.db or /absolute/path/to/devstream.db"
         )
     
@@ -243,6 +338,23 @@ def test_path_validator():
         ("data/../../../etc/passwd", False, "Directory traversal via canonicalization"),
         ("data/test.txt", False, "Invalid file extension"),
         ("", False, "Empty path"),
+        # NEW: Enhanced path traversal test cases (Context7-compliant)
+        ("..%2Fetc/passwd", False, "URL encoded forward slash traversal"),
+        ("..%2fetc/passwd", False, "URL encoded forward slash (lowercase)"),
+        ("..%5Cetc/passwd", False, "URL encoded backslash traversal"),
+        ("..%5cetc/passwd", False, "URL encoded backslash (lowercase)"),
+        ("..%c0%afetc/passwd", False, "Unicode overlong encoding"),
+        ("..%C0%AFetc/passwd", False, "Unicode overlong encoding (uppercase)"),
+        ("..%e0%80%afetc/passwd", False, "Unicode overlong encoding variant"),
+        ("..%E0%80%AFetc/passwd", False, "Unicode overlong encoding variant (uppercase)"),
+        ("..\\etc\\passwd", False, "Windows backslash traversal"),
+        ("..\\/etc\\/passwd", False, "Mixed separator traversal"),
+        ("%2e%2e%2fetc/passwd", False, "Double URL encoded dots"),
+        ("%2E%2E%2Fetc/passwd", False, "Double URL encoded dots (uppercase)"),
+        ("%252e%252e%252fetc/passwd", False, "Triple URL encoded dots"),
+        ("%252E%252E%252Fetc/passwd", False, "Triple URL encoded dots (uppercase)"),
+        ("..././../../etc/passwd", False, "Multiple dots with current directory"),
+        ("./../etc/passwd", False, "Current directory with traversal"),
     ]
     
     print("Running security test cases:\n")
