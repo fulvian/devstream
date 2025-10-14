@@ -98,7 +98,32 @@ from rate_limiter import (
     has_memory_capacity,
     has_ollama_capacity
 )
-from real_time_capture import get_real_time_capture
+# real_time_capture module not available - commenting out
+# from real_time_capture import get_real_time_capture
+
+# ContentQualityFilter integration (Task 1: Storage optimization)
+# Replace basic content storage with intelligent quality filtering
+# Target: 95% reduction in useless records (from 109K baseline)
+
+try:
+    from optimization.content_quality_filter import get_content_quality_filter
+    CONTENT_QUALITY_FILTER_AVAILABLE = True
+except ImportError as e:
+    CONTENT_QUALITY_FILTER_AVAILABLE = False
+    _CONTENT_QUALITY_FILTER_IMPORT_ERROR = str(e)
+    print(f"⚠️  DevStream: ContentQualityFilter unavailable: {e}", file=sys.stderr)
+
+# AsyncEmbeddingBatchProcessor integration (Task 2: Embedding optimization)
+# Replace synchronous embedding generation with async batch processing
+# Target: 100% pass rate with Context7-compliant retry patterns
+
+try:
+    from optimization.async_embedding_processor import get_async_embedding_processor
+    ASYNC_EMBEDDING_PROCESSOR_AVAILABLE = True
+except ImportError as e:
+    ASYNC_EMBEDDING_PROCESSOR_AVAILABLE = False
+    _ASYNC_EMBEDDING_PROCESSOR_IMPORT_ERROR = str(e)
+    print(f"⚠️  DevStream: AsyncEmbeddingProcessor unavailable: {e}", file=sys.stderr)
 
 # Protocol State Manager imports (FASE 2 Integration)
 try:
@@ -143,7 +168,9 @@ class PostToolUseHook:
         self.db_path = str(project_root / 'data' / 'devstream.db')
 
         # FASE 1: Initialize RealTimeDataCapture for enhanced file monitoring
-        self.real_time_capture = get_real_time_capture(str(project_root))
+        # real_time_capture module not available - commenting out
+        # self.real_time_capture = get_real_time_capture(str(project_root))
+        self.real_time_capture = None
 
         # FASE 2: Protocol State Sync components
         self.protocol_manager = None
@@ -168,6 +195,36 @@ class PostToolUseHook:
                     f"Protocol sync initialization failed: {e}",
                     FeedbackLevel.MINIMAL
                 )
+
+        # Initialize ContentQualityFilter for intelligent storage (Task 1)
+        self.content_quality_filter = None
+        if CONTENT_QUALITY_FILTER_AVAILABLE:
+            try:
+                self.content_quality_filter = get_content_quality_filter(
+                    quality_threshold=0.3  # Filter low-quality content
+                )
+                self.base.debug_log("ContentQualityFilter initialized")
+            except Exception as e:
+                self.base.debug_log(f"ContentQualityFilter init failed: {e}")
+                # Don't modify module-level variable - just set component to None
+        else:
+            self.base.debug_log(f"ContentQualityFilter unavailable: {_CONTENT_QUALITY_FILTER_IMPORT_ERROR}")
+
+        # Initialize AsyncEmbeddingProcessor for optimized embedding generation (Task 2)
+        self.async_embedding_processor = None
+        if ASYNC_EMBEDDING_PROCESSOR_AVAILABLE:
+            try:
+                self.async_embedding_processor = get_async_embedding_processor(
+                    batch_size=5,                    # Process up to 5 embeddings at once
+                    max_retries=3,                   # Retry logic for temporary failures
+                    max_concurrent_batches=3           # Concurrent batch processing
+                )
+                self.base.debug_log("AsyncEmbeddingProcessor initialized")
+            except Exception as e:
+                self.base.debug_log(f"AsyncEmbeddingProcessor init failed: {e}")
+                # Don't modify module-level variable - just set component to None
+        else:
+            self.base.debug_log(f"AsyncEmbeddingProcessor unavailable: {_ASYNC_EMBEDDING_PROCESSOR_IMPORT_ERROR}")
 
     async def retry_with_backoff(
         self,
@@ -337,24 +394,28 @@ class PostToolUseHook:
         try:
             self.base.debug_log(f"Triggering real-time capture for critical tool: {tool_name}")
 
-            # FASE 1: Start real-time monitoring if not already running
-            if not self.real_time_capture.is_running:
-                monitoring_started = self.real_time_capture.start_monitoring()
-                if monitoring_started:
-                    self.base.debug_log("Real-time file monitoring started")
-                else:
-                    self.base.debug_log("Failed to start real-time monitoring")
+            # FASE 1: Real-time capture not available - graceful degradation
+            if self.real_time_capture is None:
+                self.base.debug_log("Real-time capture not available (module missing)")
+            else:
+                # Start real-time monitoring if not already running
+                if not self.real_time_capture.is_running:
+                    monitoring_started = self.real_time_capture.start_monitoring()
+                    if monitoring_started:
+                        self.base.debug_log("Real-time file monitoring started")
+                    else:
+                        self.base.debug_log("Failed to start real-time monitoring")
 
-            # If we have a specific file path, ensure it's being monitored
-            if file_path and self.real_time_capture._should_monitor_file(file_path):
-                self.base.debug_log(f"File is monitored for real-time capture: {Path(file_path).name}")
+                # If we have a specific file path, ensure it's being monitored
+                if file_path and self.real_time_capture._should_monitor_file(file_path):
+                    self.base.debug_log(f"File is monitored for real-time capture: {Path(file_path).name}")
 
-            # Get real-time capture status
-            status = self.real_time_capture.get_status()
-            self.base.debug_log(
-                f"Real-time capture status: running={status['is_running']}, "
-                f"files_monitored={status['monitored_files_count']}"
-            )
+                # Get real-time capture status
+                status = self.real_time_capture.get_status()
+                self.base.debug_log(
+                    f"Real-time capture status: running={status['is_running']}, "
+                    f"files_monitored={status['monitored_files_count']}"
+                )
 
             # Use unified client for checkpoint with automatic backend selection
             result = await self.unified_client.trigger_checkpoint(
@@ -520,14 +581,55 @@ class PostToolUseHook:
             Memory ID if storage successful, None otherwise
         """
         try:
-            # Extract content preview
-            preview = self.extract_content_preview(content, max_length=500)
+            # TASK 1 ENHANCEMENT: Apply ContentQualityFilter for intelligent storage
+            # Target: 95% reduction in useless records (from 109K baseline)
+            if self.content_quality_filter:
+                try:
+                    # Apply quality filtering to content
+                    should_store, quality_score = self.content_quality_filter.should_store_content(
+                        content=content,
+                        file_path=file_path,
+                        content_type=content_type,
+                        entities=entities,
+                        topics=topics
+                    )
 
-            # Build memory content
+                    if not should_store:
+                        self.base.debug_log(
+                            f"ContentQualityFilter rejected: score below threshold "
+                            f"(score: {quality_score:.2f})"
+                        )
+                        return None  # Skip storage
+
+                    # Use original content and quality-based metadata
+                    filtered_content = content
+                    enhanced_keywords = []  # Basic keywords - no enhancement from filter
+
+                    self.base.debug_log(
+                        f"ContentQualityFilter accepted: score={quality_score:.2f}, "
+                        f"enhanced_keywords={len(enhanced_keywords)}"
+                    )
+
+                except Exception as e:
+                    self.base.debug_log(f"ContentQualityFilter failed, using original content: {e}")
+                    filtered_content = content
+                    enhanced_keywords = []
+                    quality_score = 0.0
+            else:
+                # Fallback to original content
+                filtered_content = content
+                enhanced_keywords = []
+                quality_score = 0.0
+
+            # Extract content preview from filtered content
+            preview = self.extract_content_preview(filtered_content, max_length=500)
+
+            # Build memory content with quality information
             memory_content = f"""# File Modified: {Path(file_path).name}
 
 **Operation**: {operation}
 **File**: {file_path}
+**Quality Score**: {quality_score:.2f}
 
 ## Content Preview
 
@@ -535,21 +637,32 @@ class PostToolUseHook:
 """
 
             # Extract base keywords
-            keywords = self.extract_keywords(file_path, content)
+            keywords = self.extract_keywords(file_path, filtered_content)
 
             # Add topics and entities to keywords
             keywords.extend(topics)
             keywords.extend(entities)
 
+            # Add enhanced keywords from ContentQualityFilter
+            keywords.extend(enhanced_keywords)
+
             # Add tool source tracking
             keywords.append(f"tool:{operation.lower()}")
+
+            # Add quality-based keyword for filtering
+            if quality_score > 0.8:
+                keywords.append("high-quality")
+            elif quality_score > 0.5:
+                keywords.append("medium-quality")
+            else:
+                keywords.append("low-quality")
 
             # Deduplicate keywords
             keywords = list(set(keywords))
 
             self.base.debug_log(
                 f"Storing memory: {len(preview)} chars, {len(keywords)} keywords "
-                f"({len(topics)} topics, {len(entities)} entities)"
+                f"({len(topics)} topics, {len(entities)} entities, quality: {quality_score:.2f})"
             )
 
             # Get current session ID for memory storage
@@ -583,32 +696,57 @@ class PostToolUseHook:
 
             self.base.success_feedback(f"Memory stored: {Path(file_path).name}")
 
-            # Phase 2: Generate and store embedding (async - NON-BLOCKING)
+            # Phase 2: Generate and store embedding with AsyncEmbeddingProcessor (Task 2)
+            # Target: 100% pass rate with Context7-compliant retry patterns
             try:
-                self.base.debug_log("Generating embedding via Ollama...")
-
-                # ATOMIC FIX: Non-blocking embedding generation in background thread
-                loop = asyncio.get_running_loop()
-                embedding = await loop.run_in_executor(
-                    None,  # Use default executor
-                    lambda: self.ollama_client.generate_embedding(content)
-                )
-
-                if embedding:
-                    # ATOMIC FIX: Non-blocking database operations in background thread
-                    embedding_updated = await loop.run_in_executor(
-                        None,  # Use default executor
-                        lambda: self.update_memory_embedding(memory_id, embedding)
+                if self.async_embedding_processor:
+                    # Use AsyncEmbeddingProcessor for optimized embedding generation
+                    embedding_task = self.async_embedding_processor.queue_embedding_generation(
+                        content=filtered_content,  # Use quality-filtered content
+                        memory_id=memory_id,
+                        priority="high" if quality_score > 0.7 else "normal",
+                        metadata={
+                            "file_path": file_path,
+                            "operation": operation,
+                            "content_type": content_type,
+                            "quality_score": quality_score
+                        }
                     )
 
-                    if embedding_updated:
-                        self.base.debug_log(
-                            f"✓ Embedding stored: {len(embedding)}D"
-                        )
-                    else:
-                        self.base.debug_log("Embedding update failed")
+                    self.base.debug_log(
+                        f"AsyncEmbeddingProcessor queued: {memory_id[:8]}... "
+                        f"(priority: {'high' if quality_score > 0.7 else 'normal'}, "
+                        f"quality: {quality_score:.2f})"
+                    )
+
+                    # Process is non-blocking - embedding will be generated in background
+                    # No need to wait for completion here
                 else:
-                    self.base.debug_log("Embedding generation returned None")
+                    # Fallback to synchronous embedding generation
+                    self.base.debug_log("Generating embedding via Ollama (fallback)...")
+
+                    # ATOMIC FIX: Non-blocking embedding generation in background thread
+                    loop = asyncio.get_running_loop()
+                    embedding = await loop.run_in_executor(
+                        None,  # Use default executor
+                        lambda: self.ollama_client.generate_embedding(filtered_content)
+                    )
+
+                    if embedding:
+                        # ATOMIC FIX: Non-blocking database operations in background thread
+                        embedding_updated = await loop.run_in_executor(
+                            None,  # Use default executor
+                            lambda: self.update_memory_embedding(memory_id, embedding)
+                        )
+
+                        if embedding_updated:
+                            self.base.debug_log(
+                                f"✓ Embedding stored: {len(embedding)}D (fallback mode)"
+                            )
+                        else:
+                            self.base.debug_log("Embedding update failed")
+                    else:
+                        self.base.debug_log("Embedding generation returned None")
 
             except Exception as embed_error:
                 # Graceful degradation - log but don't fail
@@ -1563,7 +1701,7 @@ class PostToolUseHook:
         finally:
             # FASE 1: Cleanup real-time monitoring if needed
             try:
-                if self.real_time_capture.is_running:
+                if self.real_time_capture is not None and self.real_time_capture.is_running:
                     # Don't stop monitoring here - let it run continuously
                     # to capture real-time file changes between tool executions
                     pass
@@ -1657,40 +1795,43 @@ class PostToolUseHook:
             try:
                 print("🔄 Testing real-time capture functionality...")
 
-                # Test file filtering
-                test_files = [
-                    "/test.py",           # Should monitor
-                    "/app.tsx",          # Should monitor
-                    "/docs/readme.md",   # Should monitor
-                    "/.git/config",      # Should exclude
-                    "/node_modules/pkg.js",  # Should exclude
-                ]
-
-                monitored_count = 0
-                for file_path in test_files:
-                    should_monitor = self.real_time_capture._should_monitor_file(file_path)
-                    if should_monitor:
-                        monitored_count += 1
-
-                print(f"✅ Real-time capture filtering: {monitored_count}/{len(test_files)} files correctly filtered")
-
-                # Test monitoring status
-                status = self.real_time_capture.get_status()
-                print(f"📊 Real-time capture status: running={status['is_running']}, extensions={status['monitored_extensions']}")
-
-                # Test starting monitoring (briefly for testing)
-                if not status['is_running']:
-                    print("🔄 Starting real-time monitoring test...")
-                    started = self.real_time_capture.start_monitoring([str(project_root)])
-                    if started:
-                        print("✅ Real-time monitoring started successfully")
-                        # Stop immediately after test
-                        self.real_time_capture.stop_monitoring()
-                        print("✅ Real-time monitoring stopped (test complete)")
-                    else:
-                        print("❌ Failed to start real-time monitoring")
+                if self.real_time_capture is None:
+                    print("⚠️ Real-time capture not available (module missing)")
                 else:
-                    print("✅ Real-time monitoring already running")
+                    # Test file filtering
+                    test_files = [
+                        "/test.py",           # Should monitor
+                        "/app.tsx",          # Should monitor
+                        "/docs/readme.md",   # Should monitor
+                        "/.git/config",      # Should exclude
+                        "/node_modules/pkg.js",  # Should exclude
+                    ]
+
+                    monitored_count = 0
+                    for file_path in test_files:
+                        should_monitor = self.real_time_capture._should_monitor_file(file_path)
+                        if should_monitor:
+                            monitored_count += 1
+
+                    print(f"✅ Real-time capture filtering: {monitored_count}/{len(test_files)} files correctly filtered")
+
+                    # Test monitoring status
+                    status = self.real_time_capture.get_status()
+                    print(f"📊 Real-time capture status: running={status['is_running']}, extensions={status['monitored_extensions']}")
+
+                    # Test starting monitoring (briefly for testing)
+                    if not status['is_running']:
+                        print("🔄 Starting real-time monitoring test...")
+                        started = self.real_time_capture.start_monitoring([str(project_root)])
+                        if started:
+                            print("✅ Real-time monitoring started successfully")
+                            # Stop immediately after test
+                            self.real_time_capture.stop_monitoring()
+                            print("✅ Real-time monitoring stopped (test complete)")
+                        else:
+                            print("❌ Failed to start real-time monitoring")
+                    else:
+                        print("✅ Real-time monitoring already running")
 
             except Exception as rtc_error:
                 print(f"⚠️ Real-time capture test failed: {rtc_error}")
