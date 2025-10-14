@@ -338,6 +338,325 @@ def basic_codebase_scan(project_path: str) -> Dict[str, Any]:
     return scan_results
 
 
+def create_project_database(project_path: str) -> None:
+    """
+    Create DevStream project database at data/devstream.db.
+
+    Args:
+        project_path: Path where project database should be created
+    """
+    project_path_obj = Path(project_path)
+
+    # Create data directory
+    data_dir = project_path_obj / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create database with basic schema
+    import sqlite3
+    db_path = data_dir / "devstream.db"
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+
+        # Create memory table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                keywords TEXT,
+                embedding BLOB,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Create semantic_memory table (for compatibility)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS semantic_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                keywords TEXT,
+                embedding BLOB,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Create indexes for better performance
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_content_type ON memory(content_type)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_created_at ON memory(created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_semantic_memory_content_type ON semantic_memory(content_type)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_semantic_memory_created_at ON semantic_memory(created_at)')
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Created project database at {db_path}")
+
+    except Exception as e:
+        logger.error(f"Failed to create database: {e}")
+        raise
+
+
+def create_project_claude_md(project_path: str, project_type: str) -> None:
+    """
+    Create/overwrite project-specific CLAUDE.md by copying and adapting DevStream's CLAUDE.md.
+
+    CRITICAL: CLAUDE.md is the foundation of DevStream system and MUST always be updated
+    to the latest version. Always overwrite existing CLAUDE.md.
+
+    Args:
+        project_path: Path where CLAUDE.md should be created/overwritten
+        project_type: Detected project type (python, typescript, etc.)
+    """
+    project_path_obj = Path(project_path)
+    claude_md_path = project_path_obj / "CLAUDE.md"
+
+    # Path to DevStream's CLAUDE.md
+    devstream_root = Path("/Users/fulvioventura/devstream")
+    source_claude_md = devstream_root / "CLAUDE.md"
+
+    if not source_claude_md.exists():
+        logger.warning(f"DevStream CLAUDE.md not found at {source_claude_md}")
+        # Create a basic version if source doesn't exist
+        create_basic_claude_md(project_path, project_type)
+        return
+
+    try:
+        # Read the original DevStream CLAUDE.md
+        with open(source_claude_md, 'r', encoding='utf-8') as f:
+            claude_content = f.read()
+
+        # Adapt paths and project-specific information
+        adapted_content = adapt_claude_md_content(claude_content, project_path_obj, project_type)
+
+        # Always overwrite the CLAUDE.md - it's the foundation of DevStream
+        with open(claude_md_path, 'w', encoding='utf-8') as f:
+            f.write(adapted_content)
+
+        if claude_md_path.exists():
+            logger.info(f"Updated existing CLAUDE.md at {claude_md_path}")
+        else:
+            logger.info(f"Created project CLAUDE.md at {claude_md_path}")
+
+    except Exception as e:
+        logger.error(f"Failed to copy and adapt CLAUDE.md: {e}")
+        # Fallback to basic version
+        create_basic_claude_md(project_path, project_type)
+
+
+def adapt_claude_md_content(content: str, project_path: Path, project_type: str) -> str:
+    """
+    Adapt DevStream's CLAUDE.md content for a specific project.
+
+    Args:
+        content: Original DevStream CLAUDE.md content
+        project_path: Target project path
+        project_type: Detected project type
+
+    Returns:
+        Adapted content for the project
+    """
+    # Replace DevStream-specific paths with project-specific paths
+    adaptations = [
+        # Update header
+        (r"# CLAUDE\.md - DevStream Project Rules", f"# CLAUDE.md - {project_path.name} Project"),
+
+        # Update version info
+        (r"\*\*Version\*\*: 2\.2\.0 \| \*\*Date\*\*: 2025-10-09 \| \*\*Status\*\*: Production Ready",
+         f"**Project Type**: {project_type}\n**Created**: {time.strftime('%Y-%m-%d', time.gmtime())}\n**DevStream Version**: 2.2.0 | **Status**: Production Ready"),
+
+        # Update database paths
+        (r"data/devstream\.db", f"{project_path}/data/devstream.db"),
+
+        # Update launcher script paths
+        (r"/Users/fulvioventura/devstream/scripts/simple-launcher\.sh",
+         f"{project_path}/../devstream/scripts/simple-launcher.sh"),
+
+        # Add project-specific section after the header
+        (r"(# CLAUDE\.md - [^\n]+ Project\n\n\*\*Project Type\*\*: [^\n]+\n)",
+         r"\1\nThis file contains the complete DevStream protocol and rules, adapted for this specific project.\n"),
+
+        # Update examples to use project paths
+        (r"cd /Users/fulvioventura/devstream", f"cd {project_path}"),
+    ]
+
+    adapted_content = content
+    for pattern, replacement in adaptations:
+        import re
+        adapted_content = re.sub(pattern, replacement, adapted_content)
+
+    # Add project-specific information section
+    project_section = f"""
+
+## 🏗️ Project-Specific Information
+
+**Project Name**: {project_path.name}
+**Project Path**: {project_path}
+**Project Type**: {project_type}
+**Database**: `{project_path}/data/devstream.db`
+**Configuration**: `{project_path}/.devstream/workspace.json`
+
+### Quick Start for This Project
+```bash
+# From this project directory ({project_path})
+cd {project_path}
+
+# Start DevStream with Claude Sonnet 4.5 (Anthropic)
+{project_path}/../devstream/scripts/simple-launcher.sh start anthropic
+
+# Start DevStream with GLM-4.6 (z.ai)
+{project_path}/../devstream/scripts/simple-launcher.sh start z.ai
+
+# Check project status
+devstream status
+
+# Project-specific commands (examples based on {project_type} type):
+"""
+
+    # Add project-specific examples
+    if project_type == "python":
+        project_section += f"""
+# Python development
+.devstream/bin/python -m pytest tests/
+.devstream/bin/python -m pip install package
+black src/ flake8 src/
+"""
+    elif project_type in ["typescript", "javascript"]:
+        project_section += f"""
+# Node.js development
+npm install
+npm run build
+npm test
+eslint src/ --fix
+"""
+    elif project_type == "go":
+        project_section += f"""
+# Go development
+go mod tidy
+go test ./...
+go build ./...
+"""
+    elif project_type == "rust":
+        project_section += f"""
+# Rust development
+cargo test
+cargo build --release
+cargo fmt
+cargo clippy
+"""
+    elif project_type == "java":
+        project_section += f"""
+# Java development
+mvn clean install
+mvn test
+mvn compile
+"""
+    else:
+        project_section += """
+# Generic development
+git add .
+git commit -m "your changes"
+"""
+
+    project_section += "\n```\n"
+
+    # Insert the project section before the first major section
+    adapted_content = adapted_content.replace("---\n\n## 🚨 MANDATORY SYSTEM", project_section + "\n---\n\n## 🚨 MANDATORY SYSTEM")
+
+    return adapted_content
+
+
+def create_basic_claude_md(project_path: str, project_type: str) -> None:
+    """
+    Create a basic CLAUDE.md if the original cannot be copied.
+
+    Args:
+        project_path: Path where basic CLAUDE.md should be created
+        project_type: Detected project type
+    """
+    project_path_obj = Path(project_path)
+    claude_md_path = project_path_obj / "CLAUDE.md"
+
+    basic_content = f"""# CLAUDE.md - {project_path_obj.name} Project
+
+**Project Type**: {project_type}
+**Created**: {time.strftime("%Y-%m-%d", time.gmtime())}
+**DevStream Version**: 2.2.0
+
+⚠️ **NOTE**: This is a basic CLAUDE.md generated because the original DevStream CLAUDE.md could not be found.
+For the complete DevStream protocol and rules, please refer to the original file at:
+`/Users/fulvioventura/devstream/CLAUDE.md`
+
+## 🚀 Quick Start for This Project
+
+```bash
+# From this project directory ({project_path_obj})
+cd {project_path_obj}
+
+# Start DevStream with Claude Sonnet 4.5 (Anthropic)
+{project_path_obj}/../devstream/scripts/simple-launcher.sh start anthropic
+
+# Start DevStream with GLM-4.6 (z.ai)
+{project_path_obj}/../devstream/scripts/simple-launcher.sh start z.ai
+```
+
+## 📋 Project Structure
+```
+{project_path_obj.name}/
+├── .devstream/           # DevStream configuration
+├── data/                # Project data
+│   └── devstream.db     # Project database
+├── CLAUDE.md           # This file
+└── ...                 # Your project files
+```
+
+## 🔧 Development Commands
+
+Based on your {project_type} project type:
+"""
+
+    # Add basic project-specific commands
+    if project_type == "python":
+        basic_content += """
+```bash
+.devstream/bin/python -m pytest tests/
+.devstream/bin/python -m pip install package
+black src/ flake8 src/
+```
+"""
+    elif project_type in ["typescript", "javascript"]:
+        basic_content += """
+```bash
+npm install
+npm run build
+npm test
+```
+"""
+    else:
+        basic_content += """
+```bash
+# Add your project-specific commands here
+```
+"""
+
+    basic_content += """
+
+---
+
+*Generated by DevStream v2.2.0 - Basic version*
+"""
+
+    try:
+        with open(claude_md_path, 'w', encoding='utf-8') as f:
+            f.write(basic_content)
+        logger.info(f"Created basic CLAUDE.md at {claude_md_path}")
+    except Exception as e:
+        logger.error(f"Failed to create basic CLAUDE.md: {e}")
+
+
 def create_project_structure(project_path: str) -> None:
     """
     Create DevStream project structure.
@@ -420,7 +739,7 @@ def initialize_project(
         "project_type": "unknown",
         "scan_results": None,
         "workspace_file": str(devstream_dir / "workspace.json"),
-        "database_path": str(devstream_dir / "db" / "devstream.db")
+        "database_path": str(project_path_obj / "data" / "devstream.db")
     }
 
     try:
@@ -439,6 +758,14 @@ def initialize_project(
             shutil.rmtree(devstream_dir)
 
         create_project_structure(str(project_path))
+
+        # Create project database
+        logger.info("Creating project database...")
+        create_project_database(str(project_path))
+
+        # Create project-specific CLAUDE.md
+        logger.info("Creating project-specific CLAUDE.md...")
+        create_project_claude_md(str(project_path), type_detection["primary_type"])
 
         # Update workspace.json with detected project type
         workspace_file = devstream_dir / "workspace.json"

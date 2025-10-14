@@ -1,16 +1,10 @@
 #!/bin/bash
 
-# DevStream Production Launcher v2.0
-# Starts DevStream MCP Server with Agent Auto-Delegation System
-# Integrated: Context7, Agent Routing, Memory System, Monitoring
+# DevStream Production Launcher v2.0 - Direct DB Architecture
+# Starts DevStream with Direct DB Architecture and Agent Auto-Delegation System
+# Integrated: Context7, Agent Routing, Memory System, Direct Database
 
 set -euo pipefail
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
-MCP_SERVER_DIR="$PROJECT_ROOT/mcp-devstream-server"
-VENV_DIR="$PROJECT_ROOT/.devstream"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -39,6 +33,24 @@ print_error() {
 print_feature() {
   echo -e "${CYAN}[FEATURE]${NC} $1"
 }
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Use project root from environment if set (multi-project mode), otherwise use script directory
+if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+  PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
+  print_info "Multi-project mode: Using project directory $PROJECT_ROOT"
+  print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+else
+  PROJECT_ROOT="$SCRIPT_DIR"
+  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
+  print_info "Single-project mode: Using DevStream directory $PROJECT_ROOT"
+fi
+# MCP server directory (kept for compatibility but not used in Direct DB mode)
+MCP_SERVER_DIR="$DEVSTREAM_SCRIPT_DIR/mcp-devstream-server"
+VENV_DIR="$DEVSTREAM_SCRIPT_DIR/.devstream"
 
 # Function to check and setup Python virtual environment
 check_python_venv() {
@@ -71,12 +83,12 @@ verify_agent_delegation() {
   print_status "Verifying Agent Auto-Delegation System..."
 
   # Check if agent modules exist
-  if [ ! -f "$PROJECT_ROOT/.claude/hooks/devstream/agents/pattern_matcher.py" ]; then
+  if [ ! -f "$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/agents/pattern_matcher.py" ]; then
     print_error "Pattern matcher not found"
     return 1
   fi
 
-  if [ ! -f "$PROJECT_ROOT/.claude/hooks/devstream/agents/agent_router.py" ]; then
+  if [ ! -f "$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/agents/agent_router.py" ]; then
     print_error "Agent router not found"
     return 1
   fi
@@ -84,7 +96,7 @@ verify_agent_delegation() {
   # Test module import
   local import_test=$("$VENV_DIR/bin/python" -c "
 import sys
-sys.path.insert(0, '$PROJECT_ROOT/.claude/hooks/devstream')
+sys.path.insert(0, '$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream')
 try:
     from agents.pattern_matcher import PatternMatcher
     from agents.agent_router import AgentRouter
@@ -279,10 +291,10 @@ load_llm_provider() {
   # Export provider for downstream functions
   export DEVSTREAM_LLM_PROVIDER="$provider"
 
-  # Load root .env first (single source of truth)
-  if [ -f "$PROJECT_ROOT/.env" ]; then
+  # Load root .env first (single source of truth) - always from DevStream installation
+  if [ -f "$DEVSTREAM_SCRIPT_DIR/.env" ]; then
     set -a
-    source "$PROJECT_ROOT/.env"
+    source "$DEVSTREAM_SCRIPT_DIR/.env"
     set +a
     export DEVSTREAM_ANTHROPIC_API_KEY_DEFAULT="${ANTHROPIC_API_KEY:-}"
     print_info "Root .env loaded"
@@ -292,8 +304,8 @@ load_llm_provider() {
   switch_auth_provider "$provider"
 
   # For non-anthropic providers, load additional config
-  if [ "$provider" != "anthropic" ] && [ -f "$PROJECT_ROOT/.env.llm-providers" ]; then
-    source "$PROJECT_ROOT/.env.llm-providers"
+  if [ "$provider" != "anthropic" ] && [ -f "$DEVSTREAM_SCRIPT_DIR/.env.llm-providers" ]; then
+    source "$DEVSTREAM_SCRIPT_DIR/.env.llm-providers"
     print_info "Additional provider configuration loaded"
   fi
 }
@@ -302,9 +314,9 @@ load_llm_provider() {
 load_devstream_config() {
   print_status "Loading DevStream configuration..."
 
-  # Load .env.devstream
-  if [ -f "$PROJECT_ROOT/.env.devstream" ]; then
-    export $(cat "$PROJECT_ROOT/.env.devstream" | grep -v '^#' | grep -v '^$' | xargs)
+  # Load .env.devstream - always from DevStream installation
+  if [ -f "$DEVSTREAM_SCRIPT_DIR/.env.devstream" ]; then
+    export $(cat "$DEVSTREAM_SCRIPT_DIR/.env.devstream" | grep -v '^#' | grep -v '^$' | xargs)
     print_info ".env.devstream loaded"
   else
     print_warning ".env.devstream not found"
@@ -423,29 +435,53 @@ check_prerequisites() {
     print_info "jq: $(jq --version)"
   fi
 
-  # Check database
-  if [ ! -f "$PROJECT_ROOT/data/devstream.db" ]; then
-    print_error "Database not found at data/devstream.db"
-    all_good=false
+  # Check database - use project directory for multi-project mode with Direct DB architecture
+  local db_path=""
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    db_path="$PROJECT_ROOT/data/devstream.db"
+    print_info "Direct DB: Using project database at $db_path"
   else
-    print_info "Database: Found"
+    db_path="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
+    print_info "Direct DB: Using DevStream database at $db_path"
   fi
 
-  # Check Ollama (non-blocking)
+  if [ ! -f "$db_path" ]; then
+    print_error "Database not found: $db_path"
+    all_good=false
+  else
+    print_info "Database: Found at $db_path"
+
+    # Test Direct DB access
+    local db_test=$("$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+try:
+    db = sqlite3.connect('$db_path')
+    cursor = db.execute('SELECT COUNT(*) FROM memory')
+    count = cursor.fetchone()[0]
+    print(f'OK:{count}')
+    db.close()
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)
+
+    if [[ "$db_test" == OK:* ]]; then
+      local record_count=${db_test#*:}
+      print_info "Direct DB access: $record_count records"
+    else
+      print_error "Direct DB access failed: ${db_test#ERROR:}"
+      all_good=false
+    fi
+  fi
+
+  # Check Ollama (non-blocking) - needed for embeddings in Direct DB
   if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
     print_warning "Ollama service not responding at http://localhost:11434"
     print_info "Start Ollama: brew services start ollama"
-    print_info "Continuing without Ollama (embeddings will be disabled)"
+    print_info "Embeddings will be disabled until Ollama is running"
   else
-    print_info "Ollama: Running"
-  fi
-
-  # Check MCP server build
-  if [ ! -d "$MCP_SERVER_DIR/dist" ]; then
-    print_warning "MCP server not built, running build..."
-    cd "$MCP_SERVER_DIR" && npm run build
-  else
-    print_info "MCP Server: Built"
+    print_info "Ollama: Running - embeddings available"
   fi
 
   if [ "$all_good" = false ]; then
@@ -462,8 +498,8 @@ check_direct_db_architecture() {
 
   # Check if feature flag is enabled
   local direct_db_enabled=false
-  if [ -f "$PROJECT_ROOT/.env.devstream" ]; then
-    if grep -q "DEVSTREAM_FEATURE_DIRECT_DB_ENABLED=true" "$PROJECT_ROOT/.env.devstream"; then
+  if [ -f "$DEVSTREAM_SCRIPT_DIR/.env.devstream" ]; then
+    if grep -q "DEVSTREAM_FEATURE_DIRECT_DB_ENABLED=true" "$DEVSTREAM_SCRIPT_DIR/.env.devstream"; then
       direct_db_enabled=true
     fi
   fi
@@ -480,147 +516,71 @@ check_direct_db_architecture() {
   fi
 }
 
-# Function to start MCP server
-start_mcp_server() {
-  # Check if Direct DB is enabled
-  if check_direct_db_architecture; then
-    print_status "✅ Direct DB Architecture active - MCP server not needed"
-    return 0
+# Function to initialize Direct DB Architecture
+initialize_direct_db() {
+  print_status "Initializing Direct DB Architecture..."
+
+  # Verify Direct DB is enabled
+  if ! check_direct_db_architecture; then
+    print_error "❌ Direct DB Architecture is disabled"
+    print_error "   Enable it by setting DEVSTREAM_FEATURE_DIRECT_DB_ENABLED=true"
+    exit 1
   fi
 
-  print_warning "⚠️  Starting MCP Server in legacy mode (Direct DB disabled)"
-  print_info "   Consider enabling Direct DB for better performance"
-  print_status "Starting DevStream MCP Server..."
-
-  cd "$MCP_SERVER_DIR"
-
-  # Check if already running
-  if lsof -i :9090 >/dev/null 2>&1; then
-    print_warning "Metrics server already running on port 9090"
-    print_info "Skipping server startup"
-    return 0
-  fi
-
-  # NEW: Cleanup zombie MCP processes BEFORE starting server
-  print_status "Running pre-launch zombie cleanup..."
-  local zombie_count=$(pgrep -f "mcp-devstream-server/dist/index.js" 2>/dev/null | wc -l | tr -d ' ')
-
-  if [ "$zombie_count" -gt 0 ]; then
-    print_warning "Found $zombie_count existing MCP processes, cleaning up..."
-    if "$VENV_DIR/bin/python" "$PROJECT_ROOT/.claude/hooks/devstream/monitoring/mcp_cleanup_hook.py"; then
-      print_status "✅ Pre-launch cleanup complete"
-      sleep 1  # Brief pause to ensure processes fully terminated
-    else
-      print_warning "⚠️  Cleanup had issues, but continuing..."
-    fi
-  fi
-
-  # ============================================================================
-  # Pre-Launch MCP Configuration Validation
-  # ============================================================================
-
-  print_status "Validating MCP configuration before launch..."
-
-  # Extract DEVSTREAM_DB_PATH from .mcp.json
-  if [ -f "$PROJECT_ROOT/.mcp.json" ]; then
-    MCP_DB_PATH=$(grep "DEVSTREAM_DB_PATH" "$PROJECT_ROOT/.mcp.json" | sed 's/.*": "//;s/".*//')
-
-    # Validate it's NOT the wrong path
-    if [[ "$MCP_DB_PATH" == *"mcp-devstream-server/data/devstream.db"* ]]; then
-      print_error "❌ CRITICAL: .mcp.json contains WRONG database path!"
-      print_error "   Found: $MCP_DB_PATH"
-      print_error "   Expected: /Users/fulvioventura/devstream/data/devstream.db"
-      print_error ""
-      print_error "This indicates Claude Code configuration cache issue."
-      print_error "SOLUTION: Restart Claude Code application completely (Cmd+Q then relaunch)."
-      print_error ""
-      exit 1
-    fi
-
-    # Validate correct path exists
-    if [ ! -f "$MCP_DB_PATH" ]; then
-      print_error "❌ ERROR: Database file not found at: $MCP_DB_PATH"
-      exit 1
-    fi
-
-    # Validate database size (correct DB should be ~500MB)
-    DB_SIZE=$(stat -f%z "$MCP_DB_PATH" 2>/dev/null || stat -c%s "$MCP_DB_PATH" 2>/dev/null)
-    if [ "$DB_SIZE" -lt 50000000 ]; then  # Less than 50MB is suspicious
-      print_warning "⚠️  WARNING: Database size is only $(numfmt --to=iec $DB_SIZE 2>/dev/null || echo $DB_SIZE bytes)"
-      print_warning "   Expected ~500MB for production database"
-      print_warning "   Verify you're using the correct database path"
-    fi
-
-    print_status "✅ MCP configuration validated - Path: $MCP_DB_PATH ($(numfmt --to=iec $DB_SIZE 2>/dev/null || echo $DB_SIZE bytes))"
+  # Set environment variables for Direct DB
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    export DEVSTREAM_DB_PATH="$PROJECT_ROOT/data/devstream.db"
+    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+    print_info "Direct DB configured for project: $PROJECT_ROOT"
   else
-    print_warning "⚠️  .mcp.json file not found - skipping configuration validation"
+    export DEVSTREAM_DB_PATH="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
+    print_info "Direct DB configured for DevStream installation"
   fi
 
-  # Start production server in background with memory optimization flags
-  # Context7 best practice: Increase heap size and expose GC for long-running Node.js processes
-  nohup node --max-old-space-size=8192 --expose-gc start-production.js > "$PROJECT_ROOT/devstream-server.log" 2>&1 &
-  local server_pid=$!
-
-  print_info "Server PID: $server_pid"
-  print_info "Log file: $PROJECT_ROOT/devstream-server.log"
-
-  # Wait for server to start
-  print_status "Waiting for server to start..."
-  local max_attempts=30
-  local attempt=0
-
-  while [ $attempt -lt $max_attempts ]; do
-    if curl -s http://localhost:9090/health >/dev/null 2>&1; then
-      print_status "✅ MCP Server started successfully"
-      print_info "Metrics: http://localhost:9090/metrics"
-      print_info "Health: http://localhost:9090/health"
-      return 0
-    fi
-    sleep 1
-    attempt=$((attempt + 1))
-  done
-
-  print_error "Server failed to start within 30 seconds"
-  print_info "Check logs: tail -f $PROJECT_ROOT/devstream-server.log"
-  exit 1
+  print_status "✅ Direct DB Architecture initialized"
 }
 
-# Function to validate database path and configuration
-validate_database_config() {
-  print_status "Validating database configuration..."
+# Function to validate Direct DB configuration
+validate_direct_db_config() {
+  print_status "Validating Direct DB configuration..."
 
   local db_path=""
-  local config_file="$HOME/.claude/config.json"
   local validation_passed=true
 
-  # Check for .devstream directory first
-  if [ -d "$PROJECT_ROOT/.devstream" ]; then
-    local db_path="$PROJECT_ROOT/.devstream/db/devstream.db"
-    print_info "Multi-project mode: Using project database at $db_path"
+  # Determine database path based on mode
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    db_path="$PROJECT_ROOT/data/devstream.db"
+    print_info "Direct DB: Using project database at $db_path"
   else
-    # Fallback to legacy single-project mode
-    local db_path="$PROJECT_ROOT/data/devstream.db"
-    print_info "Legacy mode: Using single-project database at $db_path"
+    db_path="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
+    print_info "Direct DB: Using DevStream database at $db_path"
   fi
 
   # Check if database exists
   if [ ! -f "$db_path" ]; then
-    print_error "Database not found: $db_path"
+    print_error "❌ Database not found: $db_path"
     validation_passed=false
   else
-    print_info "Database found: $db_path"
+    print_info "✅ Database found: $db_path"
   fi
 
-  # Check database accessibility
+  # Test Direct DB accessibility
   if [ "$validation_passed" = true ]; then
     local db_test=$("$VENV_DIR/bin/python" -c "
 import sqlite3
 import sys
 try:
     db = sqlite3.connect('$db_path')
+
+    # Test memory table
+    cursor = db.execute('SELECT COUNT(*) FROM memory')
+    memory_count = cursor.fetchone()[0]
+
+    # Test semantic_memory table
     cursor = db.execute('SELECT COUNT(*) FROM semantic_memory')
-    count = cursor.fetchone()[0]
-    print(f'OK:{count}')
+    semantic_count = cursor.fetchone()[0]
+
+    print(f'OK:{memory_count}:{semantic_count}')
     db.close()
 except Exception as e:
     print(f'ERROR:{e}')
@@ -628,132 +588,92 @@ except Exception as e:
 " 2>&1)
 
     if [[ "$db_test" == OK:* ]]; then
-      local record_count=${db_test#*:}
-      print_info "Database accessible: $record_count records"
+      local memory_count=${db_test#*:}
+      local semantic_count=${memory_count#*:}
+      memory_count=${memory_count%:*}
+      print_info "✅ Direct DB accessible:"
+      print_info "   Memory table: $memory_count records"
+      print_info "   Semantic Memory table: $semantic_count records"
     else
-      print_error "Database access failed: ${db_test#ERROR:}"
+      print_error "❌ Direct DB access failed: ${db_test#ERROR:}"
       validation_passed=false
     fi
   fi
 
-  # Check MCP configuration consistency
-  if [ -f "$config_file" ]; then
-    local mcp_db_path=$(grep -A 5 '"devstream"' "$config_file" | grep "DEVSTREAM_DB_PATH" | cut -d'"' -f4 2>/dev/null || echo "")
-
-    if [ -n "$mcp_db_path" ]; then
-      # Expand variables if present
-      local expanded_path="${mcp_db_path//\${CLAUDE_PROJECT_DIR}/$PROJECT_ROOT}"
-      expanded_path="${expanded_path//\$CLAUDE_PROJECT_DIR/$PROJECT_ROOT}"
-
-      if [ "$expanded_path" != "$db_path" ]; then
-        print_warning "MCP configuration mismatch:"
-        print_warning "  Expected: $db_path"
-        print_warning "  Configured: $expanded_path"
-        print_info "  Run: ./start-devstream.sh restart to fix configuration"
-      else
-        print_info "MCP configuration: Path matches database location"
-      fi
-    else
-      print_warning "MCP configuration not found in ~/.claude/config.json"
-    fi
-  fi
-
-  # Check for wrong database paths (data.noindex)
+  # Check for legacy database paths
   if [ -d "$PROJECT_ROOT/data.noindex" ] && [ -f "$PROJECT_ROOT/data.noindex/devstream.db" ]; then
-    print_warning "Legacy database found at data.noindex/devstream.db"
-    print_info "  Current database: data/devstream.db"
-    print_info "  Consider archiving data.noindex/ directory"
+    print_warning "⚠️  Legacy database found at data.noindex/devstream.db"
+    print_info "   Current database: data/devstream.db"
+    print_info "   Consider archiving data.noindex/ directory"
   fi
 
   if [ "$validation_passed" = false ]; then
-    print_error "Database validation failed"
+    print_error "❌ Direct DB validation failed"
     return 1
   fi
 
-  print_status "✅ Database configuration validated"
+  print_status "✅ Direct DB configuration validated"
   return 0
 }
 
-# Function to setup Claude Code MCP configuration
-setup_claude_mcp() {
-  print_status "Configuring Claude Code MCP servers..."
+# Function to show Direct DB status
+show_direct_db_status() {
+  print_status "📊 Direct DB Architecture Status"
+  print_status "================================="
+  echo ""
 
-  local config_file="$HOME/.claude/config.json"
-
-  # Check if config.json exists
-  if [ ! -f "$config_file" ]; then
-    print_warning "Claude config.json not found, creating..."
-    mkdir -p "$HOME/.claude"
-    echo '{"mcpServers":{}}' > "$config_file"
-  fi
-
-  # Check if DevStream is already configured
-  if grep -q '"devstream"' "$config_file" 2>/dev/null; then
-    print_info "DevStream MCP already configured"
+  # Check if Direct DB is enabled
+  if check_direct_db_architecture; then
+    print_status "✅ Direct DB Architecture: ENABLED"
+    print_info "   Using SQLite direct connections via Python hooks"
+    print_info "   No MCP server required for core functionality"
   else
-    print_info "DevStream MCP configuration:"
-    print_info "  Add to ~/.claude/config.json manually:"
-    print_info '  "devstream": {'
-    print_info '    "command": "node",'
-    print_info "    \"args\": [\"$MCP_SERVER_DIR/dist/index.js\"],"
-    print_info '    "env": {'
-    print_info "      \"DEVSTREAM_DB_PATH\": \"$PROJECT_ROOT/data/devstream.db\""
-    print_info '    }'
-    print_info '  }'
+    print_error "❌ Direct DB Architecture: DISABLED"
+    print_info "   Enable with: DEVSTREAM_FEATURE_DIRECT_DB_ENABLED=true"
   fi
 
-  # Setup Context7 (non-blocking)
-  print_status "Configuring Context7..."
+  # Show database path
+  local db_path=""
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    db_path="$PROJECT_ROOT/data/devstream.db"
+  else
+    db_path="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
+  fi
 
-  if [ -f "$PROJECT_ROOT/context7-wrapper.sh" ]; then
-    if grep -q '"context7"' "$config_file" 2>/dev/null; then
-      print_info "Context7 MCP already configured"
-    else
-      print_info "Context7 configuration:"
-      print_info "  Add to ~/.claude/config.json manually:"
-      print_info '  "context7": {'
-      print_info '    "command": "bash",'
-      print_info "    \"args\": [\"$PROJECT_ROOT/context7-wrapper.sh\"]"
-      print_info '  }'
+  echo ""
+  print_info "🗄️  Database Information:"
+  print_info "   Path: $db_path"
+
+  if [ -f "$db_path" ]; then
+    local db_size=$(stat -f%z "$db_path" 2>/dev/null || stat -c%s "$db_path" 2>/dev/null)
+    print_info "   Size: $(numfmt --to=iec $db_size 2>/dev/null || echo $db_size bytes)"
+
+    # Get record counts
+    local db_status=$("$VENV_DIR/bin/python" -c "
+import sqlite3
+try:
+    db = sqlite3.connect('$db_path')
+    memory_count = db.execute('SELECT COUNT(*) FROM memory').fetchone()[0]
+    semantic_count = db.execute('SELECT COUNT(*) FROM semantic_memory').fetchone()[0]
+    print(f'Memory: {memory_count}, Semantic: {semantic_count}')
+    db.close()
+except:
+    print('Database access error')
+" 2>/dev/null)
+
+    if [[ "$db_status" == Memory:* ]]; then
+      print_info "   Records: $db_status"
     fi
   else
-    print_warning "Context7 wrapper script not found at $PROJECT_ROOT/context7-wrapper.sh"
+    print_error "   Database file not found"
   fi
 
   echo ""
-  print_info "📖 MCP Configuration Help:"
-  print_info "  1. Edit ~/.claude/config.json"
-  print_info "  2. Add 'devstream' and 'context7' to mcpServers"
-  print_info "  3. Restart Claude Code to activate"
-  echo ""
-}
-
-# Function to show server status
-show_server_status() {
-  print_status "📊 DevStream Server Status"
-  print_status "============================="
-  echo ""
-
-  # Check health
-  if curl -s http://localhost:9090/health >/dev/null 2>&1; then
-    local health_json=$(curl -s http://localhost:9090/health)
-    print_status "✅ Server is healthy"
-    print_info "   Uptime: $(echo $health_json | grep -o '"uptime":[0-9.]*' | cut -d: -f2)s"
-  else
-    print_error "❌ Server is not responding"
-  fi
-
-  # Show endpoints
-  echo ""
-  print_info "📈 Monitoring Endpoints:"
-  print_info "   Health:     http://localhost:9090/health"
-  print_info "   Metrics:    http://localhost:9090/metrics"
-  print_info "   Quality:    http://localhost:9090/quality"
-  print_info "   Errors:     http://localhost:9090/errors"
-
-  echo ""
-  print_info "📝 Server Log:"
-  print_info "   tail -f $PROJECT_ROOT/devstream-server.log"
+  print_info "🔧 Architecture Details:"
+  print_info "   Python Hooks: $(ls -1 "$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/memory/" 2>/dev/null | wc -l | tr -d ' ') files"
+  print_info "   Agent System: 17 specialist agents available"
+  print_info "   Context7: $( [ "${DEVSTREAM_CONTEXT7_ENABLED:-true}" = "true" ] && echo "ENABLED" || echo "DISABLED")"
+  print_info "   Memory System: $( [ "${DEVSTREAM_MEMORY_ENABLED:-true}" = "true" ] && echo "ENABLED" || echo "DISABLED")"
 
   echo ""
 }
@@ -907,8 +827,8 @@ start_claude_with_devstream() {
   # Check if z.ai provider is selected and use dedicated script
   if [ "$active_provider" = "z.ai" ]; then
     print_info "🔄 Launching Claude Code with GLM-4.6 via dedicated script..."
-    # Use the dedicated z.ai script which handles all environment setup
-    exec "$PROJECT_ROOT/scripts/start-claude-zai.sh"
+    # Use the dedicated z.ai script from DevStream installation
+    exec "$DEVSTREAM_SCRIPT_DIR/scripts/start-claude-zai.sh"
   else
     # Default Claude Code launch for Anthropic provider
     claude
@@ -1112,11 +1032,14 @@ main() {
       # Check prerequisites
       check_prerequisites
 
-      # Validate database configuration
-      if validate_database_config; then
-        print_status "✅ Database configuration validated"
+      # Initialize Direct DB Architecture
+      initialize_direct_db
+
+      # Validate Direct DB configuration
+      if validate_direct_db_config; then
+        print_status "✅ Direct DB configuration validated"
       else
-        print_error "Database validation failed"
+        print_error "Direct DB validation failed"
         exit 1
       fi
 
@@ -1134,26 +1057,14 @@ main() {
       # Verify Context7 availability
       verify_context7
 
-      # Start MCP server
-      start_mcp_server
-
-      # Start monitoring daemons (DISABLED - Preventing zombie spreading)
-      # start_monitors
-
-      # Show server status
-      show_server_status
+      # Show Direct DB status
+      show_direct_db_status
 
       # Show Agent status
       show_agent_status
 
-      # Show monitoring status (NEW)
-      check_monitor_status
-
-      # Setup Claude MCP configuration
-      setup_claude_mcp
-
       echo ""
-      print_status "🎉 DevStream v2.0 is ready!"
+      print_status "🎉 DevStream v2.0 (Direct DB Architecture) is ready!"
       echo ""
 
       # Start Claude Code
@@ -1166,23 +1077,11 @@ main() {
 
     status)
       load_devstream_config
-      show_server_status
+      show_direct_db_status
       show_agent_status
-      check_monitor_status
-      ;;
-
-    codex)
-      load_llm_provider "$provider"
-      check_python_venv
-      load_devstream_config
-      check_prerequisites
-      start_mcp_server
-      prepare_codex_runtime
       ;;
 
     restart)
-      stop_server
-      sleep 2
       main start "$provider"
       ;;
 

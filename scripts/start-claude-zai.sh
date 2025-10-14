@@ -79,15 +79,77 @@ launch_claude_code() {
   # Change to project directory
   cd "$PROJECT_ROOT"
 
-  # Build Claude Code command with GLM-4.6 model
-  local claude_command="claude --model glm-4.6"
+  # Configure Claude Code settings for z.ai (required for model switching)
+  configure_claude_settings
 
-  print_info "Command: $claude_command"
   print_info "Working directory: $(pwd)"
+  print_info "🤖 Model: GLM-4.6 (via z.ai API)"
+  print_info "📡 API: $ANTHROPIC_BASE_URL"
   echo ""
 
-  # Execute Claude Code with GLM-4.6
-  exec $claude_command
+  # Execute Claude Code (settings will handle model selection)
+  exec claude
+}
+
+# Function to configure Claude Code settings for z.ai
+configure_claude_settings() {
+  local settings_file="$HOME/.claude/settings.json"
+
+  print_status "⚙️ Configuring Claude Code settings for GLM-4.6..."
+
+  # Backup existing settings
+  if [ -f "$settings_file" ]; then
+    cp "$settings_file" "$settings_file.backup-zai-$(date +%Y%m%d_%H%M%S)"
+    print_info "✅ Backed up existing settings"
+  fi
+
+  # Use Python for JSON manipulation (following Context7 best practices)
+  "$PROJECT_ROOT/.devstream/bin/python" << EOF
+import json
+import os
+
+settings_file = "$settings_file"
+
+# Read existing settings
+existing_data = {}
+if os.path.exists(settings_file):
+    try:
+        with open(settings_file, 'r') as f:
+            existing_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        print("Warning: Could not parse existing settings")
+
+# Preserve important data
+preserved_data = {
+    "hooks": existing_data.get("hooks", {}),
+    "mcpServers": existing_data.get("mcpServers", {}),
+    "alwaysThinkingEnabled": existing_data.get("alwaysThinkingEnabled", False)
+}
+
+# Create z.ai configuration
+zai_config = {
+    **preserved_data,
+    "model": "glm-4.6",
+    "env": {
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.6",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air"
+    }
+}
+
+# Write settings
+with open(settings_file, 'w') as f:
+    json.dump(zai_config, f, indent=2)
+
+print("✅ Claude Code configured for GLM-4.6")
+EOF
+
+  if [ $? -eq 0 ]; then
+    print_info "✅ Claude Code settings updated for GLM-4.6"
+  else
+    print_error "❌ Failed to update Claude Code settings"
+    exit 1
+  fi
 }
 
 # Main execution function
