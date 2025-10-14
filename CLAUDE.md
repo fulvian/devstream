@@ -8,6 +8,61 @@
 
 ---
 
+## 🚨 MANDATORY SYSTEM: MemoryManager for Project Memory Database
+
+<critical_memory_rule>
+**🔥 FUNDAMENTAL RULE - NON-NEGOTIABLE**
+
+**MemoryManager** is the **MANDATORY** and **EXCLUSIVE** system for interrogating the DevStream project memory database.
+
+### When to Use MemoryManager
+**ALWAYS** - **NEVER** use alternative approaches:
+- ✅ **MemoryManager**: OBLIGATORY for all project memory database queries
+- ❌ **Python Specialist**: FORBIDDEN for memory database interrogation
+- ❌ **MCP Tools**: FORBIDDEN (eliminated in v2.2.0+)
+- ❌ **Direct SQL**: FORBIDDEN (bypasses optimization)
+- ❌ **Direct Client**: FORBIDDEN unless part of MemoryManager
+
+### Correct Usage Pattern
+
+```python
+# ✅ CORRECT - Use MemoryManager (get_direct_client)
+from .claude.hooks.devstream.utils.direct_client import get_direct_client
+
+def search_project_memory(query: str):
+    client = get_direct_client()
+    return client.search_memory(query, limit=10)
+```
+
+```python
+# ❌ FORBIDDEN - Never use Python Specialist for memory queries
+@python-specialist Search DevStream memory database  # VIOLATION
+```
+
+### Enforcement Mechanisms
+
+**Automatic Detection**:
+- Hook system validates all memory database access
+- Protocol violations logged automatically
+- System rollback on non-compliant access patterns
+
+**Audit Trail**:
+- All MemoryManager queries logged in `memory_operations` table
+- Violations tracked with keyword **"memory-access-violation"**
+- Performance metrics stored per query
+
+### Rationale
+
+**Performance**: MemoryManager provides optimized hybrid search (semantic + keyword)
+**Reliability**: Direct DB architecture with proper error handling
+**Consistency**: Unified interface across all DevStream components
+**Optimization**: Two-stage search, cache management, token budget enforcement
+
+**VIOLATIONS CAUSE SYSTEM MALFUNCTIONS AND AUTOMATIC ROLLBACK**
+</critical_memory_rule>
+
+---
+
 ## 🎯 System Architecture Overview
 
 <system_architecture>
@@ -457,11 +512,26 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 ### Manual Operations (OPTIONAL)
 
 <rule type="manual_memory">
-**Tools**:
+**🚨 CRITICAL: Use MemoryManager ONLY**
+
+**MANDATORY Access Pattern**:
+```python
+from .claude.hooks.devstream.utils.direct_client import get_direct_client
+client = get_direct_client()
+# Use client methods for all memory operations
+```
+
+**Direct DB Tools** (via MemoryManager):
 - `mcp__devstream__devstream_store_memory` (content, content_type, keywords)
 - `mcp__devstream__devstream_search_memory` (query, content_type, limit)
 
-**Use Case**: Advanced queries, critical context pre-session end  
+**FORBIDDEN Alternatives**:
+- ❌ Python Specialist for memory queries (automatic violation)
+- ❌ MCP devstream server (eliminated v2.2.0+)
+- ❌ Direct SQL without MemoryManager
+- ❌ Bypassing Direct DB Architecture
+
+**Use Case**: Advanced queries, critical context pre-session end
 **Note**: Automatic system handles 99% of cases
 </rule>
 </memory_system>
@@ -1177,10 +1247,12 @@ def hybrid_search(
 | Component | Access Method | Tools | Purpose | Status |
 |-----------|---------------|-------|---------|--------|
 | Task Management | Direct DB | `mcp__devstream__devstream_*` | Task lifecycle | ✅ Active |
-| Memory System | Direct DB | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
+| Memory System | **MemoryManager** | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
 | Implementation Plans | Direct DB | `mcp__devstream__devstream_*` | Plan management | ✅ Active |
-| Vector Search | Direct DB + Ollama | N/A | Memory retrieval | ✅ Active |
+| Vector Search | **MemoryManager** + Ollama | N/A | Memory retrieval | ✅ Active |
 | Session Tracking | Direct DB | N/A | Cross-session | ✅ Active |
+
+**🚨 CRITICAL**: Memory System and Vector Search **MUST** use MemoryManager (`get_direct_client()`) - NEVER use Python Specialist or MCP tools for memory database interrogation.
 
 ### Cross-Session Summary System
 
