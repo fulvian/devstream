@@ -28,6 +28,7 @@ from devstream_base import DevStreamHookBase, FeedbackLevel
 from unified_client import get_unified_client
 from ollama_client import OllamaEmbeddingClient
 from sqlite_vec_helper import get_db_connection_with_vec
+from connection_manager import get_connection_manager
 from rate_limiter import (
     memory_rate_limiter,
     ollama_rate_limiter,
@@ -314,10 +315,11 @@ class PostToolUseHook:
         """
         Update semantic_memory record with embedding vector.
 
-        Direct SQLite UPDATE for embedding storage. Database triggers
-        will automatically sync to vec_semantic_memory virtual table.
+        CRITICAL FIX: Use ConnectionManager with sqlite-vec extension for proper
+        vector synchronization. Database triggers will automatically sync to
+        vec_semantic_memory virtual table.
 
-        Context7 Pattern: Uses sqlite_vec_helper for proper extension loading.
+        Context7 Pattern: Uses ConnectionManager that already loads sqlite-vec.
         FASE 4.4: Enhanced with connection retry logic.
 
         Args:
@@ -335,19 +337,29 @@ class PostToolUseHook:
                 # Convert embedding to JSON string for SQLite storage
                 embedding_json = json.dumps(embedding)
 
-                # Context7 Pattern: Use helper for proper vec0 loading
-                conn = get_db_connection_with_vec(self.db_path)
-                cursor = conn.cursor()
+                # CRITICAL FIX: Use ConnectionManager instead of sqlite_vec_helper
+                # ConnectionManager already loads sqlite-vec extension (see _create_connection)
+                manager = get_connection_manager(self.db_path)
 
-                # Update embedding in semantic_memory
-                cursor.execute(
-                    "UPDATE semantic_memory SET embedding = ? WHERE id = ?",
-                    (embedding_json, memory_id)
-                )
+                with manager.get_connection() as conn:
+                    cursor = conn.cursor()
 
-                conn.commit()
-                rows_updated = cursor.rowcount
-                conn.close()
+                    # Verify sqlite-vec extension is available
+                    try:
+                        vec_version = cursor.execute("SELECT vec_version()").fetchone()[0]
+                        if attempt == 0:
+                            self.base.debug_log(f"✓ Using sqlite-vec v{vec_version}")
+                    except Exception:
+                        self.base.debug_log("⚠️ sqlite-vec extension not available - embedding stored but not indexed")
+
+                    # Update embedding in semantic_memory
+                    cursor.execute(
+                        "UPDATE semantic_memory SET embedding = ? WHERE id = ?",
+                        (embedding_json, memory_id)
+                    )
+
+                    # rows_updated is available after the context manager commits
+                    rows_updated = cursor.rowcount
 
                 if rows_updated > 0:
                     if attempt > 0:
