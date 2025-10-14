@@ -24,8 +24,18 @@ class Context7Config:
     @classmethod
     def from_env(cls) -> 'Context7Config':
         """Load configuration from environment variables."""
+        direct_enabled_str = os.getenv("DEVSTREAM_CONTEXT7_DIRECT_ENABLED", "false").lower()
+
+        # Convert string to boolean or keep rollout string
+        if direct_enabled_str == "true":
+            direct_enabled = True
+        elif direct_enabled_str == "false":
+            direct_enabled = False
+        else:
+            direct_enabled = direct_enabled_str  # Keep "rollout" or other values
+
         return cls(
-            direct_enabled=os.getenv("DEVSTREAM_CONTEXT7_DIRECT_ENABLED", "false"),
+            direct_enabled=direct_enabled,
             cache_size=int(os.getenv("DEVSTREAM_CONTEXT7_DIRECT_CACHE_SIZE", "100")),
             timeout=int(os.getenv("DEVSTREAM_CONTEXT7_DIRECT_TIMEOUT", "30")),
             circuit_breaker_threshold=int(os.getenv("DEVSTREAM_CONTEXT7_DIRECT_CB_THRESHOLD", "3")),
