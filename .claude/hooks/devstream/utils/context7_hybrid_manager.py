@@ -35,6 +35,17 @@ except ImportError:
     Context7APIError = Exception
     CircuitBreakerError = Exception
 
+# Import Context7 MCP Direct Client
+try:
+    from .context7_mcp_direct_client import (
+        Context7MCPDirectClient,
+        Context7MCPError
+    )
+except ImportError:
+    # Fallback if MCP direct client not available
+    Context7MCPDirectClient = None
+    Context7MCPError = Exception
+
 # Import DevStream utilities
 try:
     from .logger import get_devstream_logger
@@ -86,11 +97,12 @@ class Context7Metrics:
 
 class Context7HybridManager:
     """
-    Hybrid Context7 manager supporting both MCP and Direct HTTP clients.
+    Hybrid Context7 manager supporting MCP Direct Client, Direct HTTP client, and MCP fallback.
     Implements gradual rollout with feature flags and automatic fallback.
 
     Attributes:
-        direct_client: Context7DirectHttpClient instance
+        mcp_direct_client: Context7MCPDirectClient instance (preferred)
+        direct_client: Context7DirectHttpClient instance (legacy)
         mcp_enabled: MCP client availability flag
         direct_enabled: Direct client enabled via feature flag
         circuit_breaker: Circuit breaker for mode switching
@@ -118,12 +130,24 @@ class Context7HybridManager:
         self.mcp_fallback = mcp_fallback
         self._direct_enabled_override = direct_enabled
 
-        # Initialize direct client if available
+        # Initialize MCP Direct Client first (preferred)
+        self.mcp_direct_client: Optional[Context7MCPDirectClient] = None
+        if Context7MCPDirectClient:
+            try:
+                self.mcp_direct_client = Context7MCPDirectClient()
+                self.logger.info("Context7 MCP Direct Client initialized (preferred)")
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to initialize Context7 MCP Direct Client: {e}",
+                    extra={"error": str(e), "error_type": type(e).__name__}
+                )
+
+        # Initialize legacy Direct HTTP Client as fallback
         self.direct_client: Optional[Context7DirectHttpClient] = None
-        if Context7DirectHttpClient:
+        if Context7DirectHttpClient and not self.mcp_direct_client:
             try:
                 self.direct_client = Context7DirectHttpClient()
-                self.logger.info("Context7 Direct HTTP Client initialized")
+                self.logger.info("Context7 Direct HTTP Client initialized (legacy fallback)")
             except Exception as e:
                 self.logger.warning(
                     f"Failed to initialize Context7 Direct HTTP Client: {e}",
@@ -175,22 +199,24 @@ class Context7HybridManager:
     def _should_use_direct_mode(self, library_name: Optional[str] = None) -> bool:
         """
         Determine if direct mode should be used based on feature flags.
+        Prefers MCP Direct Client when available.
 
         Returns:
             True if direct mode enabled and available
         """
         # Check override first
         if self._direct_enabled_override is not None:
-            return self._direct_enabled_override and self.direct_client is not None
+            return self._direct_enabled_override and (self.mcp_direct_client is not None or self.direct_client is not None)
 
         # Environment-based gradual rollout
         flag = os.getenv("DEVSTREAM_CONTEXT7_DIRECT_ENABLED", "false").lower()
 
         if flag == "true":
-            return self.direct_client is not None
+            # Prefer MCP Direct Client, fallback to legacy Direct Client
+            return self.mcp_direct_client is not None or self.direct_client is not None
         elif flag == "rollout":
             # 10% rollout based on hash of library name
-            if library_name and self.direct_client:
+            if library_name and (self.mcp_direct_client is not None or self.direct_client is not None):
                 hash_value = int(hashlib.md5(library_name.encode()).hexdigest(), 16)
                 return hash_value % 10 == 0
             return False
@@ -307,14 +333,14 @@ class Context7HybridManager:
     async def resolve_library_id(
         self,
         library_name: str,
-        force_mode: Optional[str] = None  # "direct" or "mcp"
+        force_mode: Optional[str] = None  # "mcp_direct", "direct", or "mcp"
     ) -> Optional[str]:
         """
         Resolve library ID using hybrid strategy.
 
         Args:
             library_name: Library name to resolve
-            force_mode: Force specific mode ("direct" or "mcp")
+            force_mode: Force specific mode ("mcp_direct", "direct", or "mcp")
 
         Returns:
             Context7 library ID or None
@@ -323,7 +349,16 @@ class Context7HybridManager:
             Context7Error: If both modes fail
         """
         start_time = time.time()
-        primary_mode = force_mode or ("direct" if self._should_use_direct_mode(library_name) else "mcp")
+
+        # Determine primary mode - prefer MCP Direct Client when available
+        if force_mode:
+            primary_mode = force_mode
+        elif self.mcp_direct_client and self._should_use_direct_mode(library_name):
+            primary_mode = "mcp_direct"
+        elif self.direct_client and self._should_use_direct_mode(library_name):
+            primary_mode = "direct"
+        else:
+            primary_mode = "mcp"
 
         self.logger.debug(
             f"Resolving library ID for '{library_name}' using {primary_mode} mode",
@@ -331,6 +366,7 @@ class Context7HybridManager:
                 "library_name": library_name,
                 "primary_mode": primary_mode,
                 "force_mode": force_mode,
+                "mcp_direct_available": self.mcp_direct_client is not None,
                 "direct_available": self.direct_client is not None,
                 "mcp_available": self.mcp_available
             }
@@ -338,7 +374,36 @@ class Context7HybridManager:
 
         try:
             # Try primary mode first
-            if primary_mode == "direct" and self.direct_client:
+            if primary_mode == "mcp_direct" and self.mcp_direct_client:
+                try:
+                    result = await self.mcp_direct_client.resolve_library_id(library_name)
+                    if result:
+                        self._record_mode_metrics("mcp_direct", True, time.time() - start_time)
+                        return result
+                except (Context7MCPError, Exception) as e:
+                    self.logger.warning(
+                        f"MCP Direct mode failed for library '{library_name}': {e}",
+                        extra={"library_name": library_name, "error": str(e), "primary_mode": "mcp_direct"}
+                    )
+                    self._record_mode_metrics("mcp_direct", False, time.time() - start_time)
+
+                    # Try legacy direct client as fallback
+                    if self.direct_client:
+                        self.metrics.fallback_activations += 1
+                        direct_result = await self.direct_client.resolve_library_id(library_name)
+                        if direct_result:
+                            self._record_mode_metrics("direct", True, time.time() - start_time)
+                            return direct_result
+
+                    # Try MCP server as final fallback
+                    if self.mcp_fallback and self.mcp_available:
+                        self.metrics.fallback_activations += 1
+                        mcp_result = await self._call_mcp_resolve_library(library_name)
+                        if mcp_result:
+                            self._record_mode_metrics("mcp", True, time.time() - start_time)
+                            return mcp_result
+
+            elif primary_mode == "direct" and self.direct_client:
                 try:
                     result = await self.direct_client.resolve_library_id(library_name)
                     if result:
@@ -358,6 +423,7 @@ class Context7HybridManager:
                         if mcp_result:
                             self._record_mode_metrics("mcp", True, time.time() - start_time)
                             return mcp_result
+
             elif primary_mode == "mcp" and self.mcp_available:
                 mcp_result = await self._call_mcp_resolve_library(library_name)
                 if mcp_result:
@@ -393,13 +459,22 @@ class Context7HybridManager:
             library_id: Context7 library ID
             topic: Optional topic
             tokens: Max tokens
-            force_mode: Force specific mode
+            force_mode: Force specific mode ("mcp_direct", "direct", or "mcp")
 
         Returns:
             Documentation or None
         """
         start_time = time.time()
-        primary_mode = force_mode or ("direct" if self._should_use_direct_mode() else "mcp")
+
+        # Determine primary mode - prefer MCP Direct Client when available
+        if force_mode:
+            primary_mode = force_mode
+        elif self.mcp_direct_client and self._should_use_direct_mode():
+            primary_mode = "mcp_direct"
+        elif self.direct_client and self._should_use_direct_mode():
+            primary_mode = "direct"
+        else:
+            primary_mode = "mcp"
 
         self.logger.debug(
             f"Getting docs for '{library_id}' using {primary_mode} mode",
@@ -414,7 +489,36 @@ class Context7HybridManager:
 
         try:
             # Try primary mode first
-            if primary_mode == "direct" and self.direct_client:
+            if primary_mode == "mcp_direct" and self.mcp_direct_client:
+                try:
+                    result = await self.mcp_direct_client.get_library_docs(library_id, topic, tokens)
+                    if result:
+                        self._record_mode_metrics("mcp_direct", True, time.time() - start_time)
+                        return result
+                except (Context7MCPError, Exception) as e:
+                    self.logger.warning(
+                        f"MCP Direct mode failed for docs '{library_id}': {e}",
+                        extra={"library_id": library_id, "error": str(e), "primary_mode": "mcp_direct"}
+                    )
+                    self._record_mode_metrics("mcp_direct", False, time.time() - start_time)
+
+                    # Try legacy direct client as fallback
+                    if self.direct_client:
+                        self.metrics.fallback_activations += 1
+                        direct_result = await self.direct_client.get_library_docs(library_id, topic, tokens)
+                        if direct_result:
+                            self._record_mode_metrics("direct", True, time.time() - start_time)
+                            return direct_result
+
+                    # Try MCP server as final fallback
+                    if self.mcp_fallback and self.mcp_available:
+                        self.metrics.fallback_activations += 1
+                        mcp_result = await self._call_mcp_get_docs(library_id, topic, tokens)
+                        if mcp_result:
+                            self._record_mode_metrics("mcp", True, time.time() - start_time)
+                            return mcp_result
+
+            elif primary_mode == "direct" and self.direct_client:
                 try:
                     result = await self.direct_client.get_library_docs(library_id, topic, tokens)
                     if result:
@@ -434,6 +538,7 @@ class Context7HybridManager:
                         if mcp_result:
                             self._record_mode_metrics("mcp", True, time.time() - start_time)
                             return mcp_result
+
             elif primary_mode == "mcp" and self.mcp_available:
                 mcp_result = await self._call_mcp_get_docs(library_id, topic, tokens)
                 if mcp_result:
@@ -492,10 +597,12 @@ class Context7HybridManager:
         }
 
     async def close(self) -> None:
-        """Close the direct client and cleanup resources."""
+        """Close all clients and cleanup resources."""
+        if self.mcp_direct_client:
+            await self.mcp_direct_client.close()
         if self.direct_client:
             await self.direct_client.close()
-            self.logger.debug("Context7 Hybrid Manager closed")
+        self.logger.debug("Context7 Hybrid Manager closed")
 
     async def __aenter__(self):
         """Async context manager entry."""

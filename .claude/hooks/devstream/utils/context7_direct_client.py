@@ -153,7 +153,7 @@ class Context7DirectHttpClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://api.context7.com",
+        base_url: str = "https://context7.com",
         cache_size: int = 100,
         circuit_breaker_threshold: int = 3
     ) -> None:
