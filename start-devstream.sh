@@ -561,6 +561,9 @@ initialize_direct_db() {
   # Initialize project templates for multi-project setup
   initialize_project_templates
 
+  # Initialize project virtual environment for multi-project setup (Context7 best practice)
+  initialize_project_venv
+
   print_status "✅ Direct DB Architecture initialized"
 }
 
@@ -1372,6 +1375,260 @@ stop_server() {
 
   # Also stop monitoring daemons
   stop_monitors
+}
+
+# Function to validate existing virtual environment (Context7 best practice)
+# Context7 pattern: comprehensive validation before reusing existing environments
+validate_existing_venv() {
+  local venv_path="$1"
+  local project_name="$2"
+
+  print_info "🔍 Validating existing virtual environment: $venv_path"
+
+  # Check basic structure
+  if [ ! -d "$venv_path" ]; then
+    print_warning "⚠️  Virtual environment directory not found"
+    return 1
+  fi
+
+  if [ ! -f "$venv_path/bin/python" ]; then
+    print_warning "⚠️  Python executable not found in venv"
+    return 1
+  fi
+
+  # Test Python functionality
+  local python_test=$("$venv_path/bin/python" -c "
+import sys
+try:
+    import pip
+    import setuptools
+    print('OK')
+except ImportError as e:
+    print(f'MISSING_DEPS:{e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>&1)
+
+  if [ "$python_test" != "OK" ]; then
+    if [[ "$python_test" == MISSING_DEPS:* ]]; then
+      print_warning "⚠️  Virtual environment missing dependencies: ${python_test#MISSING_DEPS:}"
+    else
+      print_warning "⚠️  Virtual environment validation failed: ${python_test#ERROR:}"
+    fi
+    return 1
+  fi
+
+  # Get Python version info
+  local python_version=$("$venv_path/bin/python" --version 2>&1)
+  local python_major=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.major)")
+  local python_minor=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.minor)")
+
+  # Validate Python version (require 3.8+ for modern features)
+  if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 8 ]); then
+    print_warning "⚠️  Python version $python_version is too old (requires 3.8+)"
+    return 1
+  fi
+
+  print_info "✅ Virtual environment validated: $python_version"
+  return 0
+}
+
+# Function to detect existing virtual environments (Context7 best practice)
+# Context7 pattern: smart detection of existing project environments
+detect_existing_venv() {
+  local project_root="$1"
+  local project_name="$2"
+
+  print_info "🔍 Detecting existing virtual environments..."
+
+  # Common venv locations to check (in order of preference)
+  local venv_locations=(
+    "$project_root/.venv"
+    "$project_root/venv"
+    "$project_root/env"
+    "$project_root/.env"
+  )
+
+  # Check for common Python project files that indicate a Python project
+  local python_indicators=(
+    "$project_root/pyproject.toml"
+    "$project_root/requirements.txt"
+    "$project_root/setup.py"
+    "$project_root/Pipfile"
+    "$project_root/poetry.lock"
+  )
+
+  local is_python_project=false
+  for indicator in "${python_indicators[@]}"; do
+    if [ -f "$indicator" ]; then
+      is_python_project=true
+      print_info "📝 Detected Python project from: $(basename "$indicator")"
+      break
+    fi
+  done
+
+  if [ "$is_python_project" = false ]; then
+    print_info "ℹ️  No Python project indicators found, will create new venv"
+    return 1
+  fi
+
+  # Search for existing virtual environments
+  for venv_path in "${venv_locations[@]}"; do
+    if [ -d "$venv_path" ]; then
+      print_info "📁 Found virtual environment: $venv_path"
+
+      if validate_existing_venv "$venv_path" "$project_name"; then
+        print_status "✅ Using existing virtual environment: $venv_path"
+        echo "$venv_path"
+        return 0
+      else
+        print_warning "⚠️  Found virtual environment but validation failed: $venv_path"
+        print_info "💡 Will create new virtual environment"
+      fi
+    fi
+  done
+
+  print_info "ℹ️  No valid existing virtual environment found"
+  return 1
+}
+
+# Function to initialize project virtual environment (Context7 best practice)
+# Context7 pattern: smart reuse of existing environments with validation
+initialize_project_venv() {
+  # Only initialize project venv in multi-project mode
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  print_status "🐍 Initializing project virtual environment..."
+
+  local project_name=$(basename "$PROJECT_ROOT")
+  local project_venv_path="$PROJECT_ROOT/.venv"
+  local framework_python="$VENV_DIR/bin/python"
+  local existing_venv=""
+
+  # Step 1: Try to detect and use existing virtual environment
+  existing_venv=$(detect_existing_venv "$PROJECT_ROOT" "$project_name")
+
+  if [ -n "$existing_venv" ] && [ "$existing_venv" != "$project_venv_path" ]; then
+    # Found existing venv in different location, create symlink for consistency
+    print_info "🔗 Linking existing venv: $existing_venv -> .venv"
+
+    # Remove broken .venv if it exists
+    if [ -L "$project_venv_path" ] && [ ! -d "$project_venv_path" ]; then
+      rm "$project_venv_path"
+    fi
+
+    # Create symlink if .venv doesn't exist
+    if [ ! -e "$project_venv_path" ]; then
+      ln -s "$existing_venv" "$project_venv_path"
+      print_info "✅ Created symlink: .venv -> $existing_venv"
+    fi
+
+    # Use existing venv
+    project_venv_path="$existing_venv"
+
+  elif [ -n "$existing_venv" ] && [ "$existing_venv" = "$project_venv_path" ]; then
+    # Found valid existing venv at standard location
+    print_info "✅ Using existing virtual environment: .venv"
+
+  else
+    # Step 2: Create new virtual environment if no valid existing one found
+    print_info "📁 Creating new project virtual environment: .venv"
+
+    # Create project venv using framework Python for consistency
+    "$framework_python" -m venv "$project_venv_path"
+
+    print_info "✅ Created new project virtual environment"
+
+    # Upgrade pip in project venv
+    "$project_venv_path/bin/pip" install --upgrade pip setuptools wheel > /dev/null 2>&1
+
+    # Install basic development dependencies if no requirements files exist
+    if [ ! -f "$PROJECT_ROOT/requirements.txt" ] && [ ! -f "$PROJECT_ROOT/pyproject.toml" ]; then
+      print_info "📦 Installing basic development dependencies..."
+      "$project_venv_path/bin/pip" install -q \
+        black \
+        ruff \
+        mypy \
+        pytest \
+        pytest-cov \
+        pre-commit > /dev/null 2>&1
+      print_info "✅ Installed basic development dependencies"
+    fi
+  fi
+
+  # Step 3: Create or update project-specific configuration
+  local project_env_file="$PROJECT_ROOT/.env.project"
+  local needs_config_update=false
+
+  # Check if config needs updating
+  if [ ! -f "$project_env_file" ]; then
+    needs_config_update=true
+  else
+    # Check if project paths have changed
+    if ! grep -q "DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT" "$project_env_file"; then
+      needs_config_update=true
+    fi
+  fi
+
+  if [ "$needs_config_update" = true ]; then
+    cat > "$project_env_file" << EOF
+# Project Environment Configuration - $project_name
+# Context7-compliant project isolation
+
+# Environment type
+DEVSTREAM_PROJECT_ENV=development
+
+# Virtual environment paths
+DEVSTREAM_PROJECT_VENV_PATH=$project_venv_path
+DEVSTREAM_PROJECT_VENV_PYTHON=$project_venv_path/bin/python
+DEVSTREAM_PROJECT_VENV_PIP=$project_venv_path/bin/pip
+
+# Project paths
+DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT
+DEVSTREAM_PROJECT_NAME=$project_name
+
+# Framework paths (for reference)
+DEVSTREAM_FRAMEWORK_PATH=$DEVSTREAM_SCRIPT_DIR
+DEVSTREAM_FRAMEWORK_VENV_PATH=$VENV_DIR
+
+# Python configuration
+PYTHONPATH=${PYTHONPATH:-}:$PROJECT_ROOT/src
+EOF
+    print_info "✅ Created/updated project configuration"
+  fi
+
+  # Step 4: Set environment variables for current session
+  export DEVSTREAM_PROJECT_VENV_PATH="$project_venv_path"
+  export DEVSTREAM_PROJECT_VENV_PYTHON="$project_venv_path/bin/python"
+  export DEVSTREAM_PROJECT_VENV_PIP="$project_venv_path/bin/pip"
+
+  # Update PATH to prioritize project venv
+  export PATH="$project_venv_path/bin:$PATH"
+
+  # Step 5: Load project environment if it exists
+  if [ -f "$project_env_file" ]; then
+    set -a
+    source "$project_env_file"
+    set +a
+    print_info "✅ Loaded project environment configuration"
+  fi
+
+  # Final verification
+  if [ ! -f "$project_venv_path/bin/python" ]; then
+    print_error "❌ Project venv setup failed - Python executable not found"
+    return 1
+  fi
+
+  local python_version=$("$project_venv_path/bin/python" --version 2>&1 | cut -d' ' -f2)
+
+  print_status "✅ Project virtual environment ready"
+  print_info "🐍 Project venv: $project_venv_path"
+  print_info "🐍 Python version: $python_version"
+  print_info "📁 Project config: .env.project"
 }
 
 # Function to initialize project templates for multi-project setup
