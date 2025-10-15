@@ -534,7 +534,7 @@ check_direct_db_architecture() {
   fi
 }
 
-# Function to initialize Direct DB Architecture
+# Function to initialize Direct DB Architecture with automatic schema management
 initialize_direct_db() {
   print_status "Initializing Direct DB Architecture..."
 
@@ -555,7 +555,322 @@ initialize_direct_db() {
     print_info "Direct DB configured for DevStream installation"
   fi
 
+  # Initialize or validate database schema (Context7 best practice)
+  initialize_database_schema
+
   print_status "✅ Direct DB Architecture initialized"
+}
+
+# Function to initialize database schema with automatic validation and creation
+# Context7-inspired: robust database initialization with schema validation
+initialize_database_schema() {
+  local db_path="$DEVSTREAM_DB_PATH"
+  print_status "🔧 Initializing database schema..."
+
+  # Ensure data directory exists
+  mkdir -p "$(dirname "$db_path")"
+
+  # Check if database exists
+  if [ ! -f "$db_path" ]; then
+    print_info "📁 Creating new database: $db_path"
+    create_complete_database "$db_path"
+  else
+    print_info "📁 Database exists: $db_path"
+    validate_and_upgrade_schema "$db_path"
+  fi
+}
+
+# Function to create complete database with all required tables
+# Context7 best practice: atomic database creation with full schema
+create_complete_database() {
+  local db_path="$1"
+
+  print_info "🏗️  Creating complete database schema..."
+
+  # Use Python for robust database creation (Context7 pattern)
+  "$VENV_DIR/bin/python" << EOF
+import sqlite3
+import sys
+from datetime import datetime
+
+db_path = r'$db_path'
+
+try:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Enable WAL mode for better concurrency (Context7 best practice)
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=10000")
+
+    # Core tables for DevStream
+    tables_sql = [
+        # Memory table for semantic storage
+        """
+        CREATE TABLE IF NOT EXISTS memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            content_type TEXT NOT NULL DEFAULT 'code',
+            keywords TEXT,
+            metadata TEXT,
+            embedding_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (embedding_id) REFERENCES semantic_memory(id)
+        )
+        """,
+
+        # Semantic memory table for vector embeddings
+        """
+        CREATE TABLE IF NOT EXISTS semantic_memory (
+            id INTEGER PRIMARY KEY,
+            embedding BLOB,
+            model TEXT NOT NULL DEFAULT 'default',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """,
+
+        # Full-text search configuration
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
+            content,
+            content_type,
+            keywords,
+            metadata,
+            content=semantic_memory,
+            content_rowid=id
+        )
+        """,
+
+        # Tasks table for project management
+        """
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            task_type TEXT NOT NULL DEFAULT 'development',
+            priority INTEGER DEFAULT 5,
+            status TEXT DEFAULT 'pending',
+            phase_name TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            metadata TEXT,
+            implementation_plan_id TEXT
+        )
+        """,
+
+        # Sessions table for session tracking
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            tokens_used INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            files_modified INTEGER DEFAULT 0,
+            tasks_completed INTEGER DEFAULT 0,
+            metadata TEXT
+        )
+        """,
+
+        # Implementation plans table (v2.2.0+)
+        """
+        CREATE TABLE IF NOT EXISTS implementation_plans (
+            id TEXT PRIMARY KEY,
+            task_id TEXT,
+            model_type TEXT NOT NULL,
+            plan_title TEXT NOT NULL,
+            plan_content TEXT,
+            plan_status TEXT DEFAULT 'draft',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            metadata TEXT,
+            FOREIGN KEY (task_id) REFERENCES tasks (id)
+        )
+        """,
+
+        # Checkpoints table for memory snapshots
+        """
+        CREATE TABLE IF NOT EXISTS checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checkpoint_name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            memory_count INTEGER DEFAULT 0,
+            task_count INTEGER DEFAULT 0,
+            session_count INTEGER DEFAULT 0,
+            metadata TEXT
+        )
+        """
+    ]
+
+    # Execute table creation
+    for table_sql in tables_sql:
+        cursor.execute(table_sql)
+
+    # Create indexes for performance (Context7 best practice)
+    indexes_sql = [
+        "CREATE INDEX IF NOT EXISTS idx_memory_content_type ON memory(content_type)",
+        "CREATE INDEX IF NOT EXISTS idx_memory_created_at ON memory(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type)",
+        "CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_task_id ON implementation_plans(task_id)",
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_status ON implementation_plans(plan_status)",
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_model_type ON implementation_plans(model_type)"
+    ]
+
+    for index_sql in indexes_sql:
+        cursor.execute(index_sql)
+
+    # Insert initial checkpoint
+    cursor.execute("""
+        INSERT INTO checkpoints (checkpoint_name, metadata)
+        VALUES ('initial_setup', 'Database created with complete DevStream schema')
+    """)
+
+    conn.commit()
+    conn.close()
+
+    print("✅ Database schema created successfully")
+
+except Exception as e:
+    print(f"❌ Error creating database: {e}")
+    sys.exit(1)
+EOF
+
+  if [ $? -eq 0 ]; then
+    print_status "✅ Complete database schema created"
+  else
+    print_error "❌ Database creation failed"
+    exit 1
+  fi
+}
+
+# Function to validate and upgrade existing database schema
+# Context7 best practice: schema validation with automatic upgrades
+validate_and_upgrade_schema() {
+  local db_path="$1"
+
+  print_info "🔍 Validating existing database schema..."
+
+  # Use Python for schema validation (Context7 pattern)
+  local validation_result=$("$VENV_DIR/bin/python" << EOF
+import sqlite3
+import sys
+from datetime import datetime
+
+db_path = r'$db_path'
+
+try:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Get existing tables
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    existing_tables = set(row[0] for row in cursor.fetchall())
+
+    # Required tables for DevStream v2.2.0
+    required_tables = {
+        'memory', 'semantic_memory', 'fts_semantic_memory',
+        'tasks', 'sessions', 'implementation_plans', 'checkpoints'
+    }
+
+    missing_tables = required_tables - existing_tables
+    extra_tables = existing_tables - required_tables
+
+    upgrade_needed = False
+
+    if missing_tables:
+        print(f"🔧 Missing tables detected: {', '.join(sorted(missing_tables))}")
+        upgrade_needed = True
+
+        # Create missing tables
+        tables_to_create = {
+            'sessions': '''
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    tokens_used INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'active',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    files_modified INTEGER DEFAULT 0,
+                    tasks_completed INTEGER DEFAULT 0,
+                    metadata TEXT
+                )
+            ''',
+            'implementation_plans': '''
+                CREATE TABLE implementation_plans (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT,
+                    model_type TEXT NOT NULL,
+                    plan_title TEXT NOT NULL,
+                    plan_content TEXT,
+                    plan_status TEXT DEFAULT 'draft',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now')),
+                    metadata TEXT,
+                    FOREIGN KEY (task_id) REFERENCES tasks (id)
+                )
+            '''
+        }
+
+        for table_name, table_sql in tables_to_create.items():
+            if table_name in missing_tables:
+                cursor.execute(table_sql)
+                print(f"✅ Created missing table: {table_name}")
+
+        # Create missing indexes
+        missing_indexes = []
+        if 'sessions' in missing_tables:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at)")
+            missing_indexes.extend(['idx_sessions_status', 'idx_sessions_started_at'])
+
+        if 'implementation_plans' in missing_tables:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_implementation_plans_task_id ON implementation_plans(task_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_implementation_plans_status ON implementation_plans(plan_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_implementation_plans_model_type ON implementation_plans(model_type)")
+            missing_indexes.extend(['idx_implementation_plans_task_id', 'idx_implementation_plans_status', 'idx_implementation_plans_model_type'])
+
+        for index_name in missing_indexes:
+            print(f"✅ Created missing index: {index_name}")
+
+    if extra_tables:
+        print(f"ℹ️  Extra tables found: {', '.join(sorted(extra_tables))}")
+
+    # Verify critical tables
+    critical_tables = ['memory', 'sessions', 'tasks']
+    missing_critical = critical_tables - existing_tables
+
+    if missing_critical:
+        print(f"❌ CRITICAL: Missing core tables: {', '.join(sorted(missing_critical))}")
+        print("💡 Consider running: python scripts/init-project-db.py")
+        sys.exit(1)
+
+    if upgrade_needed:
+        conn.commit()
+        print("✅ Database schema upgraded successfully")
+    else:
+        print("✅ Database schema is valid and up to date")
+
+    conn.close()
+
+except Exception as e:
+    print(f"❌ Error validating database: {e}")
+    sys.exit(1)
+EOF
+)
+
+  if [ $? -eq 0 ]; then
+    print_status "✅ Database schema validation completed"
+  else
+    print_error "❌ Database schema validation failed"
+    exit 1
+  fi
 }
 
 # Function to validate Direct DB configuration
@@ -1078,11 +1393,11 @@ main() {
       # Load DevStream configuration
       load_devstream_config
 
-      # Check prerequisites
-      check_prerequisites
-
       # Initialize Direct DB Architecture
       initialize_direct_db
+
+      # Check prerequisites (now database exists)
+      check_prerequisites
 
       # Validate Direct DB configuration
       if validate_direct_db_config; then
