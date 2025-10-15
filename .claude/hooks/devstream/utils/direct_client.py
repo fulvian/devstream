@@ -343,9 +343,15 @@ class DevStreamDirectClient:
 
             # BEST PRACTICE: Support both relative and absolute paths
             if not os.path.isabs(final_db_path):
-                # Convert relative path to absolute based on current working directory
-                cwd = os.getcwd()
-                final_db_path = os.path.join(cwd, final_db_path)
+                # Convert relative path to absolute based on project root (Context7-compliant)
+                # Priority: DEVSTREAM_PROJECT_ROOT > current working directory
+                project_root = os.environ.get('DEVSTREAM_PROJECT_ROOT')
+                if not project_root:
+                    # Fallback to current working directory only if PROJECT_ROOT not set
+                    project_root = os.getcwd()
+                    # Note: logger not available yet, will log after initialization
+
+                final_db_path = os.path.join(project_root, final_db_path)
                 # Note: logger not available yet, will log after initialization
 
             # Initialize connection manager with resolved path
@@ -374,69 +380,199 @@ class DevStreamDirectClient:
 
     def _verify_database_schema(self) -> None:
         """
-        Verify database has required tables and create if missing.
+        Verify database has required tables and create if missing (Context7-compliant).
 
-        Direct client should be able to initialize its own schema if needed.
+        Implements automatic schema validation and creation patterns inspired by sqlite-utils.
+        Uses transaction control and error handling for robust initialization.
         """
         try:
             with self.connection_manager.get_connection() as conn:
-                # Create semantic_memory table if not exists
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS semantic_memory (
-                        id TEXT PRIMARY KEY,
-                        content TEXT NOT NULL,
-                        content_type TEXT NOT NULL,
-                        keywords TEXT,
-                        session_id TEXT,
-                        created_at TIMESTAMP,
-                        updated_at TIMESTAMP,
-                        access_count INTEGER DEFAULT 0,
-                        relevance_score REAL DEFAULT 1.0,
-                        importance_score REAL DEFAULT 0.0,
-                        last_accessed_at TIMESTAMP,
-                        metadata TEXT,
-                        source TEXT
-                    )
-                """)
+                # Context7 Pattern: Use explicit transaction for schema operations
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
 
-                # Create FTS table for semantic_memory
-                conn.execute("""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
-                        content, content_type, memory_id, created_at
-                    )
-                """)
+                    # Define required schemas (sqlite-utils pattern)
+                    schemas = {
+                        "semantic_memory": """
+                            CREATE TABLE IF NOT EXISTS semantic_memory (
+                                id TEXT PRIMARY KEY,
+                                content TEXT NOT NULL,
+                                content_type TEXT NOT NULL,
+                                keywords TEXT,
+                                session_id TEXT,
+                                created_at TIMESTAMP,
+                                updated_at TIMESTAMP,
+                                access_count INTEGER DEFAULT 0,
+                                relevance_score REAL DEFAULT 1.0,
+                                importance_score REAL DEFAULT 0.0,
+                                last_accessed_at TIMESTAMP,
+                                metadata TEXT,
+                                source TEXT,
+                                embedding_blob BLOB,
+                                embedding_model TEXT,
+                                embedding_dimension INTEGER
+                            )
+                        """,
+                        "fts_semantic_memory": """
+                            CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
+                                content, content_type, memory_id, created_at
+                            )
+                        """,
+                        "vec_semantic_memory": """
+                            CREATE VIRTUAL TABLE IF NOT EXISTS vec_semantic_memory USING vec(
+                                embedding float[768],
+                                content_type PARTITION KEY,
+                                memory_id TEXT,
+                                content_preview TEXT
+                            )
+                        """,
+                        "tasks": """
+                            CREATE TABLE IF NOT EXISTS tasks (
+                                id TEXT PRIMARY KEY,
+                                title TEXT NOT NULL,
+                                description TEXT,
+                                task_type TEXT,
+                                priority INTEGER,
+                                status TEXT DEFAULT 'pending',
+                                phase_name TEXT,
+                                project TEXT,
+                                created_at TIMESTAMP,
+                                updated_at TIMESTAMP
+                            )
+                        """,
+                        "checkpoints": """
+                            CREATE TABLE IF NOT EXISTS checkpoints (
+                                id TEXT PRIMARY KEY,
+                                reason TEXT,
+                                triggered_at TIMESTAMP,
+                                status TEXT DEFAULT 'completed'
+                            )
+                        """,
+                        "implementation_plans": """
+                            CREATE TABLE IF NOT EXISTS implementation_plans (
+                                id TEXT PRIMARY KEY,
+                                task_id TEXT,
+                                title TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                model_type TEXT NOT NULL,
+                                status TEXT DEFAULT 'draft',
+                                created_at TIMESTAMP,
+                                updated_at TIMESTAMP,
+                                FOREIGN KEY (task_id) REFERENCES tasks(id)
+                            )
+                        """,
+                        "sessions": """
+                            CREATE TABLE IF NOT EXISTS sessions (
+                                id TEXT PRIMARY KEY,
+                                session_id TEXT UNIQUE NOT NULL,
+                                protocol_step INTEGER DEFAULT 0,
+                                task_id TEXT,
+                                start_time TIMESTAMP,
+                                last_updated TIMESTAMP,
+                                checksum TEXT,
+                                metadata TEXT,
+                                FOREIGN KEY (task_id) REFERENCES tasks(id)
+                            )
+                        """
+                    }
 
-                # Create tasks table if not exists
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS tasks (
-                        id TEXT PRIMARY KEY,
-                        title TEXT NOT NULL,
-                        description TEXT,
-                        task_type TEXT,
-                        priority INTEGER,
-                        status TEXT DEFAULT 'pending',
-                        phase_name TEXT,
-                        project TEXT,
-                        created_at TIMESTAMP,
-                        updated_at TIMESTAMP
-                    )
-                """)
+                    # Context7 Pattern: Validate and create tables with error handling
+                    tables_created = []
+                    for table_name, create_sql in schemas.items():
+                        try:
+                            # Check if table exists
+                            cursor = conn.execute(
+                                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                                (table_name,)
+                            )
+                            table_exists = cursor.fetchone() is not None
 
-                # Create checkpoints table if not exists
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS checkpoints (
-                        id TEXT PRIMARY KEY,
-                        reason TEXT,
-                        triggered_at TIMESTAMP,
-                        status TEXT DEFAULT 'completed'
-                    )
-                """)
+                            # Create table if doesn't exist
+                            if not table_exists:
+                                conn.execute(create_sql)
+                                tables_created.append(table_name)
 
-                # Thread-safe check for sqlite-vec extension
-                self._check_vector_availability(conn)
+                                if hasattr(self.logger, 'logger') and self.logger.logger:
+                                    self.logger.logger.info(
+                                        f"Created table: {table_name}",
+                                        extra={"table_name": table_name, "operation": "schema_creation"}
+                                    )
+
+                        except sqlite3.Error as table_error:
+                            if hasattr(self.logger, 'logger') and self.logger.logger:
+                                self.logger.logger.error(
+                                    f"Failed to create table {table_name}: {table_error}",
+                                    extra={"table_name": table_name, "error": str(table_error)}
+                                )
+                            raise DatabaseException(f"Table creation failed for {table_name}: {table_error}") from table_error
+
+                    # Context7 Pattern: Verify table integrity after creation
+                    if tables_created:
+                        self._verify_table_integrity(conn, tables_created)
+
+                    # Thread-safe check for sqlite-vec extension
+                    self._check_vector_availability(conn)
+
+                    # Commit transaction if all operations succeed
+                    conn.commit()
+
+                    if hasattr(self.logger, 'logger') and self.logger.logger:
+                        self.logger.logger.info(
+                            f"Database schema verification completed. Tables created: {tables_created}",
+                            extra={"tables_created": tables_created, "operation": "schema_verification"}
+                        )
+
+                except Exception as e:
+                    # Rollback transaction on any error
+                    try:
+                        conn.rollback()
+                        if hasattr(self.logger, 'logger') and self.logger.logger:
+                            self.logger.logger.warning(
+                                f"Schema verification transaction rolled back: {e}",
+                                extra={"operation": "schema_verification", "error": str(e)}
+                            )
+                    except sqlite3.Error as rollback_error:
+                        if hasattr(self.logger, 'logger') and self.logger.logger:
+                            self.logger.logger.error(
+                                f"Failed to rollback schema verification: {rollback_error}",
+                                extra={"operation": "schema_verification", "rollback_error": str(rollback_error)}
+                            )
+                    raise
 
         except Exception as e:
             raise DatabaseException(f"Schema verification failed: {e}") from e
+
+    def _verify_table_integrity(self, conn: sqlite3.Connection, tables: List[str]) -> None:
+        """
+        Verify table integrity after creation (Context7-inspired validation).
+
+        Args:
+            conn: Database connection to use for verification
+            tables: List of table names to verify
+        """
+        for table_name in tables:
+            try:
+                # Test basic table accessibility
+                cursor = conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count = cursor.fetchone()[0]
+
+                # Verify expected columns exist (for critical tables)
+                if table_name == "semantic_memory":
+                    cursor = conn.execute("PRAGMA table_info(semantic_memory)")
+                    columns = {row[1] for row in cursor.fetchall()}
+                    required_columns = {"id", "content", "content_type", "created_at"}
+                    missing_columns = required_columns - columns
+                    if missing_columns:
+                        raise DatabaseException(f"Missing required columns in semantic_memory: {missing_columns}")
+
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.debug(
+                        f"Table integrity verified: {table_name} ({count} rows)",
+                        extra={"table_name": table_name, "row_count": count, "operation": "integrity_check"}
+                    )
+
+            except sqlite3.Error as e:
+                raise DatabaseException(f"Table integrity check failed for {table_name}: {e}") from e
 
     def _check_vector_availability(self, conn: sqlite3.Connection) -> None:
         """
@@ -884,52 +1020,98 @@ class DevStreamDirectClient:
                 return self._fts_search(conn, query, content_type, limit)
 
             try:
-                # Use sqlite-vec knn syntax with correct schema (FIXED)
-                # vec_semantic_memory has: embedding float[768], content_type PARTITION KEY, +memory_id TEXT, +content_preview TEXT
-                # For partition keys, we can filter directly in the WHERE clause
-                if content_type:
-                    sql = """
-                        SELECT
-                            sm.id, sm.content, sm.content_type, sm.keywords,
-                            sm.created_at, sm.access_count, sm.importance_score,
-                            knn.distance
-                        FROM vec_semantic_memory AS knn
-                        JOIN semantic_memory sm ON knn.memory_id = sm.id
-                        WHERE knn.embedding MATCH ? AND knn.content_type = ? AND k = ?
-                        ORDER BY knn.distance
-                        LIMIT ?
-                    """
-                    params = [f"[{query_embedding}]", content_type, limit, limit]
-                else:
-                    # For general queries without content_type filter, use CTE approach
-                    sql = """
-                        WITH knn_matches AS (
-                            SELECT memory_id, distance
-                            FROM vec_semantic_memory
-                            WHERE embedding MATCH ? AND k = ?
-                        )
-                        SELECT
-                            sm.id, sm.content, sm.content_type, sm.keywords,
-                            sm.created_at, sm.access_count, sm.importance_score,
-                            knn.distance
-                        FROM knn_matches
-                        JOIN semantic_memory sm ON knn_matches.memory_id = sm.id
-                        ORDER BY knn.distance
-                        LIMIT ?
-                    """
-                    params = [f"[{query_embedding}]", limit, limit]
+                # Context7 Pattern: Use robust vector search with distance column fallback
+                # Try distance column first, fallback to basic query if it fails
+                try:
+                    # Use sqlite-vec knn syntax with correct schema
+                    # vec_semantic_memory has: embedding float[768], content_type PARTITION KEY, +memory_id TEXT, +content_preview TEXT
+                    # For partition keys, we can filter directly in the WHERE clause
+                    if content_type:
+                        sql = """
+                            SELECT
+                                sm.id, sm.content, sm.content_type, sm.keywords,
+                                sm.created_at, sm.access_count, sm.importance_score,
+                                knn.distance
+                            FROM vec_semantic_memory AS knn
+                            JOIN semantic_memory sm ON knn.memory_id = sm.id
+                            WHERE knn.embedding MATCH ? AND knn.content_type = ? AND k = ?
+                            ORDER BY knn.distance
+                            LIMIT ?
+                        """
+                        params = [f"[{query_embedding}]", content_type, limit, limit]
+                    else:
+                        # For general queries without content_type filter, use CTE approach
+                        sql = """
+                            WITH knn_matches AS (
+                                SELECT memory_id, distance
+                                FROM vec_semantic_memory
+                                WHERE embedding MATCH ? AND k = ?
+                            )
+                            SELECT
+                                sm.id, sm.content, sm.content_type, sm.keywords,
+                                sm.created_at, sm.access_count, sm.importance_score,
+                                knn.distance
+                            FROM knn_matches
+                            JOIN semantic_memory sm ON knn_matches.memory_id = sm.id
+                            ORDER BY knn.distance
+                            LIMIT ?
+                        """
+                        params = [f"[{query_embedding}]", limit, limit]
 
-                cursor = vec_conn.execute(sql, params)
-                rows = cursor.fetchall()
+                    cursor = vec_conn.execute(sql, params)
+                    rows = cursor.fetchall()
 
-                # Validate results
+                except sqlite3.OperationalError as distance_error:
+                    if "no such column" in str(distance_error).lower():
+                        # Distance column not available, retry without distance
+                        if hasattr(self.logger, 'logger') and self.logger.logger:
+                            self.logger.logger.info(
+                                "Distance column not available, using fallback query without distance",
+                                extra={"original_error": str(distance_error)}
+                            )
+
+                        if content_type:
+                            sql = """
+                                SELECT
+                                    sm.id, sm.content, sm.content_type, sm.keywords,
+                                    sm.created_at, sm.access_count, sm.importance_score
+                                FROM vec_semantic_memory AS knn
+                                JOIN semantic_memory sm ON knn.memory_id = sm.id
+                                WHERE knn.embedding MATCH ? AND knn.content_type = ? AND k = ?
+                                LIMIT ?
+                            """
+                            params = [f"[{query_embedding}]", content_type, limit, limit]
+                        else:
+                            sql = """
+                                WITH knn_matches AS (
+                                    SELECT memory_id
+                                    FROM vec_semantic_memory
+                                    WHERE embedding MATCH ? AND k = ?
+                                )
+                                SELECT
+                                    sm.id, sm.content, sm.content_type, sm.keywords,
+                                    sm.created_at, sm.access_count, sm.importance_score
+                                FROM knn_matches
+                                JOIN semantic_memory sm ON knn_matches.memory_id = sm.id
+                                LIMIT ?
+                            """
+                            params = [f"[{query_embedding}]", limit, limit]
+
+                        cursor = vec_conn.execute(sql, params)
+                        rows = cursor.fetchall()
+                    else:
+                        raise distance_error
+
+                # Validate results and handle distance column gracefully
                 results = []
                 for row in rows:
                     result = dict(row)
-                    # Handle distance field gracefully (may not exist in all query types)
+
+                    # Context7 Pattern: Handle distance column gracefully (sqlite-vec compatibility)
+                    # The distance column may not be available in all sqlite-vec versions or query types
                     if 'distance' not in result:
-                        # Remove distance reference from SELECT if it doesn't exist
-                        pass  # Keep result as-is without distance
+                        # If distance column is missing, set a default distance for compatibility
+                        result['distance'] = 1.0  # Default distance (neutral similarity)
 
                     # Parse keywords JSON if needed
                     if result.get('keywords') and isinstance(result['keywords'], str):
