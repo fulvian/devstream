@@ -100,22 +100,66 @@ class WorkSessionManager:
 
     def __init__(self, db_path: Optional[str] = None):
         """
-        Initialize WorkSessionManager.
+        Initialize WorkSessionManager with Context7-compliant dynamic path resolution.
 
         Args:
-            db_path: Path to DevStream database (defaults to data/devstream.db)
+            db_path: Path to DevStream database (auto-detected if None)
         """
         self.structured_logger = get_devstream_logger('work_session_manager')
         self.logger = self.structured_logger.logger  # Compatibility
 
-        # Database configuration (updated to use data for Spotlight exclusion)
+        # Context7 Pattern: Dynamic database path resolution with priority order
         if db_path is None:
-            project_root = Path(__file__).parent.parent.parent.parent.parent
-            self.db_path = str(project_root / 'data' / 'devstream.db')
+            self.db_path = self._get_dynamic_db_path()
         else:
             self.db_path = db_path
 
         self.logger.info(f"WorkSessionManager initialized with DB: {self.db_path}")
+
+    def _get_dynamic_db_path(self) -> str:
+        """
+        Context7-compliant dynamic database path resolution.
+
+        Priority Order (Dynaconf-inspired):
+        1. DEVSTREAM_DB_PATH environment variable (explicit override)
+        2. DEVSTREAM_PROJECT_ROOT + data/devstream.db (multi-project mode)
+        3. Current working directory + data/devstream.db (single-project mode)
+        4. Fallback to script location (legacy compatibility)
+
+        Returns:
+            str: Resolved database path
+        """
+        import os
+
+        # Priority 1: Explicit database path from environment
+        explicit_db_path = os.getenv("DEVSTREAM_DB_PATH")
+        if explicit_db_path:
+            self.logger.debug(f"Using explicit DB path from environment: {explicit_db_path}")
+            return explicit_db_path
+
+        # Priority 2: Multi-project mode with project root
+        project_root = os.getenv("DEVSTREAM_PROJECT_ROOT")
+        if project_root:
+            db_path = os.path.join(project_root, "data", "devstream.db")
+            self.logger.debug(f"Using multi-project DB path: {db_path}")
+            return db_path
+
+        # Priority 3: Current working directory (single-project mode)
+        current_dir = os.getcwd()
+        db_path = os.path.join(current_dir, "data", "devstream.db")
+
+        # Check if database exists in current directory
+        if os.path.exists(db_path):
+            self.logger.debug(f"Using current directory DB path: {db_path}")
+            return db_path
+
+        # Priority 4: Fallback to script location (legacy compatibility)
+        # Calculate script location relative to sessions directory
+        script_dir = Path(__file__).parent.parent.parent.parent.parent
+        fallback_path = str(script_dir / 'data' / 'devstream.db')
+
+        self.logger.debug(f"Using fallback DB path: {fallback_path}")
+        return fallback_path
 
     def _get_connection(self) -> aiosqlite.Connection:
         """
