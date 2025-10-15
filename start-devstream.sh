@@ -558,6 +558,9 @@ initialize_direct_db() {
   # Initialize or validate database schema (Context7 best practice)
   initialize_database_schema
 
+  # Initialize project templates for multi-project setup
+  initialize_project_templates
+
   print_status "✅ Direct DB Architecture initialized"
 }
 
@@ -1369,6 +1372,86 @@ stop_server() {
 
   # Also stop monitoring daemons
   stop_monitors
+}
+
+# Function to initialize project templates for multi-project setup
+# Context7 best practice: template inheritance for consistent project setup
+initialize_project_templates() {
+  # Only initialize templates in multi-project mode
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  print_status "📋 Initializing project templates..."
+
+  local templates_source_dir="$DEVSTREAM_SCRIPT_DIR/templates"
+  local templates_target_dir="$PROJECT_ROOT/templates"
+
+  # Check if source templates exist
+  if [ ! -d "$templates_source_dir" ]; then
+    print_warning "⚠️  Templates source directory not found: $templates_source_dir"
+    return 0
+  fi
+
+  # Create templates directory in project if it doesn't exist
+  if [ ! -d "$templates_target_dir" ]; then
+    print_info "📁 Creating project templates directory..."
+    mkdir -p "$templates_target_dir"
+  fi
+
+  # Template files to copy
+  local template_files=(
+    "implementation-plan-glm46.md"
+    "implementation-plan-sonnet45.md"
+    "handoff-prompt-glm46.md"
+  )
+
+  local copied_count=0
+  local updated_count=0
+
+  for template_file in "${template_files[@]}"; do
+    local source_file="$templates_source_dir/$template_file"
+    local target_file="$templates_target_dir/$template_file"
+
+    if [ -f "$source_file" ]; then
+      if [ ! -f "$target_file" ]; then
+        # Copy new template
+        cp "$source_file" "$target_file"
+        print_info "✅ Copied template: $template_file"
+        copied_count=$((copied_count + 1))
+      else
+        # Check if template needs update (based on modification time)
+        if [ "$source_file" -nt "$target_file" ]; then
+          cp "$source_file" "$target_file"
+          print_info "🔄 Updated template: $template_file"
+          updated_count=$((updated_count + 1))
+        else
+          print_info "✅ Template current: $template_file"
+        fi
+      fi
+    else
+      print_warning "⚠️  Template not found: $template_file"
+    fi
+  done
+
+  # Create .templates_version file for tracking
+  local version_file="$PROJECT_ROOT/.templates_version"
+  local current_version=$(date +%Y%m%d_%H%M%S)
+
+  if [ ! -f "$version_file" ] || [ "$templates_source_dir" -nt "$version_file" ]; then
+    echo "$current_version" > "$version_file"
+    print_info "📝 Updated templates version: $current_version"
+  fi
+
+  # Summary
+  local total_actions=$((copied_count + updated_count))
+  if [ $total_actions -gt 0 ]; then
+    print_status "✅ Project templates initialized ($copied_count new, $updated_count updated)"
+    print_info "   Templates directory: $templates_target_dir"
+    print_info "   Available templates: $(IFS=', '; echo "${template_files[*]}")"
+  else
+    print_info "✅ All project templates are up to date"
+  fi
 }
 
 # Main function
