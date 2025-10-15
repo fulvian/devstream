@@ -1614,7 +1614,7 @@ validate_devstream_venv() {
 
   # Validate DevStream-specific modules
   local python_exec="$venv_path/bin/python"
-  local required_modules=("cchooks" "aiohttp" "structlog" "python-dotenv")
+  local required_modules=("cchooks" "aiohttp" "structlog" "dotenv")
 
   if ! validate_required_modules "$python_exec" "${required_modules[@]}"; then
     return 1
