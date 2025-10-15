@@ -1509,6 +1509,224 @@ detect_existing_venv() {
   return 1
 }
 
+# Function to validate virtual environment health (Context7 best practice)
+# Context7 pattern: comprehensive health check before using environment
+validate_venv_health() {
+  local venv_path="$1"
+  local venv_name="$2"
+
+  print_info "🔍 Validating virtual environment: $venv_name ($venv_path)" >&2
+
+  # Check directory exists
+  if [ ! -d "$venv_path" ]; then
+    print_warning "⚠️  Directory not found: $venv_path" >&2
+    return 1
+  fi
+
+  # Check Python executable
+  local python_exec="$venv_path/bin/python"
+  if [ ! -f "$python_exec" ]; then
+    print_warning "⚠️  Python executable not found: $python_exec" >&2
+    return 1
+  fi
+
+  # Check Python version compatibility (require 3.11+ for DevStream)
+  local python_version=$("$python_exec" --version 2>&1)
+  local python_major=$("$python_exec" -c "import sys; print(sys.version_info.major)")
+  local python_minor=$("$python_exec" -c "import sys; print(sys.version_info.minor)")
+
+  if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 11 ]); then
+    print_warning "⚠️  Python version $python_version is incompatible (requires 3.11+)" >&2
+    return 1
+  fi
+
+  # Test basic Python functionality
+  local python_test=$("$python_exec" -c "
+import sys
+try:
+    import sqlite3
+    import ast
+    import json
+    print('OK')
+except ImportError as e:
+    print(f'MISSING_MODULE:{e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>/dev/null)
+
+  if [ "$python_test" != "OK" ]; then
+    if [[ "$python_test" == MISSING_MODULE:* ]]; then
+      print_warning "⚠️  Missing required modules: ${python_test#MISSING_MODULE:}" >&2
+    else
+      print_warning "⚠️  Python functionality test failed: ${python_test#ERROR:}" >&2
+    fi
+    return 1
+  fi
+
+  print_info "✅ Virtual environment validated: $python_version" >&2
+  return 0
+}
+
+# Function to validate required modules in virtual environment (Context7 best practice)
+# Context7 pattern: validate dependencies before proceeding
+validate_required_modules() {
+  local python_exec="$1"
+  shift
+  local required_modules=("$@")
+
+  print_info "🔍 Validating required modules..." >&2
+
+  for module in "${required_modules[@]}"; do
+    local module_test=$("$python_exec" -c "
+import sys
+try:
+    import $module
+    print('OK')
+except ImportError:
+    print('MISSING')
+    sys.exit(1)
+" 2>/dev/null)
+
+    if [ "$module_test" != "OK" ]; then
+      print_warning "⚠️  Missing required module: $module" >&2
+      return 1
+    fi
+  done
+
+  print_info "✅ All required modules available" >&2
+  return 0
+}
+
+# Function to validate DevStream framework virtual environment (Context7 best practice)
+# Context7 pattern: comprehensive validation of framework dependencies
+validate_devstream_venv() {
+  local venv_path="$1"
+  local project_name="$2"
+
+  print_info "🔍 Validating DevStream framework environment..." >&2
+
+  # Basic health check
+  if ! validate_venv_health "$venv_path" "DevStream Framework"; then
+    return 1
+  fi
+
+  # Validate DevStream-specific modules
+  local python_exec="$venv_path/bin/python"
+  local required_modules=("cchooks" "aiohttp" "structlog" "python-dotenv")
+
+  if ! validate_required_modules "$python_exec" "${required_modules[@]}"; then
+    return 1
+  fi
+
+  # Test Direct DB client availability
+  local direct_client_test=$("$python_exec" -c "
+import sys
+sys.path.insert(0, '$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils')
+try:
+    from direct_client import get_direct_client
+    print('OK')
+except ImportError as e:
+    print('MISSING_DIRECT_CLIENT')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>/dev/null)
+
+  if [ "$direct_client_test" != "OK" ]; then
+    print_warning "⚠️  Direct DB client not available in framework environment" >&2
+    return 1
+  fi
+
+  print_info "✅ DevStream framework environment validated" >&2
+  return 0
+}
+
+# Function to copy framework virtual environment to project (Context7 best practice)
+# Context7 pattern: atomic copy with validation and rollback
+copy_framework_venv() {
+  local project_root="$1"
+  local project_name="$2"
+  local framework_venv="$3"
+  local project_venv="$project_root/.devstream"
+
+  print_info "📋 Copying DevStream framework virtual environment..."
+
+  # Validate source environment
+  if ! validate_devstream_venv "$framework_venv" "Framework"; then
+    print_error "❌ Framework virtual environment validation failed"
+    return 1
+  fi
+
+  # Remove existing incomplete venv
+  if [ -d "$project_venv" ]; then
+    print_info "🗑️  Removing existing incomplete .devstream directory..."
+    rm -rf "$project_venv"
+  fi
+
+  # Perform atomic copy with error handling
+  print_info "📁 Copying framework virtual environment..."
+  if cp -R "$framework_venv" "$project_venv" 2>/dev/null; then
+    print_status "✅ Framework virtual environment copied successfully"
+  else
+    print_error "❌ Failed to copy framework virtual environment"
+    return 1
+  fi
+
+  # Validate copied environment
+  if validate_devstream_venv "$project_venv" "Project Framework"; then
+    print_status "✅ Copied framework environment validated"
+    print_info "   Framework venv: $project_venv"
+    print_info "   Source: $framework_venv"
+  else
+    print_error "❌ Copied framework environment validation failed"
+    print_error "   Rolling back..."
+    rm -rf "$project_venv"
+    return 1
+  fi
+
+  return 0
+}
+
+# Function to ensure DevStream framework virtual environment (Context7 best practice)
+# Context7 pattern: automatic setup with validation and recovery
+ensure_devstream_venv() {
+  local project_root="$1"
+  local project_name="$2"
+  local project_venv="$project_root/.devstream"
+  local framework_venv="$VENV_DIR"
+
+  print_status "🔧 Ensuring DevStream framework virtual environment..."
+
+  # Check if project venv exists and is valid
+  if [ -d "$project_venv" ]; then
+    print_info "📁 Found existing .devstream directory"
+
+    if validate_devstream_venv "$project_venv" "$project_name"; then
+      print_status "✅ DevStream framework environment is valid"
+      return 0
+    else
+      print_warning "⚠️  Existing .devstream environment is invalid, will recreate"
+      print_info "🔄 Removing invalid environment..."
+      rm -rf "$project_venv"
+    fi
+  else
+    print_info "📁 No .devstream directory found"
+  fi
+
+  # Copy framework venv to project
+  if copy_framework_venv "$project_root" "$project_name" "$framework_venv"; then
+    print_status "✅ DevStream framework environment ready"
+  else
+    print_error "❌ Failed to setup DevStream framework environment"
+    return 1
+  fi
+
+  return 0
+}
+
 # Function to initialize project virtual environment (Context7 best practice)
 # Context7 pattern: smart reuse of existing environments with validation
 initialize_project_venv() {
@@ -1523,6 +1741,12 @@ initialize_project_venv() {
   local project_venv_path="$PROJECT_ROOT/.venv"
   local framework_python="$VENV_DIR/bin/python"
   local existing_venv=""
+
+  # Step 0: Ensure DevStream framework venv is available
+  if ! ensure_devstream_venv "$PROJECT_ROOT" "$project_name"; then
+    print_error "❌ Failed to ensure DevStream framework environment"
+    return 1
+  fi
 
   # Step 1: Try to detect and use existing virtual environment
   # Context7 best practice: redirect stderr to avoid capturing debug output
@@ -1603,6 +1827,11 @@ DEVSTREAM_PROJECT_VENV_PATH=$project_venv_path
 DEVSTREAM_PROJECT_VENV_PYTHON=$project_venv_path/bin/python
 DEVSTREAM_PROJECT_VENV_PIP=$project_venv_path/bin/pip
 
+# DevStream framework virtual environment paths
+DEVSTREAM_PROJECT_DEVSTREAM_VENV_PATH=$PROJECT_ROOT/.devstream
+DEVSTREAM_PROJECT_DEVSTREAM_VENV_PYTHON=$PROJECT_ROOT/.devstream/bin/python
+DEVSTREAM_PROJECT_DEVSTREAM_VENV_PIP=$PROJECT_ROOT/.devstream/bin/pip
+
 # Project paths
 DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT
 DEVSTREAM_PROJECT_NAME=$project_name
@@ -1621,9 +1850,12 @@ EOF
   export DEVSTREAM_PROJECT_VENV_PATH="$project_venv_path"
   export DEVSTREAM_PROJECT_VENV_PYTHON="$project_venv_path/bin/python"
   export DEVSTREAM_PROJECT_VENV_PIP="$project_venv_path/bin/pip"
+  export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PATH="$PROJECT_ROOT/.devstream"
+  export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PYTHON="$PROJECT_ROOT/.devstream/bin/python"
+  export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PIP="$PROJECT_ROOT/.devstream/bin/pip"
 
-  # Update PATH to prioritize project venv
-  export PATH="$project_venv_path/bin:$PATH"
+  # Update PATH to prioritize project venv and framework venv
+  export PATH="$project_venv_path/bin:$PROJECT_ROOT/.devstream/bin:$PATH"
 
   # Step 5: Load project environment if it exists
   if [ -f "$project_env_file" ]; then
@@ -1639,11 +1871,17 @@ EOF
     return 1
   fi
 
+  if [ ! -f "$PROJECT_ROOT/.devstream/bin/python" ]; then
+    print_error "❌ Framework venv setup failed - Python executable not found"
+    return 1
+  fi
+
   local python_version=$("$project_venv_path/bin/python" --version 2>&1 | cut -d' ' -f2)
+  local framework_python_version=$("$PROJECT_ROOT/.devstream/bin/python" --version 2>&1 | cut -d' ' -f2)
 
   print_status "✅ Project virtual environment ready"
-  print_info "🐍 Project venv: $project_venv_path"
-  print_info "🐍 Python version: $python_version"
+  print_info "🐍 Project venv: $project_venv_path (Python $python_version)"
+  print_info "🔧 Framework venv: $PROJECT_ROOT/.devstream (Python $framework_python_version)"
   print_info "📁 Project config: .env.project"
 }
 
