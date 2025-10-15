@@ -602,6 +602,8 @@ class CodebaseScanner:
                 '**/node_modules/**',
                 '**/.venv/**',
                 '**/venv/**',
+                '**/.reporting/**',
+                '**/reporting/**',
                 '**/.pytest_cache/**',
                 '**/dist/**',
                 '**/build/**',
@@ -620,9 +622,10 @@ class CodebaseScanner:
                 if not file_path.is_file():
                     continue
 
-                # Check exclude patterns
+                # Check exclude patterns using relative path
+                relative_path = file_path.relative_to(directory)
                 excluded = any(
-                    file_path.match(exclude_pattern)
+                    relative_path.match(exclude_pattern)
                     for exclude_pattern in exclude_patterns
                 )
 

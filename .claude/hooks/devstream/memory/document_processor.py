@@ -420,6 +420,8 @@ class DocumentProcessor:
                 '**/node_modules/**',
                 '**/.venv/**',
                 '**/venv/**',
+                '**/.reporting/**',
+                '**/reporting/**',
                 '**/.pytest_cache/**',
                 '**/dist/**',
                 '**/build/**',
@@ -428,18 +430,72 @@ class DocumentProcessor:
                 '**/.DS_Store/**'
             ]
 
+    def should_exclude_file(self, file_path: Path) -> bool:
+        """
+        Check if file should be excluded using multiple strategies.
+
+        Context7 Pattern: Robust exclusion handling.
+        """
+        relative_path = file_path.relative_to(self.project_root)
+        relative_str = str(relative_path)
+
+        # Check for exact directory matches
+        exclude_dirs = ['.git', '__pycache__', 'node_modules', '.venv', 'venv',
+                       '.reporting', 'reporting', '.pytest_cache', 'dist', 'build']
+
+        # Check if any part of the path starts with exclude directories
+        for part in relative_path.parts:
+            if part in exclude_dirs:
+                return True
+
+        # Check pattern matching (fallback)
+        for pattern in self.exclude_patterns:
+            try:
+                if relative_path.match(pattern):
+                    return True
+            except:
+                # If pattern matching fails, use string matching
+                if any(exclude_dir in relative_str for exclude_dir in exclude_dirs):
+                    return True
+
+        return False
+
+    def discover_documents(self, include_patterns: Optional[List[str]] = None,
+                          exclude_patterns: Optional[List[str]] = None) -> List[Path]:
+        """
+        Discover documents in project directory.
+
+        Context7 Pattern: Intelligent file discovery with patterns.
+        """
+        if include_patterns is None:
+            include_patterns = ['**/*']
+
+        if exclude_patterns is None:
+            exclude_patterns = [
+                '**/.git/**',
+                '**/__pycache__/**',
+                '**/node_modules/**',
+                '**/.venv/**',
+                '**/venv/**',
+                '**/.reporting/**',
+                '**/reporting/**',
+                '**/.pytest_cache/**',
+                '**/dist/**',
+                '**/build/**',
+                '**/*.pyc',
+                '**/*.pyo',
+                '**/.DS_Store/**'
+            ]
+
+        # Store exclude patterns for use in should_exclude_file
+        self.exclude_patterns = exclude_patterns
         discovered_files = []
 
         for pattern in include_patterns:
             for file_path in self.project_root.glob(pattern):
                 if file_path.is_file() and file_path.suffix in self.file_processors:
-                    # Check exclude patterns
-                    excluded = any(
-                        file_path.match(exclude_pattern)
-                        for exclude_pattern in exclude_patterns
-                    )
-
-                    if not excluded:
+                    # Check exclude patterns using robust method
+                    if not self.should_exclude_file(file_path):
                         discovered_files.append(file_path)
 
         # Sort by modification time (newest first)
