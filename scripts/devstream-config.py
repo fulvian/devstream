@@ -11,6 +11,58 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
+def get_devstream_root() -> Path:
+    """
+    Get DevStream root using Context7 patterns.
+
+    Priority 1: DEVSTREAM_ROOT environment variable
+    Priority 2: Script location detection (two levels up from scripts/)
+    Priority 3: Current working directory
+    Priority 4: Common installation locations
+
+    Returns:
+        Path to DevStream root directory
+
+    Raises:
+        RuntimeError: If DevStream root cannot be determined
+    """
+    # Priority 1: DEVSTREAM_ROOT environment variable
+    devstream_root = os.getenv("DEVSTREAM_ROOT")
+    if devstream_root and Path(devstream_root).exists():
+        return Path(devstream_root).absolute()
+
+    # Priority 2: Script location detection
+    script_file = Path(__file__)
+    if script_file.exists():
+        # Two levels up from scripts/ directory
+        potential_root = script_file.parent.parent
+        if (potential_root / "start-devstream.sh").exists():
+            return potential_root.absolute()
+
+    # Priority 3: Current working directory
+    cwd = Path.cwd()
+    if (cwd / "start-devstream.sh").exists():
+        return cwd.absolute()
+
+    # Priority 4: Common installation locations
+    possible_locations = [
+        Path.home() / ".devstream",
+        Path.home() / "devstream",
+        Path("/opt/devstream"),
+        Path.cwd(),
+    ]
+
+    for location in possible_locations:
+        if location.exists() and (location / "start-devstream.sh").exists():
+            return location.absolute()
+
+    # If nothing found, raise an informative error
+    raise RuntimeError(
+        "DevStream installation not found! Please set DEVSTREAM_ROOT environment variable "
+        "or ensure DevStream is properly installed with start-devstream.sh"
+    )
+
+
 class DevStreamConfig:
     """Manages DevStream project configuration."""
 
@@ -122,7 +174,12 @@ class DevStreamConfig:
     def get_startup_command(self) -> str:
         """Get appropriate startup command based on provider."""
         provider = self.get_provider()
-        devstream_root = os.environ.get("DEVSTREAM_ROOT", "/Users/fulvioventura/devstream")
+
+        try:
+            devstream_root = get_devstream_root()
+        except RuntimeError:
+            # Fallback to environment variable or default for backward compatibility
+            devstream_root = Path(os.environ.get("DEVSTREAM_ROOT", "/devstream"))
 
         if provider == "z.ai":
             return f"{devstream_root}/start-devstream.sh start z.ai"

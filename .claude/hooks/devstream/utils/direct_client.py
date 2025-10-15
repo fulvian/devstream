@@ -314,37 +314,60 @@ class DevStreamDirectClient:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         """
-        Initialize direct client with ConnectionManager.
+        Initialize direct client with ConnectionManager using multi-project best practices.
 
         Args:
-            db_path: Path to database file (validated) - FORCED to data/devstream.db
+            db_path: Path to database file (validated) - supports multi-project configuration
 
         Raises:
             DatabaseException: If database connection fails
         """
         try:
-            # CRITICAL: Force database path to official DevStream database
-            if db_path is not None and db_path != "data/devstream.db":
-                self.logger.logger.warning(
-                    f"Overriding custom db_path '{db_path}' with official 'data/devstream.db'",
-                    extra={"custom_path": db_path, "official_path": "data/devstream.db"}
-                )
+            # BEST PRACTICE: Multi-project database path resolution
+            # Priority order: 1) explicit db_path, 2) DEVSTREAM_DB_PATH env var, 3) default "data/devstream.db"
 
-            # Use official DevStream database path - let connection_manager handle path resolution
-            official_db_path = "data/devstream.db"
+            if db_path is not None:
+                # Explicit path provided (programmatic usage)
+                final_db_path = db_path
+                # Note: logger not available yet, will log after initialization
+            else:
+                # Check environment variable first (multi-project support)
+                env_db_path = os.environ.get('DEVSTREAM_DB_PATH')
+                if env_db_path:
+                    final_db_path = env_db_path
+                    # Note: logger not available yet, will log after initialization
+                else:
+                    # Default to relative path (supports multi-project)
+                    final_db_path = "data/devstream.db"
+                    # Note: logger not available yet, will log after initialization
 
-            # Initialize connection manager with official path
-            self.connection_manager = ConnectionManager.get_instance(official_db_path)
+            # BEST PRACTICE: Support both relative and absolute paths
+            if not os.path.isabs(final_db_path):
+                # Convert relative path to absolute based on current working directory
+                cwd = os.getcwd()
+                final_db_path = os.path.join(cwd, final_db_path)
+                # Note: logger not available yet, will log after initialization
+
+            # Initialize connection manager with resolved path
+            self.connection_manager = ConnectionManager.get_instance(final_db_path)
             self.db_path = self.connection_manager.db_path
             self.logger = logger_service
 
             # Verify database schema compatibility
             self._verify_database_schema()
 
-            self.logger.logger.info(
-                "Direct database client initialized with official database",
-                extra={"db_path": self.db_path}
-            )
+            # Safe logging - check if logger exists
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info(
+                    "Direct database client initialized with multi-project support",
+                    extra={
+                        "db_path": self.db_path,
+                        "original_input": db_path,
+                        "resolved_path": final_db_path
+                    }
+                )
+            else:
+                print(f"✅ Direct database client initialized: {self.db_path}")
 
         except Exception as e:
             raise DatabaseException(f"Failed to initialize direct client: {e}") from e

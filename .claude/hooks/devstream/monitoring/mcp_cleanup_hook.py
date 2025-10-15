@@ -14,6 +14,7 @@ Usage:
 import asyncio
 import subprocess
 import sys
+import os
 from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime
@@ -22,22 +23,59 @@ import structlog
 # Setup structured logging
 logger = structlog.get_logger("mcp_cleanup_hook")
 
-# Wrong path detection constants
-CORRECT_DB_PATH = "/Users/fulvioventura/devstream/data/devstream.db"
+# Context7 Pattern: Dynamic path resolution
+def get_project_root():
+    """Get project root using Context7/Dynaconf patterns."""
+    # Priority 1: DEVSTREAM_PROJECT_ROOT (multi-project mode)
+    project_root = os.getenv("DEVSTREAM_PROJECT_ROOT")
+
+    # Priority 2: Current working directory (single-project mode)
+    if project_root is None:
+        project_root = os.getcwd()
+
+    return Path(project_root)
+
+# Dynamic path configuration (Context7 best practice)
+PROJECT_ROOT = get_project_root()
+CORRECT_DB_PATH = str(PROJECT_ROOT / "data" / "devstream.db")
 WRONG_DB_PATH_PATTERN = "mcp-devstream-server/data/devstream.db"
 
 
 class MCPCleanupHook:
-    """Cleanup hook to prevent zombie MCP processes."""
+    """Context7-compliant cleanup hook to prevent zombie MCP processes."""
 
     def __init__(self):
-        self.project_root = Path(__file__).parent.parent.parent.parent.parent
-        self.mcp_server_path = self.project_root / "mcp-devstream-server" / "dist" / "index.js"
+        # Context7 Pattern: Dynamic project root detection
+        self.project_root = PROJECT_ROOT
+        self.devstream_root = self._detect_devstream_root()
+        self.mcp_server_path = self.devstream_root / "mcp-devstream-server" / "dist" / "index.js"
         self.max_instances = 2  # Allow max 2 instances
+
+        # Multi-project log paths
         self.log_file = self.project_root / ".claude" / "logs" / "devstream" / "mcp_cleanup_hook.jsonl"
         self.wrong_path_log = self.project_root / ".claude" / "logs" / "devstream" / "wrong-path-detections.log"
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.wrong_path_log.parent.mkdir(parents=True, exist_ok=True)
+
+    def _detect_devstream_root(self):
+        """Detect DevStream installation root using Context7 patterns."""
+        # Priority 1: DEVSTREAM_ROOT environment variable
+        devstream_root = os.getenv("DEVSTREAM_ROOT")
+
+        # Priority 2: Try to locate based on hook script location
+        if devstream_root is None:
+            hook_file = Path(__file__)
+            # Hook is in: /Users/fulvioventura/devstream/.claude/hooks/devstream/monitoring/
+            # DevStream root is 4 levels up
+            potential_root = hook_file.parent.parent.parent.parent
+            if (potential_root / ".claude" / "hooks" / "devstream").exists():
+                devstream_root = str(potential_root)
+
+        # Priority 3: Fallback to project root (single-project mode)
+        if devstream_root is None:
+            devstream_root = str(self.project_root)
+
+        return Path(devstream_root)
 
     async def get_mcp_process_count(self) -> int:
         """

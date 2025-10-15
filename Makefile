@@ -69,8 +69,13 @@ docs-build: ## Build documentation
 	poetry run mkdocs build
 
 # Database operations
-db-init: ## Initialize database with schema
-	poetry run python -c "from src.devstream.database.connection import DatabaseManager; import asyncio; asyncio.run(DatabaseManager.create_schema())"
+db-init: ## Initialize database with schema (no data loss)
+	@if [ -f data/devstream.db ]; then \
+		printf "Database already exists at data/devstream.db\\n"; \
+		printf "Use make db-reset to recreate it from scratch.\\n"; \
+	else \
+		poetry run python scripts/setup-db.py --verbose; \
+	fi
 
 db-migrate: ## Run database migrations
 	poetry run devstream-migrate

@@ -455,20 +455,38 @@ check_prerequisites() {
     local db_test=$("$VENV_DIR/bin/python" -c "
 import sqlite3
 import sys
+
+db_path = r'$db_path'
+
+def table_counts(connection):
+    tables = [row[0] for row in connection.execute(
+        \"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memory', 'semantic_memory')\"
+    )]
+    if not tables:
+        return []
+    counts = []
+    for table_name in sorted(set(tables)):
+        query = \"SELECT COUNT(*) FROM {}\".format(table_name)
+        count = connection.execute(query).fetchone()[0]
+        counts.append('{}={}'.format(table_name, count))
+    return counts
+
 try:
-    db = sqlite3.connect('$db_path')
-    cursor = db.execute('SELECT COUNT(*) FROM memory')
-    count = cursor.fetchone()[0]
-    print(f'OK:{count}')
-    db.close()
-except Exception as e:
-    print(f'ERROR:{e}')
+    conn = sqlite3.connect(db_path)
+    stats = table_counts(conn)
+    conn.close()
+    if not stats:
+        print('ERROR:No memory tables found. Run make db-init to initialize the schema.')
+        sys.exit(1)
+    print('OK:' + ','.join(stats))
+except Exception as exc:
+    print(f'ERROR:{exc}')
     sys.exit(1)
 " 2>&1)
 
     if [[ "$db_test" == OK:* ]]; then
-      local record_count=${db_test#*:}
-      print_info "Direct DB access: $record_count records"
+      local record_info=${db_test#OK:}
+      print_info "Direct DB access: $record_info"
     else
       print_error "Direct DB access failed: ${db_test#ERROR:}"
       all_good=false
@@ -569,31 +587,44 @@ validate_direct_db_config() {
     local db_test=$("$VENV_DIR/bin/python" -c "
 import sqlite3
 import sys
+
+db_path = r'$db_path'
+
+def table_counts(connection):
+    tables = [row[0] for row in connection.execute(
+        \"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memory', 'semantic_memory')\"
+    )]
+    if not tables:
+        return []
+    counts = []
+    for table_name in sorted(set(tables)):
+        query = \"SELECT COUNT(*) FROM {}\".format(table_name)
+        count = connection.execute(query).fetchone()[0]
+        counts.append('{}={}'.format(table_name, count))
+    return counts
+
 try:
-    db = sqlite3.connect('$db_path')
-
-    # Test memory table
-    cursor = db.execute('SELECT COUNT(*) FROM memory')
-    memory_count = cursor.fetchone()[0]
-
-    # Test semantic_memory table
-    cursor = db.execute('SELECT COUNT(*) FROM semantic_memory')
-    semantic_count = cursor.fetchone()[0]
-
-    print(f'OK:{memory_count}:{semantic_count}')
-    db.close()
-except Exception as e:
-    print(f'ERROR:{e}')
+    conn = sqlite3.connect(db_path)
+    stats = table_counts(conn)
+    conn.close()
+    if not stats:
+        print('ERROR:No memory tables found. Run make db-init to initialize the schema.')
+        sys.exit(1)
+    print('OK:' + ','.join(stats))
+except Exception as exc:
+    print(f'ERROR:{exc}')
     sys.exit(1)
 " 2>&1)
 
     if [[ "$db_test" == OK:* ]]; then
-      local memory_count=${db_test#*:}
-      local semantic_count=${memory_count#*:}
-      memory_count=${memory_count%:*}
+      local stats=${db_test#OK:}
       print_info "✅ Direct DB accessible:"
-      print_info "   Memory table: $memory_count records"
-      print_info "   Semantic Memory table: $semantic_count records"
+      IFS=',' read -ra entries <<< "$stats"
+      for entry in "${entries[@]}"; do
+        local table_name=${entry%%=*}
+        local row_count=${entry#*=}
+        print_info "   ${table_name//_/ }: $row_count records"
+      done
     else
       print_error "❌ Direct DB access failed: ${db_test#ERROR:}"
       validation_passed=false
@@ -651,17 +682,35 @@ show_direct_db_status() {
     # Get record counts
     local db_status=$("$VENV_DIR/bin/python" -c "
 import sqlite3
+
+db_path = r'$db_path'
+
+def table_counts(connection):
+    tables = [row[0] for row in connection.execute(
+        \"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memory', 'semantic_memory')\"
+    )]
+    if not tables:
+        return []
+    counts = []
+    for table_name in sorted(set(tables)):
+        query = \"SELECT COUNT(*) FROM {}\".format(table_name)
+        count = connection.execute(query).fetchone()[0]
+        counts.append('{}={}'.format(table_name, count))
+    return counts
+
 try:
-    db = sqlite3.connect('$db_path')
-    memory_count = db.execute('SELECT COUNT(*) FROM memory').fetchone()[0]
-    semantic_count = db.execute('SELECT COUNT(*) FROM semantic_memory').fetchone()[0]
-    print(f'Memory: {memory_count}, Semantic: {semantic_count}')
-    db.close()
-except:
-    print('Database access error')
+    conn = sqlite3.connect(db_path)
+    stats = table_counts(conn)
+    conn.close()
+    if stats:
+        print(', '.join(stats))
+    else:
+        print('missing memory tables (run make db-init)')
+except Exception as exc:
+    print(f'error: {exc}')
 " 2>/dev/null)
 
-    if [[ "$db_status" == Memory:* ]]; then
+    if [[ "$db_status" != "" ]]; then
       print_info "   Records: $db_status"
     fi
   else

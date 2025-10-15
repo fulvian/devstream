@@ -14,6 +14,48 @@ print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Context7 Pattern: Get DevStream root using environment detection
+get_devstream_root() {
+    # Priority 1: DEVSTREAM_ROOT environment variable
+    if [ -n "${DEVSTREAM_ROOT:-}" ]; then
+        echo "$DEVSTREAM_ROOT"
+        return 0
+    fi
+
+    # Priority 2: Script location detection (two levels up from scripts/)
+    if [ -n "${BASH_SOURCE[0]}" ]; then
+        local script_dir="${BASH_SOURCE[0]%/*}"
+        local parent_dir="${script_dir%/*}"
+        if [ -f "$parent_dir/start-devstream.sh" ]; then
+            echo "$parent_dir"
+            return 0
+        fi
+    fi
+
+    # Priority 3: Common installation locations
+    local possible_paths=(
+        "$HOME/.devstream"
+        "$HOME/devstream"
+        "/opt/devstream"
+        "$(pwd)"
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [ -f "$path/start-devstream.sh" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    # Priority 4: Current working directory
+    if [ -f "$(pwd)/start-devstream.sh" ]; then
+        echo "$(pwd)"
+        return 0
+    fi
+
+    return 1
+}
+
 # Function to detect project directory using multiple methods
 detect_project_directory() {
     local detected_dir=""
@@ -90,18 +132,35 @@ main() {
 
         # Initialize DevStream if it's not a project yet
         cd "$project_dir"
-        if [[ -f "/Users/fulvioventura/devstream/scripts/devstream-init.py" ]]; then
-            python3 "/Users/fulvioventura/devstream/scripts/devstream-init.py" "$project_dir"
+        local devstream_root
+        devstream_root=$(get_devstream_root)
+        if [ $? -eq 0 ] && [ -n "$devstream_root" ]; then
+            local init_script="$devstream_root/scripts/devstream-init.py"
+            if [[ -f "$init_script" ]]; then
+                python3 "$init_script" "$project_dir"
+            else
+                print_error "DevStream initialization script not found at: $init_script"
+                exit 1
+            fi
         else
-            print_error "DevStream initialization script not found"
+            print_error "DevStream installation not found!"
+            print_info "Set DEVSTREAM_ROOT environment variable or ensure DevStream is properly installed"
             exit 1
         fi
     fi
 
-    # Find DevStream installation
-    local devstream_root="/Users/fulvioventura/devstream"
+    # Find DevStream installation using Context7 patterns
+    local devstream_root
+    devstream_root=$(get_devstream_root)
+    if [ $? -ne 0 ] || [ -z "$devstream_root" ]; then
+        print_error "DevStream installation not found!"
+        print_info "Set DEVSTREAM_ROOT environment variable or ensure DevStream is properly installed"
+        exit 1
+    fi
+
     if [ ! -f "$devstream_root/start-devstream.sh" ]; then
         print_error "DevStream installation not found at: $devstream_root"
+        print_info "Expected start-devstream.sh at: $devstream_root/start-devstream.sh"
         exit 1
     fi
 

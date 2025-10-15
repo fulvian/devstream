@@ -11,10 +11,42 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+# Context7 Pattern: Get DevStream root using environment detection
+get_devstream_root() {
+    # Priority 1: DEVSTREAM_ROOT environment variable or function parameter
+    if [ -n "${DEVSTREAM_ROOT:-}" ]; then
+        echo "$DEVSTREAM_ROOT"
+        return 0
+    fi
+
+    # Priority 2: Script location detection (two levels up from scripts/)
+    if [ -f "${BASH_SOURCE[0]%/*/*}/start-devstream.sh" ]; then
+        echo "${BASH_SOURCE[0]%/*/*}"
+        return 0
+    fi
+
+    # Priority 3: Common installation locations
+    local possible_paths=(
+        "$HOME/.devstream"
+        "$HOME/devstream"
+        "/opt/devstream"
+        "$(pwd)"
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [ -f "$path/start-devstream.sh" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${1:-$(pwd)}"
-DEVSTREAM_ROOT="${2:-/Users/fulvioventura/devstream}"
+DEVSTREAM_ROOT="${2:-$(get_devstream_root)}"  # Use dynamic detection if not provided
 
 print_status() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
@@ -27,12 +59,16 @@ show_usage() {
     echo ""
     echo "Arguments:"
     echo "  PROJECT_DIR     Project directory (default: current directory)"
-    echo "  DEVSTREAM_ROOT  DevStream installation directory (default: /Users/fulvioventura/devstream)"
+    echo "  DEVSTREAM_ROOT  DevStream installation directory (default: auto-detect)"
+    echo ""
+    echo "Environment Variables:"
+    echo "  DEVSTREAM_ROOT  DevStream installation directory (overrides auto-detection)"
     echo ""
     echo "Examples:"
-    echo "  $0                           # Current directory"
-    echo "  $0 /path/to/project          # Specific project"
+    echo "  $0                           # Current directory, auto-detect DevStream"
+    echo "  $0 /path/to/project          # Specific project, auto-detect DevStream"
     echo "  $0 /path/to/project /path/to/devstream  # Custom paths"
+    echo "  DEVSTREAM_ROOT=/path/to/devstream $0     # Using environment variable"
     echo ""
 }
 
@@ -43,6 +79,19 @@ show_header() {
     echo "🚀 Universal DevStream Project Launcher"
     echo "===================================="
     echo -e "${NC}"
+
+    # Validate DevStream installation
+    if [ ! -f "$DEVSTREAM_ROOT/start-devstream.sh" ]; then
+        print_error "DevStream installation not found at: $DEVSTREAM_ROOT"
+        print_info "Set DEVSTREAM_ROOT environment variable or ensure DevStream is properly installed"
+        echo ""
+        print_info "Auto-detection attempted:"
+        print_info "  - DEVSTREAM_ROOT environment variable: ${DEVSTREAM_ROOT:-[not set]}"
+        print_info "  - Script location detection: ${BASH_SOURCE[0]%/*/*}"
+        print_info "  - Common locations: \$HOME/.devstream, \$HOME/devstream, /opt/devstream"
+        echo ""
+        exit 1
+    fi
 
     print_status "Project: $PROJECT_ROOT"
     print_status "DevStream: $DEVSTREAM_ROOT"

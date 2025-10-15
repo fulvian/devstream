@@ -17,9 +17,47 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Test configuration
-DEVSTREAM_ROOT="/Users/fulvioventura/devstream"
-TEST_PROJECT="/Users/fulvioventura/accountabilly"
+# Context7 Pattern: Dynamic path configuration
+get_devstream_root() {
+    # Priority 1: DEVSTREAM_ROOT environment variable
+    if [ -n "${DEVSTREAM_ROOT:-}" ]; then
+        echo "$DEVSTREAM_ROOT"
+        return 0
+    fi
+
+    # Priority 2: Script location detection (two levels up from scripts/)
+    if [ -f "${BASH_SOURCE[0]%/*/*}/start-devstream.sh" ]; then
+        echo "${BASH_SOURCE[0]%/*/*}"
+        return 0
+    fi
+
+    # Priority 3: Common installation locations
+    local possible_paths=(
+        "$HOME/.devstream"
+        "$HOME/devstream"
+        "/opt/devstream"
+        "$(pwd)"
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [ -f "$path/start-devstream.sh" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Test configuration (dynamic)
+DEVSTREAM_ROOT=$(get_devstream_root)
+if [ $? -ne 0 ] || [ -z "$DEVSTREAM_ROOT" ]; then
+    print_error "DevStream installation not found!"
+    print_info "Set DEVSTREAM_ROOT environment variable or ensure DevStream is properly installed"
+    exit 1
+fi
+
+TEST_PROJECT="${1:-$(pwd)}"  # Use provided project or current directory
 LAUNCHER="$DEVSTREAM_ROOT/scripts/simple-launcher.sh"
 
 echo ""

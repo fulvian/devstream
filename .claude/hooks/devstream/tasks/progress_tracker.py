@@ -632,11 +632,23 @@ if __name__ == "__main__":
     async def test_progress_tracker():
         tracker = ProgressTracker()
 
-        # Simulate tool usage
+        # Context7 Pattern: Dynamic file path resolution for testing
+        def get_test_file_path():
+            """Get test file path using Context7 patterns."""
+            # Priority 1: DEVSTREAM_ROOT environment variable
+            devstream_root = os.getenv("DEVSTREAM_ROOT")
+
+            # Priority 2: Current working directory
+            if devstream_root is None:
+                devstream_root = os.getcwd()
+
+            return Path(devstream_root) / ".claude" / "hooks" / "devstream" / "memory" / "user_prompt_submit.py"
+
+        # Simulate tool usage with dynamic path
         await tracker.track_progress(
             tool_name="Edit",
             tool_input={
-                "file_path": "/Users/fulvioventura/devstream/.claude/hooks/devstream/memory/user_prompt_submit.py",
+                "file_path": str(get_test_file_path()),
                 "new_string": "# Test implementation with 100+ lines of code..."
             },
             tool_result={"success": True},

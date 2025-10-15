@@ -8,15 +8,54 @@ import subprocess
 import sys
 import signal
 import time
+import os
 from pathlib import Path
 from datetime import datetime
 import argparse
 
-# Configuration
-CORRECT_DB_PATH = "/Users/fulvioventura/devstream/data/devstream.db"
+# Context7 Pattern: Dynamic configuration resolution
+def get_project_paths():
+    """Get project-specific paths using Context7/Dynaconf patterns."""
+    # Priority 1: DEVSTREAM_PROJECT_ROOT (multi-project mode)
+    project_root = os.getenv("DEVSTREAM_PROJECT_ROOT")
+
+    # Priority 2: Current working directory (single-project mode)
+    if project_root is None:
+        project_root = os.getcwd()
+
+    project_root = Path(project_root)
+
+    # Priority 1: DEVSTREAM_ROOT for DevStream installation
+    devstream_root = os.getenv("DEVSTREAM_ROOT")
+
+    # Priority 2: Try to detect DevStream installation
+    if devstream_root is None:
+        # Current script location heuristic
+        script_dir = Path(__file__).parent
+        potential_root = script_dir.parent.parent.parent
+        if (potential_root / ".claude" / "hooks" / "devstream").exists():
+            devstream_root = str(potential_root)
+
+    # Priority 3: Fallback to project root (single-project mode)
+    if devstream_root is None:
+        devstream_root = str(project_root)
+
+    devstream_root = Path(devstream_root)
+
+    return {
+        "project_root": project_root,
+        "devstream_root": devstream_root,
+        "correct_db_path": str(project_root / "data" / "devstream.db"),
+        "alert_log": project_root / ".claude" / "logs" / "devstream" / "wrong-path-alerts.log",
+        "cleanup_hook": devstream_root / ".claude" / "hooks" / "devstream" / "monitoring" / "mcp_cleanup_hook.py"
+    }
+
+# Dynamic configuration (Context7 best practice)
+PATHS = get_project_paths()
+CORRECT_DB_PATH = PATHS["correct_db_path"]
 WRONG_DB_PATH_PATTERN = "mcp-devstream-server/data/devstream.db"
-ALERT_LOG = Path.home() / ".claude" / "logs" / "devstream" / "wrong-path-alerts.log"
-CLEANUP_HOOK = Path.home() / "/Users/fulvioventura/devstream/.claude/hooks/devstream/monitoring/mcp_cleanup_hook.py"
+ALERT_LOG = PATHS["alert_log"]
+CLEANUP_HOOK = PATHS["cleanup_hook"]
 
 class WrongPathMonitor:
     """Monitor for wrong database path usage in MCP processes."""

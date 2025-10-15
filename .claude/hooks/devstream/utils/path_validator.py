@@ -30,6 +30,26 @@ import unicodedata
 from pathlib import Path
 from typing import Optional
 
+# Context7 Pattern: Dynamic environment-based configuration
+def load_dotenv():
+    """Load .env file if available (Context7/Dynaconf pattern)"""
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _load_dotenv()
+    except ImportError:
+        # Fallback: manually parse .env file
+        env_file = os.path.join(os.getcwd(), '.env')
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        os.environ[key.strip()] = value.strip()
+
+# Load environment variables on import (Context7 best practice)
+load_dotenv()
+
 
 def is_path_traversal_attack(path: str) -> bool:
     """
@@ -276,17 +296,23 @@ def get_validated_db_path(
     project_root: Optional[str] = None
 ) -> str:
     """
-    Get validated database path from environment or default.
-    
-    Convenience function that:
-    1. Reads path from environment variable
-    2. Falls back to default if not set
-    3. Validates path with validate_db_path()
-    
+    Context7-compliant database path resolution with multi-project support.
+
+    This function implements Dynaconf-inspired patterns:
+    1. Environment variable detection (DEVSTREAM_DB_PATH)
+    2. Fallback to default relative path
+    3. Dynamic project root resolution
+    4. Security validation with path traversal protection
+
+    Priority Order (Context7 best practice):
+    1. Explicit env_var (DEVSTREAM_DB_PATH)
+    2. DEVSTREAM_PROJECT_ROOT + default_path
+    3. Current working directory + default_path
+
     Args:
         env_var: Environment variable name (default: DEVSTREAM_DB_PATH)
         default_path: Default relative path (default: data/devstream.db)
-        project_root: Project root directory (default: current working directory)
+        project_root: Project root directory (auto-detected if None)
 
     Returns:
         Validated canonical absolute path
@@ -295,24 +321,37 @@ def get_validated_db_path(
         PathValidationError: If validation fails
 
     Examples:
-        >>> # With environment variable
-        >>> os.environ["DEVSTREAM_DB_PATH"] = "data/devstream.db"
+        >>> # Multi-project with DEVSTREAM_PROJECT_ROOT
+        >>> os.environ["DEVSTREAM_PROJECT_ROOT"] = "/Users/accountabilly"
         >>> get_validated_db_path()
-        '/project/data/devstream.db'
+        '/Users/accountabilly/data/devstream.db'
 
-        >>> # With default
-        >>> del os.environ["DEVSTREAM_DB_PATH"]
+        >>> # Custom database path
+        >>> os.environ["DEVSTREAM_DB_PATH"] = "data/custom.db"
         >>> get_validated_db_path()
-        '/project/data/devstream.db'
-        
+        '/project/data/custom.db'
+
         >>> # Attack attempt blocked
         >>> os.environ["DEVSTREAM_DB_PATH"] = "../../etc/passwd"
         >>> get_validated_db_path()
         PathValidationError: Path traversal detected
     """
-    # Get path from environment or use default
-    db_path = os.getenv(env_var, default_path)
-    
+    # Context7 Pattern: Multi-project environment detection
+    if project_root is None:
+        # Priority 1: DEVSTREAM_PROJECT_ROOT (multi-project mode)
+        project_root = os.getenv("DEVSTREAM_PROJECT_ROOT")
+
+        # Priority 2: Current working directory (single-project mode)
+        if project_root is None:
+            project_root = os.getcwd()
+
+    # Priority 1: Custom database path from environment
+    db_path = os.getenv(env_var)
+
+    # Priority 2: Default path in project directory
+    if db_path is None:
+        db_path = default_path
+
     # Validate and return canonical path
     return validate_db_path(db_path, project_root)
 
@@ -320,14 +359,15 @@ def get_validated_db_path(
 # Test function for standalone execution
 def test_path_validator():
     """
-    Test path validator with attack scenarios.
-    
-    Tests legitimate paths and attack vectors to ensure security.
+    Context7-compliant path validator security testing.
+
+    Tests legitimate paths and attack vectors to ensure security
+    in multi-project environments.
     """
-    print("🔒 Testing Path Validator Security\n")
-    
-    # Create temporary project root
-    project_root = "/Users/fulvioventura/devstream"
+    print("🔒 Testing Path Validator Security (Context7 Multi-Project)\n")
+
+    # Context7 Pattern: Dynamic project root detection
+    project_root = os.getenv("DEVSTREAM_PROJECT_ROOT", os.getcwd())
     
     test_cases = [
         # (path, should_pass, description)

@@ -16,12 +16,30 @@ print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Auto-detect DevStream installation
-find_devstream_installation() {
+# Context7 Pattern: Get DevStream root using environment detection
+get_devstream_root() {
+    # Priority 1: DEVSTREAM_ROOT environment variable
+    if [ -n "${DEVSTREAM_ROOT:-}" ]; then
+        echo "$DEVSTREAM_ROOT"
+        return 0
+    fi
+
+    # Priority 2: Script location detection (two levels up from scripts/)
+    if [ -n "${BASH_SOURCE[0]}" ]; then
+        local script_dir="${BASH_SOURCE[0]%/*}"
+        local parent_dir="${script_dir%/*}"
+        if [ -f "$parent_dir/start-devstream.sh" ]; then
+            echo "$parent_dir"
+            return 0
+        fi
+    fi
+
+    # Priority 3: Common installation locations
     local possible_paths=(
         "$HOME/.devstream"
-        "/Users/fulvioventura/devstream"
-        "$(find /Users/fulvioventura -name 'start-devstream.sh' -type f 2>/dev/null | head -1 | xargs dirname)"
+        "$HOME/devstream"
+        "/opt/devstream"
+        "$(pwd)"
     )
 
     for path in "${possible_paths[@]}"; do
@@ -31,9 +49,38 @@ find_devstream_installation() {
         fi
     done
 
+    # Priority 4: Search in user directory
+    if command -v find >/dev/null 2>&1; then
+        local found_path
+        found_path=$(find "$HOME" -name 'start-devstream.sh' -type f 2>/dev/null | head -1 | xargs dirname 2>/dev/null || echo "")
+        if [ -n "$found_path" ] && [ -f "$found_path/start-devstream.sh" ]; then
+            echo "$found_path"
+            return 0
+        fi
+    fi
+
+    # Priority 5: Current working directory
+    if [ -f "$(pwd)/start-devstream.sh" ]; then
+        echo "$(pwd)"
+        return 0
+    fi
+
+    return 1
+}
+
+# Auto-detect DevStream installation using Context7 patterns
+find_devstream_installation() {
+    local devstream_root
+    devstream_root=$(get_devstream_root)
+
+    if [ $? -eq 0 ] && [ -n "$devstream_root" ]; then
+        echo "$devstream_root"
+        return 0
+    fi
+
     print_error "DevStream installation not found!"
-    print_info "Please install DevStream first:"
-    print_info "  bash /Users/fulvioventura/devstream/scripts/install-devstream-global.sh"
+    print_info "Please install DevStream first or set DEVSTREAM_ROOT environment variable"
+    print_info "  export DEVSTREAM_ROOT=/path/to/devstream"
     return 1
 }
 

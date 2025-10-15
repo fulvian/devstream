@@ -17,6 +17,58 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 import logging
 
+
+def get_devstream_root() -> Path:
+    """
+    Get DevStream root using Context7 patterns.
+
+    Priority 1: DEVSTREAM_ROOT environment variable
+    Priority 2: Script location detection (two levels up from scripts/)
+    Priority 3: Current working directory
+    Priority 4: Common installation locations
+
+    Returns:
+        Path to DevStream root directory
+
+    Raises:
+        RuntimeError: If DevStream root cannot be determined
+    """
+    # Priority 1: DEVSTREAM_ROOT environment variable
+    devstream_root = os.getenv("DEVSTREAM_ROOT")
+    if devstream_root and Path(devstream_root).exists():
+        return Path(devstream_root).absolute()
+
+    # Priority 2: Script location detection
+    script_file = Path(__file__)
+    if script_file.exists():
+        # Two levels up from scripts/ directory
+        potential_root = script_file.parent.parent
+        if (potential_root / "start-devstream.sh").exists():
+            return potential_root.absolute()
+
+    # Priority 3: Current working directory
+    cwd = Path.cwd()
+    if (cwd / "start-devstream.sh").exists():
+        return cwd.absolute()
+
+    # Priority 4: Common installation locations
+    possible_locations = [
+        Path.home() / ".devstream",
+        Path.home() / "devstream",
+        Path("/opt/devstream"),
+        Path.cwd(),
+    ]
+
+    for location in possible_locations:
+        if location.exists() and (location / "start-devstream.sh").exists():
+            return location.absolute()
+
+    # If nothing found, raise an informative error
+    raise RuntimeError(
+        "DevStream installation not found! Please set DEVSTREAM_ROOT environment variable "
+        "or ensure DevStream is properly installed with start-devstream.sh"
+    )
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -414,9 +466,14 @@ def create_project_claude_md(project_path: str, project_type: str) -> None:
     project_path_obj = Path(project_path)
     claude_md_path = project_path_obj / "CLAUDE.md"
 
-    # Path to DevStream's CLAUDE.md
-    devstream_root = Path("/Users/fulvioventura/devstream")
-    source_claude_md = devstream_root / "CLAUDE.md"
+    # Path to DevStream's CLAUDE.md using Context7 patterns
+    try:
+        devstream_root = get_devstream_root()
+        source_claude_md = devstream_root / "CLAUDE.md"
+    except RuntimeError:
+        logger.warning("DevStream installation not found, creating basic CLAUDE.md")
+        create_basic_claude_md(project_path, project_type)
+        return
 
     if not source_claude_md.exists():
         logger.warning(f"DevStream CLAUDE.md not found at {source_claude_md}")
@@ -459,6 +516,12 @@ def adapt_claude_md_content(content: str, project_path: Path, project_type: str)
     Returns:
         Adapted content for the project
     """
+    # Get DevStream root for path references
+    try:
+        devstream_root = get_devstream_root()
+    except RuntimeError:
+        devstream_root = Path("/devstream")  # Fallback placeholder
+
     # Replace DevStream-specific paths with project-specific paths
     adaptations = [
         # Update header
@@ -471,9 +534,9 @@ def adapt_claude_md_content(content: str, project_path: Path, project_type: str)
         # Update database paths
         (r"data/devstream\.db", f"{project_path}/data/devstream.db"),
 
-        # Update launcher script paths
+        # Update launcher script paths with dynamic detection
         (r"/Users/fulvioventura/devstream/scripts/simple-launcher\.sh",
-         f"{project_path}/../devstream/scripts/simple-launcher.sh"),
+         f"{devstream_root}/scripts/simple-launcher.sh"),
 
         # Add project-specific section after the header
         (r"(# CLAUDE\.md - [^\n]+ Project\n\n\*\*Project Type\*\*: [^\n]+\n)",
@@ -505,10 +568,10 @@ def adapt_claude_md_content(content: str, project_path: Path, project_type: str)
 cd {project_path}
 
 # Start DevStream with Claude Sonnet 4.5 (Anthropic)
-{project_path}/../devstream/scripts/simple-launcher.sh start anthropic
+{devstream_root}/scripts/simple-launcher.sh start anthropic
 
 # Start DevStream with GLM-4.6 (z.ai)
-{project_path}/../devstream/scripts/simple-launcher.sh start z.ai
+{devstream_root}/scripts/simple-launcher.sh start z.ai
 
 # Check project status
 devstream status
@@ -588,7 +651,7 @@ def create_basic_claude_md(project_path: str, project_type: str) -> None:
 
 ⚠️ **NOTE**: This is a basic CLAUDE.md generated because the original DevStream CLAUDE.md could not be found.
 For the complete DevStream protocol and rules, please refer to the original file at:
-`/Users/fulvioventura/devstream/CLAUDE.md`
+`$DEVSTREAM_ROOT/CLAUDE.md` (set DEVSTREAM_ROOT environment variable if needed)
 
 ## 🚀 Quick Start for This Project
 
@@ -597,10 +660,10 @@ For the complete DevStream protocol and rules, please refer to the original file
 cd {project_path_obj}
 
 # Start DevStream with Claude Sonnet 4.5 (Anthropic)
-{project_path_obj}/../devstream/scripts/simple-launcher.sh start anthropic
+$DEVSTREAM_ROOT/scripts/simple-launcher.sh start anthropic
 
 # Start DevStream with GLM-4.6 (z.ai)
-{project_path_obj}/../devstream/scripts/simple-launcher.sh start z.ai
+$DEVSTREAM_ROOT/scripts/simple-launcher.sh start z.ai
 ```
 
 ## 📋 Project Structure

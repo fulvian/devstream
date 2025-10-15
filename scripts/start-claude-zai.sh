@@ -8,7 +8,21 @@ set -e
 
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# BEST PRACTICE: Multi-project support - use project root from environment if set
+if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+  PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
+  DEVSTREAM_ROOT="$(dirname "$SCRIPT_DIR")"  # DevStream installation root
+  echo "[INFO] Multi-project mode: Using project directory $PROJECT_ROOT"
+  echo "[INFO] DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+  echo "[INFO] DevStream root: $DEVSTREAM_ROOT"
+else
+  PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
+  DEVSTREAM_ROOT="$PROJECT_ROOT"
+  echo "[INFO] Single-project mode: Using DevStream directory $PROJECT_ROOT"
+fi
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -37,15 +51,15 @@ print_error() {
 validate_environment() {
   print_status "Validating Z.AI environment..."
 
-  # Check if we're in the correct directory
-  if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    print_error ".env file not found in project root"
+  # Load environment variables from DevStream installation root (single source of truth)
+  if [ ! -f "$DEVSTREAM_ROOT/.env" ]; then
+    print_error ".env file not found in DevStream installation: $DEVSTREAM_ROOT/.env"
     exit 1
   fi
 
-  # Load environment variables from project root
+  # Load environment variables from DevStream installation
   set -a
-  source "$PROJECT_ROOT/.env"
+  source "$DEVSTREAM_ROOT/.env"
   set +a
 
   # Validate Z.AI API key
@@ -79,16 +93,32 @@ launch_claude_code() {
   # Change to project directory
   cd "$PROJECT_ROOT"
 
+  # CONTEXT7 BEST PRACTICE: Use DevStream virtual environment for multi-project support
+  # This ensures Claude Code always has access to DevStream modules regardless of project location
+  # IMPORTANT: Set environment variables BEFORE configuring Claude Code settings
+  export VIRTUAL_ENV="$DEVSTREAM_ROOT/.devstream"
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+  export PYTHONPATH="$DEVSTREAM_ROOT/.claude/hooks/devstream:$PYTHONPATH"
+
+  # CRITICAL: Project-specific database path for multi-project isolation
+  export DEVSTREAM_DB_PATH="$PROJECT_ROOT/data/devstream.db"
+
   # Configure Claude Code settings for z.ai (required for model switching)
   configure_claude_settings
 
   print_info "Working directory: $(pwd)"
   print_info "🤖 Model: GLM-4.6 (via z.ai API)"
   print_info "📡 API: $ANTHROPIC_BASE_URL"
+  print_info "🐍 Virtual Environment: $VIRTUAL_ENV"
+  print_info "🔧 Python Path: DevStream modules available"
   echo ""
 
-  # Execute Claude Code (settings will handle model selection)
-  exec claude
+  # Execute Claude Code with DevStream environment (settings will handle model selection)
+  # CONTEXT7 BEST PRACTICE: Use environment block to ensure all variables are available to Claude Code
+  {
+    export VIRTUAL_ENV PATH PYTHONPATH ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+    exec claude
+  }
 }
 
 # Function to configure Claude Code settings for z.ai
@@ -104,7 +134,8 @@ configure_claude_settings() {
   fi
 
   # Use Python for JSON manipulation (following Context7 best practices)
-  "$PROJECT_ROOT/.devstream/bin/python" << EOF
+  # NOTE: Always use DevStream installation Python for cross-project compatibility
+  "$DEVSTREAM_ROOT/.devstream/bin/python" << EOF
 import json
 import os
 
@@ -133,7 +164,13 @@ zai_config = {
     "env": {
         "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.6",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.6",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air"
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air",
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": os.environ.get("ZAI_API_KEY", ""),
+        "VIRTUAL_ENV": os.environ.get("VIRTUAL_ENV", ""),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "PATH": os.environ.get("PATH", ""),
+        "DEVSTREAM_DB_PATH": os.environ.get("DEVSTREAM_DB_PATH", "")
     }
 }
 
