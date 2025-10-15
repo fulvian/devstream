@@ -572,6 +572,9 @@ initialize_direct_db() {
   # Initialize project CLAUDE.md for multi-project setup (Context7 + projen/chezmoi patterns)
   initialize_project_claude_md
 
+  # Initialize project memory for multi-project setup (Context7 best practices)
+  initialize_project_memory_bootstrap
+
   print_status "✅ Direct DB Architecture initialized"
 }
 
@@ -2120,6 +2123,101 @@ EOF
   print_status "✅ Fallback CLAUDE.md created successfully"
   print_info "   Project: $project_name"
   print_info "   Location: $project_claude_md"
+}
+
+# Function to initialize project memory bootstrap for multi-project setup
+# Context7 best practice: automatic memory population from existing codebase
+initialize_project_memory_bootstrap() {
+  # Only initialize memory bootstrap in multi-project mode
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  print_status "🧠 Initializing project memory bootstrap..."
+
+  local memory_bootstrap_script="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/memory/memory_bootstrap.py"
+
+  # Check if memory bootstrap script exists
+  if [ ! -f "$memory_bootstrap_script" ]; then
+    print_warning "⚠️  Memory bootstrap script not found: $memory_bootstrap_script"
+    return 0
+  fi
+
+  # Check if this is a new project (no memory records)
+  local indexing_db="$PROJECT_ROOT/.claude/indexing.db"
+  local needs_bootstrap=false
+
+  if [ ! -f "$indexing_db" ]; then
+    needs_bootstrap=true
+    print_info "📝 No indexing database found, will run initial bootstrap"
+  else
+    # Check if database is empty (no records)
+    local record_count=$("$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+
+db_path = r'$indexing_db'
+
+try:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute('SELECT COUNT(*) FROM indexing_records')
+    count = cursor.fetchone()[0]
+    conn.close()
+    print(count)
+except Exception as e:
+    print(f'ERROR:{e}')
+    sys.exit(1)
+" 2>/dev/null)
+
+    if [[ "$record_count" =~ ^[0-9]+$ ]] && [ "$record_count" -eq 0 ]; then
+      needs_bootstrap=true
+      print_info "📝 Indexing database is empty, will run bootstrap"
+    else
+      print_info "✅ Memory bootstrap already completed ($record_count files indexed)"
+    fi
+  fi
+
+  if [ "$needs_bootstrap" = false ]; then
+    return 0
+  fi
+
+  # Run memory bootstrap
+  print_info "🔄 Running memory bootstrap for project: $(basename "$PROJECT_ROOT")"
+  print_info "   This may take a few minutes for large codebases..."
+
+  # Run the bootstrap script with appropriate arguments
+  local bootstrap_result=$("$VENV_DIR/bin/python" "$memory_bootstrap_script" \
+    "$PROJECT_ROOT" \
+    --mode incremental \
+    --cleanup incremental \
+    --batch-size 25 \
+    --output summary \
+    2>&1)
+  local bootstrap_exit_code=$?
+
+  if [ $bootstrap_exit_code -eq 0 ]; then
+    print_status "✅ Project memory bootstrap completed successfully"
+
+    # Show summary of what was indexed
+    if echo "$bootstrap_result" | grep -q "Total files:"; then
+      local files_info=$(echo "$bootstrap_result" | grep "Total files:" | head -1)
+      print_info "   $files_info"
+    fi
+
+    if echo "$bootstrap_result" | grep -q "Total chunks:"; then
+      local chunks_info=$(echo "$bootstrap_result" | grep "Total chunks:" | head -1)
+      print_info "   $chunks_info"
+    fi
+
+    print_info "   Memory is now available for AI-powered search and context"
+    print_info "   Run: .devstream/bin/python -c \"from .claude.hooks.devstream.utils.direct_client import get_direct_client; print(get_direct_client().search_memory('test query', limit=5))\""
+  else
+    print_error "❌ Memory bootstrap failed"
+    print_error "   Error: $bootstrap_result"
+    print_warning "   You can run it manually later:"
+    print_warning "   $memory_bootstrap_script $PROJECT_ROOT --mode incremental"
+    return 1
+  fi
 }
 
 # Main function
