@@ -67,12 +67,17 @@ check_python_venv() {
   local python_version=$("$VENV_DIR/bin/python" --version 2>&1 | cut -d' ' -f2)
   print_info "Python: $python_version"
 
-  # Check critical dependencies
+  # Check critical dependencies (Context7 best practice: handle broken pipes)
   print_status "Checking hook dependencies..."
-  if ! "$VENV_DIR/bin/python" -m pip list | grep -q "cchooks"; then
+  if ! "$VENV_DIR/bin/python" -m pip list 2>/dev/null | grep -q "cchooks"; then
     print_warning "Installing hook dependencies..."
-    "$VENV_DIR/bin/pip" install -q cchooks>=0.1.4 aiohttp>=3.8.0 structlog>=23.0.0 python-dotenv>=1.0.0
-    print_status "✅ Hook dependencies installed"
+    # Context7 best practice: use proper error handling and pipe management
+    if "$VENV_DIR/bin/pip" install -q cchooks>=0.1.4 aiohttp>=3.8.0 structlog>=23.0.0 python-dotenv>=1.0.0 2>/dev/null; then
+      print_status "✅ Hook dependencies installed"
+    else
+      print_error "❌ Failed to install hook dependencies"
+      return 1
+    fi
   else
     print_info "Hook dependencies: OK"
   fi
@@ -1386,20 +1391,21 @@ validate_existing_venv() {
   local venv_path="$1"
   local project_name="$2"
 
-  print_info "🔍 Validating existing virtual environment: $venv_path"
+  # Debug info goes to stderr (Context7 best practice for clean output)
+  print_info "🔍 Validating existing virtual environment: $venv_path" >&2
 
   # Check basic structure
   if [ ! -d "$venv_path" ]; then
-    print_warning "⚠️  Virtual environment directory not found"
+    print_warning "⚠️  Virtual environment directory not found" >&2
     return 1
   fi
 
   if [ ! -f "$venv_path/bin/python" ]; then
-    print_warning "⚠️  Python executable not found in venv"
+    print_warning "⚠️  Python executable not found in venv" >&2
     return 1
   fi
 
-  # Test Python functionality
+  # Test Python functionality (Context7 best practice: capture only the result)
   local python_test=$("$venv_path/bin/python" -c "
 import sys
 try:
@@ -1412,13 +1418,13 @@ except ImportError as e:
 except Exception as e:
     print(f'ERROR:{e}')
     sys.exit(1)
-" 2>&1)
+" 2>/dev/null)
 
   if [ "$python_test" != "OK" ]; then
     if [[ "$python_test" == MISSING_DEPS:* ]]; then
-      print_warning "⚠️  Virtual environment missing dependencies: ${python_test#MISSING_DEPS:}"
+      print_warning "⚠️  Virtual environment missing dependencies: ${python_test#MISSING_DEPS:}" >&2
     else
-      print_warning "⚠️  Virtual environment validation failed: ${python_test#ERROR:}"
+      print_warning "⚠️  Virtual environment validation failed: ${python_test#ERROR:}" >&2
     fi
     return 1
   fi
@@ -1430,21 +1436,23 @@ except Exception as e:
 
   # Validate Python version (require 3.8+ for modern features)
   if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 8 ]); then
-    print_warning "⚠️  Python version $python_version is too old (requires 3.8+)"
+    print_warning "⚠️  Python version $python_version is too old (requires 3.8+)" >&2
     return 1
   fi
 
-  print_info "✅ Virtual environment validated: $python_version"
+  print_info "✅ Virtual environment validated: $python_version" >&2
   return 0
 }
 
 # Function to detect existing virtual environments (Context7 best practice)
 # Context7 pattern: smart detection of existing project environments
+# Note: This function outputs ONLY the path to stdout for capture
 detect_existing_venv() {
   local project_root="$1"
   local project_name="$2"
 
-  print_info "🔍 Detecting existing virtual environments..."
+  # Debug info goes to stderr (Context7 best practice for output redirection)
+  print_info "🔍 Detecting existing virtual environments..." >&2
 
   # Common venv locations to check (in order of preference)
   local venv_locations=(
@@ -1467,33 +1475,34 @@ detect_existing_venv() {
   for indicator in "${python_indicators[@]}"; do
     if [ -f "$indicator" ]; then
       is_python_project=true
-      print_info "📝 Detected Python project from: $(basename "$indicator")"
+      print_info "📝 Detected Python project from: $(basename "$indicator")" >&2
       break
     fi
   done
 
   if [ "$is_python_project" = false ]; then
-    print_info "ℹ️  No Python project indicators found, will create new venv"
+    print_info "ℹ️  No Python project indicators found, will create new venv" >&2
     return 1
   fi
 
   # Search for existing virtual environments
   for venv_path in "${venv_locations[@]}"; do
     if [ -d "$venv_path" ]; then
-      print_info "📁 Found virtual environment: $venv_path"
+      print_info "📁 Found virtual environment: $venv_path" >&2
 
       if validate_existing_venv "$venv_path" "$project_name"; then
-        print_status "✅ Using existing virtual environment: $venv_path"
+        print_status "✅ Using existing virtual environment: $venv_path" >&2
+        # Only output the path to stdout (Context7 best practice)
         echo "$venv_path"
         return 0
       else
-        print_warning "⚠️  Found virtual environment but validation failed: $venv_path"
-        print_info "💡 Will create new virtual environment"
+        print_warning "⚠️  Found virtual environment but validation failed: $venv_path" >&2
+        print_info "💡 Will create new virtual environment" >&2
       fi
     fi
   done
 
-  print_info "ℹ️  No valid existing virtual environment found"
+  print_info "ℹ️  No valid existing virtual environment found" >&2
   return 1
 }
 
@@ -1513,7 +1522,8 @@ initialize_project_venv() {
   local existing_venv=""
 
   # Step 1: Try to detect and use existing virtual environment
-  existing_venv=$(detect_existing_venv "$PROJECT_ROOT" "$project_name")
+  # Context7 best practice: redirect stderr to avoid capturing debug output
+  existing_venv=$(detect_existing_venv "$PROJECT_ROOT" "$project_name" 2>/dev/null)
 
   if [ -n "$existing_venv" ] && [ "$existing_venv" != "$project_venv_path" ]; then
     # Found existing venv in different location, create symlink for consistency
