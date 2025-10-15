@@ -1714,8 +1714,149 @@ initialize_project_templates() {
   fi
 }
 
+# Function to detect if CLAUDE.md was manually modified (Context7 best practice)
+# Context7 pattern: intelligent detection of manual vs generated configurations
+detect_manual_claude_md() {
+  local project_claude_md="$1"
+  local version_file="$2"
+
+  # No file means not manually modified
+  if [ ! -f "$project_claude_md" ]; then
+    return 1
+  fi
+
+  # Check for manual modification indicators
+  local manual_indicators=(
+    "Manual configuration"
+    "Custom rules"
+    "User-defined"
+    "Hand-crafted"
+    "Personalized"
+    "Customized for"
+    "Manual setup"
+  )
+
+  # Check content for manual indicators
+  for indicator in "${manual_indicators[@]}"; do
+    if grep -qi "$indicator" "$project_claude_md"; then
+      return 0  # Manual modification detected
+    fi
+  done
+
+  # Check for DevStream generation markers
+  if grep -q "Generated with DevStream" "$project_claude_md"; then
+    return 1  # DevStream-generated
+  fi
+
+  # Check for template markers
+  if grep -q "Template:" "$project_claude_md"; then
+    return 1  # Template-generated
+  fi
+
+  # Check version tracking consistency
+  if [ -f "$version_file" ]; then
+    local version_timestamp=$(cat "$version_file")
+    local file_timestamp=$(stat -f %m "$project_claude_md" 2>/dev/null || stat -c %Y "$project_claude_md" 2>/dev/null)
+    local version_timestamp_sec=$(date -j -f "%Y%m%d_%H%M%S" "$version_timestamp" +%s 2>/dev/null || date -d "$version_timestamp" +%s 2>/dev/null)
+
+    # If file was modified significantly after version tracking, likely manual
+    if [ "$file_timestamp" -gt "$((version_timestamp_sec + 3600))" ]; then
+      return 0  # File modified more than 1 hour after generation
+    fi
+  fi
+
+  return 1  # No manual modification detected
+}
+
+# Function to backup existing CLAUDE.md (Context7 best practice)
+# Context7 pattern: safe configuration management with automatic backups
+backup_existing_claude_md() {
+  local project_claude_md="$1"
+  local backup_dir="$PROJECT_ROOT/.claude/backups"
+
+  if [ ! -f "$project_claude_md" ]; then
+    return 0
+  fi
+
+  # Create backup directory
+  mkdir -p "$backup_dir"
+
+  # Create timestamped backup
+  local timestamp=$(date +%Y%m%d_%H%M%S)
+  local backup_file="$backup_dir/CLAUDE.md.backup.$timestamp"
+
+  cp "$project_claude_md" "$backup_file"
+  print_info "📋 Backed up existing CLAUDE.md to: $(basename "$backup_file")"
+
+  # Keep only last 5 backups
+  ls -t "$backup_dir"/CLAUDE.md.backup.* 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+
+  return 0
+}
+
+# Function to prompt user for CLAUDE.md update confirmation (Context7 best practice)
+# Context7 pattern: user confirmation for destructive operations
+prompt_claude_md_update() {
+  local project_claude_md="$1"
+  local action="$2"  # "create", "update", or "overwrite"
+
+  case "$action" in
+    "create")
+      print_warning "⚠️  About to create new CLAUDE.md in project directory"
+      print_info "   This will add DevStream project-specific rules to: $(basename "$project_claude_md")"
+      ;;
+    "update")
+      print_warning "⚠️  About to update existing CLAUDE.md"
+      print_info "   This will refresh DevStream project-specific rules in: $(basename "$project_claude_md")"
+      ;;
+    "overwrite")
+      print_warning "⚠️  About to overwrite existing CLAUDE.md"
+      print_info "   This will REPLACE the current file with DevStream-generated content"
+      print_warning "   Any manual customizations will be lost!"
+      ;;
+  esac
+
+  echo ""
+  print_info "Options:"
+  print_info "  [Y] Yes - Proceed with CLAUDE.md update"
+  print_info "  [N] No  - Skip CLAUDE.md update (keep existing file)"
+  print_info "  [B] Backup - Create backup before updating"
+  echo ""
+
+  # Check if we're in an interactive session
+  if [ -t 0 ] && [ "${DEVSTREAM_AUTO_CONFIRM_CLAUDE_MD:-false}" != "true" ]; then
+    while true; do
+      read -p "Proceed with CLAUDE.md $action? [Y/N/B] " -n 1 -r reply
+      echo ""
+      case $reply in
+        [Yy]* )
+          return 0  # Proceed
+          ;;
+        [Nn]* )
+          return 1  # Skip
+          ;;
+        [Bb]* )
+          backup_existing_claude_md "$project_claude_md"
+          return 0  # Proceed after backup
+          ;;
+        * )
+          echo "Please choose Y, N, or B"
+          ;;
+      esac
+    done
+  else
+    # Non-interactive mode, proceed with backup if manual modifications detected
+    if detect_manual_claude_md "$project_claude_md" "$PROJECT_ROOT/.claude_version"; then
+      backup_existing_claude_md "$project_claude_md"
+      print_warning "⚠️  Non-interactive mode: Created backup of existing CLAUDE.md"
+    fi
+    return 0
+  fi
+}
+
 # Function to initialize project CLAUDE.md for multi-project setup
 # Context7 + projen/chezmoi patterns: intelligent template inheritance and adaptation
+# Enhanced with safety mechanisms: user confirmation, backups, manual detection
 initialize_project_claude_md() {
   # Only initialize CLAUDE.md in multi-project mode
   if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
@@ -1728,6 +1869,7 @@ initialize_project_claude_md() {
   local templates_source_dir="$DEVSTREAM_SCRIPT_DIR/templates/claude"
   local project_claude_md="$PROJECT_ROOT/CLAUDE.md"
   local framework_claude_md="$DEVSTREAM_SCRIPT_DIR/CLAUDE.md"
+  local version_file="$PROJECT_ROOT/.claude_version"
 
   # Check if template processor exists
   local template_processor="$templates_source_dir/template_processor.py"
@@ -1741,22 +1883,25 @@ initialize_project_claude_md() {
 
   # Check if project CLAUDE.md needs update
   local needs_update=false
+  local update_action="create"
 
   # Always update if project CLAUDE.md doesn't exist
   if [ ! -f "$project_claude_md" ]; then
     needs_update=true
+    update_action="create"
     print_info "📝 Project CLAUDE.md not found, will create"
   else
     # Check if framework CLAUDE.md is newer
     if [ "$framework_claude_md" -nt "$project_claude_md" ]; then
       needs_update=true
+      update_action="update"
       print_info "📝 Framework CLAUDE.md is newer, will update project"
     fi
 
     # Check if templates have been updated
-    local version_file="$PROJECT_ROOT/.claude_version"
     if [ ! -f "$version_file" ] || [ "$templates_source_dir" -nt "$version_file" ]; then
       needs_update=true
+      update_action="update"
       print_info "📝 Templates updated, will regenerate project CLAUDE.md"
     fi
   fi
@@ -1764,6 +1909,29 @@ initialize_project_claude_md() {
   if [ "$needs_update" = false ]; then
     print_info "✅ Project CLAUDE.md is up to date"
     return 0
+  fi
+
+  # Safety check: Detect manual modifications and prompt for confirmation
+  if [ -f "$project_claude_md" ] && detect_manual_claude_md "$project_claude_md" "$version_file"; then
+    print_warning "⚠️  Manual modifications detected in existing CLAUDE.md"
+    update_action="overwrite"
+
+    if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+      print_info "ℹ️  CLAUDE.md update skipped by user"
+      return 0
+    fi
+  elif [ -f "$project_claude_md" ]; then
+    # File exists but no manual modifications detected
+    if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+      print_info "ℹ️  CLAUDE.md update skipped by user"
+      return 0
+    fi
+  else
+    # New file creation
+    if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+      print_info "ℹ️  CLAUDE.md creation skipped by user"
+      return 0
+    fi
   fi
 
   # Use the template processor to generate project-specific CLAUDE.md
@@ -1787,6 +1955,14 @@ initialize_project_claude_md() {
       local title=$(head -1 "$project_claude_md" 2>/dev/null || echo "CLAUDE.md")
       print_info "   Title: $title"
     fi
+
+    # Add generation marker to the file
+    echo "" >> "$project_claude_md"
+    echo "<!--" >> "$project_claude_md"
+    echo "Generated with DevStream v2.0 - Context7-compliant multi-project setup" >> "$project_claude_md"
+    echo "Generation timestamp: $(date)" >> "$project_claude_md"
+    echo "Template: $(basename "$template_processor")" >> "$project_claude_md"
+    echo "-->" >> "$project_claude_md"
   else
     print_error "❌ Template processor failed: $processor_result"
     print_info "💡 Falling back to basic CLAUDE.md copy"
@@ -1795,12 +1971,38 @@ initialize_project_claude_md() {
 }
 
 # Fallback method for CLAUDE.md initialization (if template processor fails)
+# Enhanced with safety mechanisms: user confirmation, backups, manual detection
 initialize_project_claude_md_fallback() {
   local project_name=$(basename "$PROJECT_ROOT")
   local project_claude_md="$PROJECT_ROOT/CLAUDE.md"
   local framework_claude_md="$DEVSTREAM_SCRIPT_DIR/CLAUDE.md"
+  local version_file="$PROJECT_ROOT/.claude_version"
 
   print_info "🔄 Using fallback CLAUDE.md initialization..."
+
+  # Safety check: Detect manual modifications and prompt for confirmation
+  local update_action="create"
+  if [ -f "$project_claude_md" ]; then
+    update_action="overwrite"
+
+    if detect_manual_claude_md "$project_claude_md" "$version_file"; then
+      print_warning "⚠️  Manual modifications detected in existing CLAUDE.md"
+      if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+        print_info "ℹ️  CLAUDE.md update skipped by user"
+        return 0
+      fi
+    else
+      if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+        print_info "ℹ️  CLAUDE.md update skipped by user"
+        return 0
+      fi
+    fi
+  else
+    if ! prompt_claude_md_update "$project_claude_md" "$update_action"; then
+      print_info "ℹ️  CLAUDE.md creation skipped by user"
+      return 0
+    fi
+  fi
 
   # Create basic project-specific CLAUDE.md
   cat > "$project_claude_md" << EOF
@@ -1894,13 +2096,14 @@ The following DevStream framework rules apply to this project:
 **Quality Gates**: Mandatory code review and testing requirements
 </project_metadata>
 
----
-
-*These project-specific rules complement the DevStream framework rules. Framework violations cause system malfunctions, while project-specific violations affect development workflow efficiency.*
+<!--
+Generated with DevStream v2.0 - Context7-compliant multi-project setup (Fallback)
+Generation timestamp: $(date)
+Template: initialize_project_claude_md_fallback
+-->
 EOF
 
   # Update version tracking
-  local version_file="$PROJECT_ROOT/.claude_version"
   local current_version=$(date +%Y%m%d_%H%M%S)
   echo "$current_version" > "$version_file"
 
