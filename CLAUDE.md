@@ -74,7 +74,141 @@ DevStream combines 4 core systems:
 
 **Operation Mode**: Fully automatic - hooks execute without manual intervention.
 
-**Database Architecture**: Direct DB (v2.2.0+) - Native SQLite access with `mcp__devstream__devstream_*` tools as the primary interface. MCP server eliminated for enhanced performance and reliability.
+**Database Architecture**: Direct DB (v2.2.0+) - Native SQLite access with `get_direct_client` tools as the primary interface. MCP server eliminated for enhanced performance and reliability.
+
+🔧 Comandi Direct DB - Guida Completa
+
+  📋 Accesso alla Memory Database (Query)
+
+  # Search nella memoria DevStream
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def search_memory():
+      client = get_direct_client()
+      result = await client.search_memory('query qui', limit=10)
+      print(result)
+
+  asyncio.run(search_memory())
+  "
+
+  💾 Archiviazione nella Memory Database
+
+  # Store contenuto nella memoria
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def store_memory():
+      client = get_direct_client()
+      result = await client.store_memory(
+          content='contenuto qui',
+          content_type='code',  # code, documentation, decision, etc.
+          keywords=['keyword1', 'keyword2']
+      )
+      print(result)
+
+  asyncio.run(store_memory())
+  "
+
+  🎯 Gestione Task Direct DB
+
+  # Creare un task
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def create_task():
+      client = get_direct_client()
+      result = await client.create_task(
+          title='Task Title',
+          description='Task description',
+          task_type='development',
+          priority=5,
+          phase_name='Implementation'
+      )
+      print(result)
+
+  asyncio.run(create_task())
+  "
+
+  # Listare tasks
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def list_tasks():
+      client = get_direct_client()
+      result = await client.list_tasks(status='pending')
+      print(result)
+
+  asyncio.run(list_tasks())
+  "
+
+  📊 Health Check e Statistiche
+
+  # Health check del database
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def health_check():
+      client = get_direct_client()
+      is_healthy = await client.health_check()
+      print(f'Database healthy: {is_healthy}')
+      stats = client.get_stats()
+      print(f'Stats: {stats}')
+
+  asyncio.run(health_check())
+  "
+
+  🚀 Esempi Pratici Utili
+
+  Cercare Interventi Ollama
+
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def search_ollama():
+      client = get_direct_client()
+      result = await client.search_memory('ollama optimization', limit=15)
+      for item in result['results'][:5]:
+          print(f\"[{item['content_type']}] {item['created_at'][:10]}: {item['content'][:100]}...\")
+
+  asyncio.run(search_ollama())
+  "
+
+  Analizzare Context7 Compliance
+
+  .devstream/bin/python -c "
+  import asyncio
+  import sys
+  sys.path.append('.claude/hooks/devstream/utils')
+  from direct_client import get_direct_client
+
+  async def context7_analysis():
+      client = get_direct_client()
+      result = await client.search_memory('Context7', content_type='decision', limit=10)
+      print(f'Found {len(result[\"results\"])} Context7 decisions')
+      for item in result['results']:
+          print(f\"- {item['created_at'][:10]}: {item['content'][:80]}...\")
+
+  asyncio.run(context7_analysis())
+  "
 </system_architecture>
 
 ---
@@ -141,8 +275,8 @@ DevStream combines 4 core systems:
 
 ### Memory Optimization
 
-**Problem Solved**: JavaScript heap exhaustion during agent execution  
-**Solution**: `node --max-old-space-size=8192 --expose-gc start-production.js`  
+**Problem Solved**: JavaScript heap exhaustion during agent execution
+**Solution**: `node --max-old-space-size=8192 --expose-gc start-production.js`
 **Status**: Production stable ✅
 </agent_system>
 
@@ -151,7 +285,7 @@ DevStream combines 4 core systems:
 ## 🎯 Tier-Based Delegation Policy (v2.2.0 - Token Optimization)
 
 <tier_based_delegation>
-**Purpose**: Reduce token overhead by -70% through strategic delegation  
+**Purpose**: Reduce token overhead by -70% through strategic delegation
 **Impact**: 0-7K tokens/task → 1K average | 28→100 tasks/5h capacity
 
 ### Tier Structure
@@ -200,26 +334,26 @@ DevStream combines 4 core systems:
 def get_delegation_tier(context: Dict[str, Any]) -> Tuple[int, Optional[str], float]:
     """
     Determine delegation tier based on task context.
-    
+
     Returns: (tier_number, agent_name, confidence)
     """
     # Tier 1: Monolithic (no delegation)
     if is_simple_task(context):
         return (1, None, 1.0)
-    
+
     # Tier 2: Single specialist
     if has_clear_file_pattern(context) and is_single_language(context):
         agent = match_specialist_by_file(context["file_path"])
         return (2, agent, 0.95)
-    
+
     # Tier 3: Multi-agent orchestration
     if is_multi_stack(context) or context.get("context_size", 0) > 100_000:
         return (3, "@tech-lead", 0.70)
-    
+
     # Tier 4: Quality gate (MANDATORY)
     if is_commit_operation(context):
         return (4, "@code-reviewer", 1.0)
-    
+
     # Default: Tier 1 (monolithic)
     return (1, None, 1.0)
 ```
@@ -295,7 +429,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 
 **Override Tracking**:
 - Every override logged with timestamp, justification, disabled gates
-- **Audit Trail**: Query with `mcp__devstream__devstream_search_memory` using keyword **"protocol-override"**
+- **Audit Trail**: Query with `get_direct_client().search_memory()` using keyword **"protocol-override"**
 
 **Violations**: Automatic detection → rollback → restart with enforcement
 </enforcement_gate>
@@ -308,7 +442,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - Discuss trade-offs, constraints
 - Obtain consensus
 
-**Hook**: Registers discussions in memory (`content_type: "decision"`)  
+**Hook**: Registers discussions in memory (`content_type: "decision"`)
 **Validation**: ≥1 discussion record required
 
 **NEW v2.2.0**: Task creation moved to Step 1 (prevents data loss)
@@ -326,7 +460,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - Estimate complexity
 - Define acceptance criteria
 
-**Hook**: Requires context injection from memory  
+**Hook**: Requires context injection from memory
 **Validation**: Verify codebase pattern analysis completed
 </step>
 
@@ -339,7 +473,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - Document findings
 - Validate approach
 
-**Hook**: Context7 integration automatic via PreToolUse  
+**Hook**: Context7 integration automatic via PreToolUse
 **Validation**: Verify Context7 docs in context injection log
 </step>
 
@@ -359,7 +493,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - GLM-4.6: Execution-focused, micro-tasks, syntax precision
 - Sonnet 4.5: Architectural, ADRs, component-level
 
-**Hook**: `implementation_plan_generator.py` automates plan at Step 4  
+**Hook**: `implementation_plan_generator.py` automates plan at Step 4
 **Validation**: Task list + implementation plan must exist before implementation
 </step>
 
@@ -379,7 +513,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 3. Display handoff instructions
 4. Close Sonnet session → Start GLM session
 
-**Hook**: Memory registers approval + model choice  
+**Hook**: Memory registers approval + model choice
 **Validation**: Approval record + model selection before commit
 </step>
 
@@ -391,7 +525,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - Mark "in_progress" → work → mark "completed"
 - Document with docstrings + type hints
 
-**Hook**: PostToolUse registers code automatically  
+**Hook**: PostToolUse registers code automatically
 **Validation**: Every written file registered in memory
 </step>
 
@@ -405,7 +539,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 - E2E integration tests
 - Error handling verification
 
-**Hook**: Requires test validation before completion  
+**Hook**: Requires test validation before completion
 **Validation**: Test results documented in memory
 </step>
 </seven_step_workflow>
@@ -418,19 +552,19 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 ### Task Creation (Step 1 - MANDATORY)
 
 <rule type="task_creation">
-**WHEN**: Work > 15 min OR code/architecture/research  
+**WHEN**: Work > 15 min OR code/architecture/research
 **CRITICAL**: Task creation at Step 1 (old protocol: Step 5)
 
 **Process**:
 - ✅ `task_first_handler.py` enforces at Step 1
 - ✅ Automatic complexity detection
 - ✅ Interactive enforcement gate
-- ✅ Use `mcp__devstream__devstream_create_task`
+- ✅ Use `get_direct_client().create_task()`
 - ✅ Define: title, description, task_type, priority (1-10), phase_name
 - ✅ Draft cleanup: >7 days auto-archived
 
 **Forbidden**:
-- ❌ Manual tasks without MCP
+- ❌ Manual tasks without Direct DB
 - ❌ Creating tasks at Step 5
 </rule>
 
@@ -440,7 +574,7 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 **WHEN**: During implementation
 
 **Process**:
-- ✅ Mark "active" via `mcp__devstream__devstream_update_task`
+- ✅ Mark "active" via `get_direct_client().update_task()`
 - ✅ Follow 7-step workflow
 - ✅ Update progress continuously
 - ✅ Register decisions/learnings
@@ -502,8 +636,8 @@ Protocol → Execute 7 steps | Override → Log + Warn + Direct execution
 4. Inject in Claude context
 5. Token budget management
 
-**Algorithm**: Hybrid search (semantic + keyword) via RRF  
-**Threshold**: 0.5 relevance  
+**Algorithm**: Hybrid search (semantic + keyword) via RRF
+**Threshold**: 0.5 relevance
 **Token Budget**: Context7 5000 + Memory 2000
 
 **User Action**: None - fully automatic
@@ -522,12 +656,12 @@ client = get_direct_client()
 ```
 
 **Direct DB Tools** (via MemoryManager):
-- `mcp__devstream__devstream_store_memory` (content, content_type, keywords)
-- `mcp__devstream__devstream_search_memory` (query, content_type, limit)
+- `get_direct_client().store_memory()` (content, content_type, keywords)
+- `get_direct_client().search_memory()` (query, content_type, limit)
 
 **FORBIDDEN Alternatives**:
 - ❌ Python Specialist for memory queries (automatic violation)
-- ❌ MCP devstream server (eliminated v2.2.0+)
+- ❌ ~~MCP devstream server~~ (eliminated v2.2.0+)
 - ❌ Direct SQL without MemoryManager
 - ❌ Bypassing Direct DB Architecture
 
@@ -830,7 +964,7 @@ async def test_async_generator():
         for i in range(3):
             yield f"data-{i}"
             await asyncio.sleep(0.01)
-    
+
     results = [item async for item in data_stream()]
     assert results == ["data-0", "data-1", "data-2"]
 ```
@@ -939,9 +1073,9 @@ jobs:
 **Example**:
 ```python
 def hybrid_search(
-    self, 
-    query: str, 
-    limit: int = 10, 
+    self,
+    query: str,
+    limit: int = 10,
     content_type: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
@@ -1246,9 +1380,9 @@ def hybrid_search(
 
 | Component | Access Method | Tools | Purpose | Status |
 |-----------|---------------|-------|---------|--------|
-| Task Management | Direct DB | `mcp__devstream__devstream_*` | Task lifecycle | ✅ Active |
-| Memory System | **MemoryManager** | `mcp__devstream__devstream_*` | Semantic storage | ✅ Active |
-| Implementation Plans | Direct DB | `mcp__devstream__devstream_*` | Plan management | ✅ Active |
+| Task Management | Direct DB | `get_direct_client()` methods | Task lifecycle | ✅ Active |
+| Memory System | **MemoryManager** | `get_direct_client()` methods | Semantic storage | ✅ Active |
+| Implementation Plans | Direct DB | `get_direct_client()` methods | Plan management | ✅ Active |
 | Vector Search | **MemoryManager** + Ollama | N/A | Memory retrieval | ✅ Active |
 | Session Tracking | Direct DB | N/A | Cross-session | ✅ Active |
 
@@ -1268,18 +1402,18 @@ def hybrid_search(
 **Architecture**: Direct SQLite database connection (Direct DB Architecture)
 
 **IMPORTANT**: This system uses **Direct DB Architecture**, NOT MCP server architecture.
-- **Direct DB**: Native SQLite access via `mcp__devstream__devstream_*` tools (current)
+- **Direct DB**: Native SQLite access via `get_direct_client()` methods (current)
 - **MCP Server**: Eliminated in v2.2.0+ for performance and reliability
 
-**Primary Interface**: All database operations use Direct DB tools (`mcp__devstream__devstream_*`) - this is the default and only supported method.
+**Primary Interface**: All database operations use Direct DB tools (`get_direct_client()`) - this is the default and only supported method.
 
 **Database**: `data/devstream.db` (sqlite-vec enabled)
 
 **Direct DB Tools** (no server required):
-- Task Management: `mcp__devstream__devstream_create_task`, `mcp__devstream__devstream_update_task`, `mcp__devstream__devstream_list_tasks`
-- Memory System: `mcp__devstream__devstream_store_memory`, `mcp__devstream__devstream_search_memory`
-- Implementation Plans: `mcp__devstream__devstream_create_implementation_plan`, `mcp__devstream__devstream_get_implementation_plan`, `mcp__devstream__devstream_update_implementation_plan`, `mcp__devstream__devstream_list_implementation_plans`
-- Memory Operations: `mcp__devstream__devstream_trigger_checkpoint`
+- Task Management: `get_direct_client().create_task()`, `get_direct_client().update_task()`, `get_direct_client().list_tasks()`
+- Memory System: `get_direct_client().store_memory()`, `get_direct_client().search_memory()`
+- Implementation Plans: `get_direct_client().create_implementation_plan()`, `get_direct_client().get_implementation_plan()`, `get_direct_client().update_implementation_plan()`, `get_direct_client().list_implementation_plans()`
+- Memory Operations: `get_direct_client().trigger_checkpoint()`
 
 **Key Benefits**:
 - ✅ **Direct DB Architecture** - No server dependency, direct SQLite access
@@ -1301,7 +1435,7 @@ def hybrid_search(
 **Architecture**: Direct database integration with dual storage pattern
 
 **Database Schema**: `implementation_plans` table
-- Direct SQLite access via `mcp__devstream__devstream_*` tools
+- Direct SQLite access via `get_direct_client()` methods
 - Full metadata, task linkage, model type tracking
 - Direct DB Architecture (no server dependency)
 
@@ -1315,10 +1449,10 @@ def hybrid_search(
 - **Handoff**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
 
 **Direct DB Tools** (Primary Interface):
-- `mcp__devstream__devstream_create_implementation_plan` - Create new plan
-- `mcp__devstream__devstream_get_implementation_plan` - Retrieve plan by task ID
-- `mcp__devstream__devstream_update_implementation_plan` - Update existing plan
-- `mcp__devstream__devstream_list_implementation_plans` - List all plans
+- `get_direct_client().create_implementation_plan()` - Create new plan
+- `get_direct_client().get_implementation_plan()` - Retrieve plan by task ID
+- `get_direct_client().update_implementation_plan()` - Update existing plan
+- `get_direct_client().list_implementation_plans()` - List all plans
 
 **Strategic Choice Gate**: Interactive model selection at Step 5 with auto plan generation
 **Hook Integration**: `implementation_plan_generator.py` automates at Step 4
@@ -1334,8 +1468,8 @@ DEVSTREAM_MEMORY_FEEDBACK_LEVEL=minimal
 # Database (MANDATORY - Direct DB Architecture)
 DEVSTREAM_DB_PATH=data/devstream.db
 DEVSTREAM_DIRECT_DB_ENABLED=true
-# MCP server is disabled by default - Direct DB is the primary interface
-DEVSTREAM_MCP_SERVER_ENABLED=false
+# ~~MCP server~~ is disabled by default - Direct DB is the primary interface
+# ~~DEVSTREAM_MCP_SERVER_ENABLED=false~~ (eliminated v2.2.0+)
 
 # Context7 (MANDATORY)
 DEVSTREAM_CONTEXT7_ENABLED=true
@@ -1393,7 +1527,7 @@ DEVSTREAM_VECTOR_DB_ENABLED=true
 **Architecture Migration**:
 - ❌ ~~MCP devstream server~~ (eliminated - Direct DB Architecture)
 - ✅ Direct SQLite database (`data/devstream.db`) - Primary storage
-- ✅ Direct DB tools (`mcp__devstream__devstream_*`) - Primary interface
+- ✅ Direct DB tools (`get_direct_client()` methods) - Primary interface
 - ✅ Enhanced performance and reliability
 - ✅ Reduced system complexity
 
