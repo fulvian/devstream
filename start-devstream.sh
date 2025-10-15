@@ -564,6 +564,9 @@ initialize_direct_db() {
   # Initialize project virtual environment for multi-project setup (Context7 best practice)
   initialize_project_venv
 
+  # Initialize project CLAUDE.md for multi-project setup (Context7 + projen/chezmoi patterns)
+  initialize_project_claude_md
+
   print_status "✅ Direct DB Architecture initialized"
 }
 
@@ -1709,6 +1712,201 @@ initialize_project_templates() {
   else
     print_info "✅ All project templates are up to date"
   fi
+}
+
+# Function to initialize project CLAUDE.md for multi-project setup
+# Context7 + projen/chezmoi patterns: intelligent template inheritance and adaptation
+initialize_project_claude_md() {
+  # Only initialize CLAUDE.md in multi-project mode
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  print_status "📝 Initializing project CLAUDE.md..."
+
+  local project_name=$(basename "$PROJECT_ROOT")
+  local templates_source_dir="$DEVSTREAM_SCRIPT_DIR/templates/claude"
+  local project_claude_md="$PROJECT_ROOT/CLAUDE.md"
+  local framework_claude_md="$DEVSTREAM_SCRIPT_DIR/CLAUDE.md"
+
+  # Check if template processor exists
+  local template_processor="$templates_source_dir/template_processor.py"
+  local template_variables="$templates_source_dir/template_variables.py"
+
+  if [ ! -f "$template_processor" ] || [ ! -f "$template_variables" ]; then
+    print_warning "⚠️  CLAUDE.md template processor not found, using fallback method"
+    initialize_project_claude_md_fallback
+    return 0
+  fi
+
+  # Check if project CLAUDE.md needs update
+  local needs_update=false
+
+  # Always update if project CLAUDE.md doesn't exist
+  if [ ! -f "$project_claude_md" ]; then
+    needs_update=true
+    print_info "📝 Project CLAUDE.md not found, will create"
+  else
+    # Check if framework CLAUDE.md is newer
+    if [ "$framework_claude_md" -nt "$project_claude_md" ]; then
+      needs_update=true
+      print_info "📝 Framework CLAUDE.md is newer, will update project"
+    fi
+
+    # Check if templates have been updated
+    local version_file="$PROJECT_ROOT/.claude_version"
+    if [ ! -f "$version_file" ] || [ "$templates_source_dir" -nt "$version_file" ]; then
+      needs_update=true
+      print_info "📝 Templates updated, will regenerate project CLAUDE.md"
+    fi
+  fi
+
+  if [ "$needs_update" = false ]; then
+    print_info "✅ Project CLAUDE.md is up to date"
+    return 0
+  fi
+
+  # Use the template processor to generate project-specific CLAUDE.md
+  print_info "🔄 Generating project-specific CLAUDE.md..."
+
+  # Run the template processor
+  local processor_result=$("$VENV_DIR/bin/python" "$template_processor" "$PROJECT_ROOT" "$DEVSTREAM_SCRIPT_DIR" 2>&1)
+  local processor_exit_code=$?
+
+  if [ $processor_exit_code -eq 0 ]; then
+    # Update version tracking
+    local current_version=$(date +%Y%m%d_%H%M%S)
+    echo "$current_version" > "$version_file"
+
+    print_status "✅ Project CLAUDE.md generated successfully"
+    print_info "   Project: $project_name"
+    print_info "   Location: $project_claude_md"
+
+    # Show what was generated (first few lines)
+    if [ -f "$project_claude_md" ]; then
+      local title=$(head -1 "$project_claude_md" 2>/dev/null || echo "CLAUDE.md")
+      print_info "   Title: $title"
+    fi
+  else
+    print_error "❌ Template processor failed: $processor_result"
+    print_info "💡 Falling back to basic CLAUDE.md copy"
+    initialize_project_claude_md_fallback
+  fi
+}
+
+# Fallback method for CLAUDE.md initialization (if template processor fails)
+initialize_project_claude_md_fallback() {
+  local project_name=$(basename "$PROJECT_ROOT")
+  local project_claude_md="$PROJECT_ROOT/CLAUDE.md"
+  local framework_claude_md="$DEVSTREAM_SCRIPT_DIR/CLAUDE.md"
+
+  print_info "🔄 Using fallback CLAUDE.md initialization..."
+
+  # Create basic project-specific CLAUDE.md
+  cat > "$project_claude_md" << EOF
+# CLAUDE.md - $project_name Project Rules
+
+**Version**: 2.2.0 | **Date**: $(date +%Y-%m-%d) | **Status**: Multi-Project Configuration
+
+<critical_notice>
+⚠️ **PROJECT-SPECIFIC RULES** - These rules are adapted for $project_name project.
+Combined with DevStream framework rules for complete development workflow.
+</critical_notice>
+
+---
+
+## 🎯 Project Environment (PROJECT-SPECIFIC)
+
+### 🚨 CRITICAL RULE: Project Isolation
+
+<rule type="project_isolation" priority="critical">
+**Project Configuration**:
+- Project Root: $PROJECT_ROOT
+- Project Name: $project_name
+- Environment File: .env.project
+
+**Framework vs Project Separation**:
+- **Project Development**: Work in project directory with project-specific tools
+- **DevStream Operations**: Use DevStream framework for system operations
+
+**Project Development Workflow**:
+\`\`\`bash
+# 1. Work in project directory
+cd $PROJECT_ROOT
+
+# 2. Start DevStream in multi-project mode
+export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+./path/to/devstream/start-devstream.sh start
+
+# 3. Use project-specific tools and workflows
+# (Depends on project type - see sections below)
+\`\`\`
+
+**DevStream System Commands**:
+\`\`\`bash
+# ✅ CORRECT - Use framework for DevStream operations
+$VENV_DIR/bin/python .claude/hooks/devstream/memory/pre_tool_use.py
+./start-devstream.sh status
+
+# ✅ CORRECT - Project operations in project directory
+cd $PROJECT_ROOT
+# Use project-specific tools here
+\`\`\`
+</rule>
+
+---
+
+## 📚 Framework Rules (Inherited)
+
+The following DevStream framework rules apply to this project:
+
+### Memory System (MANDATORY)
+- ✅ Use MemoryManager (\`get_direct_client()\`) for all memory operations
+- ❌ NEVER use Python Specialist for memory database queries
+- ❌ NEVER use MCP tools (eliminated in v2.2.0+)
+
+### Context7 Integration (MANDATORY)
+- ✅ Use Context7 for research and best practices
+- ✅ Automatic library detection and documentation injection
+- ❌ NEVER skip Context7 research for new technologies
+
+### Quality Gates (MANDATORY)
+- ✅ 95%+ test coverage for NEW code
+- ✅ 100% test pass rate before commits
+- ✅ Full type hints and docstrings
+- ✅ @code-reviewer validation before commits
+
+### 7-Step Workflow (MANDATORY)
+- ✅ DISCUSS → ANALYZE → RESEARCH → PLAN → APPROVE → IMPLEMENT → VERIFY
+- ✅ TodoWrite tracking for all non-trivial tasks
+- ✅ Context7 research for technical decisions
+
+---
+
+<project_metadata>
+**Project**: $project_name
+**DevStream Version**: 2.2.0
+**Framework Path**: $DEVSTREAM_SCRIPT_DIR
+**Project Path**: $PROJECT_ROOT
+
+**Context7 Compliance**: ✅ Multi-project setup
+**Architecture**: Direct DB + Project Isolation
+**Quality Gates**: Mandatory code review and testing requirements
+</project_metadata>
+
+---
+
+*These project-specific rules complement the DevStream framework rules. Framework violations cause system malfunctions, while project-specific violations affect development workflow efficiency.*
+EOF
+
+  # Update version tracking
+  local version_file="$PROJECT_ROOT/.claude_version"
+  local current_version=$(date +%Y%m%d_%H%M%S)
+  echo "$current_version" > "$version_file"
+
+  print_status "✅ Fallback CLAUDE.md created successfully"
+  print_info "   Project: $project_name"
+  print_info "   Location: $project_claude_md"
 }
 
 # Main function
