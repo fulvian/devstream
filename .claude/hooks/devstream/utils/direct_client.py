@@ -728,7 +728,8 @@ class DevStreamDirectClient:
         content: str,
         content_type: str,
         keywords: Optional[List[str]] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        source: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Store content in semantic_memory table directly with automatic embedding generation.
@@ -737,11 +738,15 @@ class DevStreamDirectClient:
         Uses OllamaEmbeddingClient with graceful degradation - storage succeeds even if
         embedding generation fails. Embeddings are stored as BLOB format (70% space reduction).
 
+        Context7 Pattern: Dependency Injection for optional source tracking.
+        Source parameter enables file-based deduplication and incremental indexing.
+
         Args:
             content: Content to store
             content_type: Type of content (code, documentation, context, output, error, decision, learning)
             keywords: Associated keywords for search
             session_id: Session ID for tracking
+            source: Source file path (optional, for file tracking and deduplication)
 
         Returns:
             Dictionary with stored memory ID and metadata:
@@ -840,11 +845,13 @@ class DevStreamDirectClient:
                         INSERT INTO semantic_memory (
                             id, content, content_type, keywords, session_id,
                             created_at, updated_at, access_count, relevance_score,
+                            source,
                             embedding_blob, embedding_model, embedding_dimension
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?)
                     """, (
                         memory_id, content, content_type, keywords_json,
                         session_id_clean, current_time, current_time,
+                        source,
                         embedding_blob, embedding_model, embedding_dimension
                     ))
 

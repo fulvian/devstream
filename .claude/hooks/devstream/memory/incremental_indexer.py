@@ -327,7 +327,8 @@ class IncrementalIndexer:
                                 content=doc.page_content,
                                 content_type=metadata.get('content_type', 'code'),
                                 keywords=metadata.get('keywords', []),
-                                session_id=metadata.get('session_id')
+                                session_id=metadata.get('session_id'),
+                                source=source_path
                             )
                         )
                     finally:
