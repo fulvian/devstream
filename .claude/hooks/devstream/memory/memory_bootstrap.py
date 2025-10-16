@@ -218,15 +218,70 @@ class MemoryBootstrap:
                 warnings=["Dry run mode - no actual indexing performed"]
             )
 
-        # Actual processing
-        result = self.incremental_indexer.index_directory(
-            cleanup_mode=self.config.cleanup_mode,
-            force_reindex=self.config.force_reindex,
-            include_patterns=self.config.include_patterns,
-            exclude_patterns=self.config.exclude_patterns
-        )
+        # Actual processing - Context7 Pattern: Explicit file processing with progress tracking
+        # ✅ Process the passed file_paths directly (fixes ignored parameter bug)
+        processed = 0
+        added = 0
+        updated = 0
+        skipped = 0
+        errors = []
+        total_chunks = 0
 
-        return result
+        # Process each file explicitly (Context7: Explicit over Implicit)
+        for i, file_path in enumerate(file_paths, 1):
+            try:
+                success, message = self.incremental_indexer.index_file(
+                    file_path,
+                    force_reindex=self.config.force_reindex
+                )
+
+                # Progress logging (Context7: Observable behavior)
+                if i % 10 == 0 or i == len(file_paths):
+                    self.logger.info(f"Progress: {i}/{len(file_paths)} files processed")
+
+                processed += 1
+
+                # Parse result message for statistics
+                if success:
+                    if "Reindexed" in message:
+                        updated += 1
+                    elif "Indexed" in message:
+                        added += 1
+                    elif "Skipped" in message:
+                        skipped += 1
+
+                    # Extract chunk count if present
+                    # Message format: "Indexed: path (5 chunks)" or "Reindexed: path (5 chunks)"
+                    if "chunks)" in message:
+                        try:
+                            chunks_str = message.split("(")[-1].split(")")[0]  # Extract "5 chunks"
+                            chunks = int(chunks_str.split()[0])  # Take first word = "5"
+                            total_chunks += chunks
+                        except (ValueError, IndexError):
+                            pass
+                else:
+                    errors.append(message)
+
+            except Exception as e:
+                error_msg = f"Error processing {file_path}: {e}"
+                errors.append(error_msg)
+                self.logger.error(error_msg)
+
+        processing_time = time.time() - start_time
+
+        # Return comprehensive result
+        return IndexingResult(
+            success=len(errors) == 0,
+            total_files=len(file_paths),
+            processed_files=processed,
+            updated_files=updated,
+            added_files=added,
+            skipped_files=skipped,
+            deleted_files=0,
+            total_chunks=total_chunks,
+            processing_time=processing_time,
+            errors=errors
+        )
 
     def _analyze_codebase(self, file_paths: List[Path]) -> Dict[str, Any]:
         """
