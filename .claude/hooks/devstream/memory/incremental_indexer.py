@@ -30,7 +30,8 @@ from contextlib import contextmanager
 
 # Import DevStream components
 import sys
-sys.path.append(str(Path(__file__).parent))
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent / 'utils'))
 try:
     from direct_client import get_direct_client
     DIRECT_CLIENT_AVAILABLE = True
