@@ -317,12 +317,12 @@ class IncrementalIndexer:
 
                 # Use the appropriate method based on available client
                 if hasattr(self.memory_client, 'store_memory'):
-                    # Async client
+                    # Context7 Pattern: Run async code from sync context using asyncio.run()
+                    # This is the recommended pattern - creates clean event loop per call
+                    # AnyIO in direct_client ensures no event loop blocking
                     import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
                     try:
-                        result = loop.run_until_complete(
+                        result = asyncio.run(
                             self.memory_client.store_memory(
                                 content=doc.page_content,
                                 content_type=metadata.get('content_type', 'code'),
@@ -331,8 +331,15 @@ class IncrementalIndexer:
                                 source=source_path
                             )
                         )
-                    finally:
-                        loop.close()
+                    except RuntimeError as e:
+                        # If already in event loop (shouldn't happen in bootstrap), log and skip
+                        if "asyncio.run() cannot be called" in str(e):
+                            self.logger.warning(
+                                f"Cannot call asyncio.run() from running event loop: {e}"
+                            )
+                            result = None
+                        else:
+                            raise
                 else:
                     # Sync fallback
                     self.logger.warning("Async client not available, using fallback")

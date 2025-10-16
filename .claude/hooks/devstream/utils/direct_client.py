@@ -723,6 +723,46 @@ class DevStreamDirectClient:
             else:
                 print(f"⚠️ Vector search check failed: {e}, using FTS fallback")
 
+    def _generate_embedding_sync(self, content: str) -> Optional[List[float]]:
+        """
+        Synchronous helper for embedding generation (runs in worker thread via AnyIO).
+
+        Context7 Pattern: Extract blocking I/O to sync helper, called via anyio.to_thread.run_sync().
+        This prevents event loop blocking when called from async context.
+
+        Args:
+            content: Text content to embed
+
+        Returns:
+            Embedding vector (768-dim float list) or None if generation fails
+
+        Note:
+            This method MUST be synchronous - it will be called via anyio.to_thread.run_sync()
+            from async context to avoid blocking the event loop.
+        """
+        try:
+            # Lazy import to avoid circular dependencies
+            try:
+                from .ollama_client import OllamaEmbeddingClient
+            except ImportError:
+                try:
+                    from ollama_client import OllamaEmbeddingClient
+                except ImportError:
+                    self.logger.logger.warning("OllamaEmbeddingClient not available")
+                    return None
+
+            ollama_client = OllamaEmbeddingClient()
+            # This is a synchronous blocking call - safe because we're in a worker thread
+            embedding = ollama_client.generate_embedding(content)
+            return embedding
+
+        except Exception as e:
+            self.logger.logger.warning(
+                f"Embedding generation failed in worker thread: {e}",
+                extra={"error": str(e), "operation": "_generate_embedding_sync"}
+            )
+            return None
+
     async def store_memory(
         self,
         content: str,
@@ -740,6 +780,9 @@ class DevStreamDirectClient:
 
         Context7 Pattern: Dependency Injection for optional source tracking.
         Source parameter enables file-based deduplication and incremental indexing.
+
+        Context7 Pattern (AnyIO): Blocking I/O runs in worker thread via anyio.to_thread.run_sync()
+        to prevent event loop blocking. Research-backed solution from FastAPI/Starlette patterns.
 
         Args:
             content: Content to store
@@ -767,6 +810,7 @@ class DevStreamDirectClient:
             - Embeddings are stored as binary BLOB using struct.pack for 70% space savings
             - Uses embeddinggemma:300m model for consistent 768-dimension vectors
             - Performance impact: ~100ms additional latency per operation
+            - AnyIO pattern prevents event loop blocking (Context7-compliant)
         """
         start_time = time.time()
 
@@ -778,25 +822,21 @@ class DevStreamDirectClient:
             keywords_json = json.dumps(keywords or [])
             session_id_clean = session_id or os.getenv('CLAUDE_SESSION_ID', '')
 
-            # FASE 1: Generate embedding BLOB BEFORE storage (NEW CODE)
+            # FASE 1: Generate embedding BLOB BEFORE storage (AnyIO pattern - non-blocking)
             embedding_blob = None
             embedding_dimension = None
             embedding_model = None
 
             try:
-                # Lazy import to avoid circular dependencies - use same pattern as other imports
-                try:
-                    from .ollama_client import OllamaEmbeddingClient
-                except ImportError:
-                    try:
-                        from ollama_client import OllamaEmbeddingClient
-                    except ImportError:
-                        raise ImportError("OllamaEmbeddingClient not available - embedding generation disabled")
+                # Context7 Pattern: Run blocking Ollama call in worker thread via AnyIO
+                # This prevents event loop blocking - research-backed pattern from FastAPI/Starlette
+                import anyio
 
-                ollama_client = OllamaEmbeddingClient()
-
-                # Generate embedding (synchronous call - DO NOT use await!)
-                embedding = ollama_client.generate_embedding(content)
+                embedding = await anyio.to_thread.run_sync(
+                    self._generate_embedding_sync,
+                    content,
+                    cancellable=True  # Allow cancellation via Ctrl+C
+                )
 
                 if embedding and len(embedding) > 0:
                     # Convert to BLOB using struct.pack (70% space reduction)
