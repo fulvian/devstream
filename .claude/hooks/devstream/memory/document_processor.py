@@ -409,82 +409,47 @@ class DocumentProcessor:
         Discover documents in project directory.
 
         Context7 Pattern: Intelligent file discovery with patterns.
+        Excludes virtualenvs, build artifacts, and media while preserving hooks.
         """
         if include_patterns is None:
             include_patterns = ['**/*']
 
         if exclude_patterns is None:
+            # Context7 Pattern: Comprehensive exclusion list
+            # Based on gitignore_parser best practices (Trust Score 8.9)
             exclude_patterns = [
+                # Version control
                 '**/.git/**',
+                # Python artifacts
                 '**/__pycache__/**',
-                '**/node_modules/**',
-                '**/.venv/**',
-                '**/venv/**',
-                '**/.reporting/**',
-                '**/reporting/**',
                 '**/.pytest_cache/**',
-                '**/dist/**',
-                '**/build/**',
+                '**/.tox/**',
+                '**/.mypy_cache/**',
+                '**/.ruff_cache/**',
+                '**/htmlcov/**',
+                '**/.eggs/**',
+                '**/*.egg-info/**',
                 '**/*.pyc',
                 '**/*.pyo',
-                '**/.DS_Store/**'
-            ]
-
-    def should_exclude_file(self, file_path: Path) -> bool:
-        """
-        Check if file should be excluded using multiple strategies.
-
-        Context7 Pattern: Robust exclusion handling.
-        """
-        relative_path = file_path.relative_to(self.project_root)
-        relative_str = str(relative_path)
-
-        # Check for exact directory matches
-        exclude_dirs = ['.git', '__pycache__', 'node_modules', '.venv', 'venv',
-                       '.reporting', 'reporting', '.pytest_cache', 'dist', 'build']
-
-        # Check if any part of the path starts with exclude directories
-        for part in relative_path.parts:
-            if part in exclude_dirs:
-                return True
-
-        # Check pattern matching (fallback)
-        for pattern in self.exclude_patterns:
-            try:
-                if relative_path.match(pattern):
-                    return True
-            except:
-                # If pattern matching fails, use string matching
-                if any(exclude_dir in relative_str for exclude_dir in exclude_dirs):
-                    return True
-
-        return False
-
-    def discover_documents(self, include_patterns: Optional[List[str]] = None,
-                          exclude_patterns: Optional[List[str]] = None) -> List[Path]:
-        """
-        Discover documents in project directory.
-
-        Context7 Pattern: Intelligent file discovery with patterns.
-        """
-        if include_patterns is None:
-            include_patterns = ['**/*']
-
-        if exclude_patterns is None:
-            exclude_patterns = [
-                '**/.git/**',
-                '**/__pycache__/**',
-                '**/node_modules/**',
-                '**/.venv/**',
-                '**/venv/**',
-                '**/.reporting/**',
-                '**/reporting/**',
-                '**/.pytest_cache/**',
+                '**/*.pyd',
+                # Build artifacts
                 '**/dist/**',
                 '**/build/**',
-                '**/*.pyc',
-                '**/*.pyo',
-                '**/.DS_Store/**'
+                # Virtual environments (CRITICAL: includes .devstream)
+                '**/.venv/**',
+                '**/venv/**',
+                '**/.devstream/**',
+                '**/.reporting/**',
+                '**/reporting/**',
+                # Node.js
+                '**/node_modules/**',
+                # Media files
+                '**/registrazioni/**',
+                # OS artifacts
+                '**/.DS_Store',
+                '**/.DS_Store/**',
+                '**/*.swp',
+                '**/*.swo'
             ]
 
         # Store exclude patterns for use in should_exclude_file
@@ -503,6 +468,64 @@ class DocumentProcessor:
 
         self.logger.info(f"Discovered {len(discovered_files)} files to process")
         return discovered_files
+
+    def should_exclude_file(self, file_path: Path) -> bool:
+        """
+        Check if file should be excluded using multiple strategies.
+
+        Context7 Pattern: Robust exclusion with path part inspection.
+        Strategy based on gitignore_parser and pathspec best practices.
+
+        Performance: O(n) where n=path depth, suitable for large file sets.
+        Rationale: Path.parts checking is more reliable than Path.match()
+        for directory exclusions (python-pathspec Trust Score 7.1).
+        """
+        try:
+            relative_path = file_path.relative_to(self.project_root)
+        except ValueError:
+            # File is outside project root
+            return True
+
+        relative_str = str(relative_path)
+
+        # Context7 Pattern: Comprehensive directory exclusion list
+        # Includes: VCS, build artifacts, virtualenvs, media, caches
+        exclude_dirs = {
+            '.git', '__pycache__', 'node_modules',
+            '.venv', 'venv', '.devstream', '.reporting', 'reporting',
+            '.pytest_cache', 'dist', 'build', 'registrazioni',
+            '.tox', '.mypy_cache', '.ruff_cache', 'htmlcov',
+            '.eggs', '*.egg-info', '.DS_Store'
+        }
+
+        # Context7 Pattern: Path part inspection (primary strategy)
+        # Most reliable for directory-based exclusions
+        for part in relative_path.parts:
+            if part in exclude_dirs:
+                return True
+            # Handle .egg-info and similar patterns
+            if part.endswith('.egg-info') or part.endswith('.dist-info'):
+                return True
+
+        # Context7 Pattern: File extension exclusion (compiled artifacts)
+        exclude_extensions = {'.pyc', '.pyo', '.pyd', '.so', '.dylib', '.swp', '.swo'}
+        if relative_path.suffix in exclude_extensions:
+            return True
+
+        # Context7 Pattern: Pattern matching (fallback for glob patterns)
+        # Only used for patterns not covered by part inspection
+        if hasattr(self, 'exclude_patterns'):
+            for pattern in self.exclude_patterns:
+                try:
+                    # Use pathlib.match for gitignore-style patterns
+                    if relative_path.match(pattern):
+                        return True
+                except (ValueError, Exception):
+                    # Fallback: string matching for malformed patterns
+                    if pattern.strip('*').strip('/') in relative_str:
+                        return True
+
+        return False
 
     def process_document(self, file_path: Path) -> ProcessedDocument:
         """
