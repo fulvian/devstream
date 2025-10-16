@@ -418,6 +418,7 @@ class DevStreamDirectClient:
                                 content, content_type, memory_id, created_at
                             )
                         """,
+                        # Only create vector table if extension is available
                         "vec_semantic_memory": """
                             CREATE VIRTUAL TABLE IF NOT EXISTS vec_semantic_memory USING vec(
                                 embedding float[768],
@@ -425,7 +426,7 @@ class DevStreamDirectClient:
                                 memory_id TEXT,
                                 content_preview TEXT
                             )
-                        """,
+                        """ if self._check_vec_extension_available() else None,
                         "tasks": """
                             CREATE TABLE IF NOT EXISTS tasks (
                                 id TEXT PRIMARY KEY,
@@ -479,6 +480,15 @@ class DevStreamDirectClient:
                     # Context7 Pattern: Validate and create tables with error handling
                     tables_created = []
                     for table_name, create_sql in schemas.items():
+                        # Skip None values (e.g., when vec extension not available)
+                        if create_sql is None:
+                            if hasattr(self.logger, 'logger') and self.logger.logger:
+                                self.logger.logger.debug(
+                                    f"Skipping table creation for {table_name} (extension not available)",
+                                    extra={"table_name": table_name, "operation": "schema_creation"}
+                                )
+                            continue
+
                         try:
                             # Check if table exists
                             cursor = conn.execute(
@@ -574,6 +584,76 @@ class DevStreamDirectClient:
             except sqlite3.Error as e:
                 raise DatabaseException(f"Table integrity check failed for {table_name}: {e}") from e
 
+    def _check_vec_extension_available(self) -> bool:
+        """
+        Check if sqlite-vec extension is available AND functional for CREATE VIRTUAL TABLE.
+
+        CRITICAL: Tests actual CREATE VIRTUAL TABLE statement, not just vec_version(),
+        because some loading methods allow queries but not table creation.
+
+        Returns:
+            True if CREATE VIRTUAL TABLE USING vec() works, False otherwise
+        """
+        try:
+            # Try to import sqlite-vec Python module
+            import sqlite_vec
+
+            # CRITICAL: Test if CREATE VIRTUAL TABLE actually works
+            # This is the ONLY reliable test for our use case
+            test_conn = None
+            try:
+                test_conn = sqlite3.connect(":memory:")
+                test_conn.enable_load_extension(True)
+
+                # Load the extension
+                try:
+                    sqlite_vec.load(test_conn)
+
+                    # CRITICAL TEST: Try to create a virtual table
+                    # This is what actually matters for our use case
+                    test_conn.execute("""
+                        CREATE VIRTUAL TABLE test_vec USING vec(
+                            embedding float[3]
+                        )
+                    """)
+
+                    # If we get here, it works!
+                    test_conn.execute("DROP TABLE test_vec")
+                    test_conn.close()
+                    return True
+
+                except Exception as create_error:
+                    if test_conn:
+                        try:
+                            test_conn.close()
+                        except:
+                            pass
+                    if hasattr(self.logger, 'logger') and self.logger.logger:
+                        self.logger.logger.info(f"sqlite-vec CREATE VIRTUAL TABLE failed: {create_error}")
+                    else:
+                        print(f"⚠️ sqlite-vec CREATE VIRTUAL TABLE not supported: {create_error}")
+                    return False
+
+            except Exception as conn_error:
+                if test_conn:
+                    try:
+                        test_conn.close()
+                    except:
+                        pass
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.info(f"Cannot test sqlite-vec extension: {conn_error}")
+                else:
+                    print(f"⚠️ Cannot test sqlite-vec extension: {conn_error}")
+                return False
+
+        except ImportError:
+            # sqlite-vec not available
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info("sqlite-vec not available, vector features disabled")
+            else:
+                print("⚠️ sqlite-vec not available, using FTS search only")
+            return False
+
     def _check_vector_availability(self, conn: sqlite3.Connection) -> None:
         """
         Thread-safe check for vector search availability.
@@ -588,16 +668,22 @@ class DevStreamDirectClient:
             # First, check if vector table exists in the current database using the provided connection
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_semantic_memory'")
             if not cursor.fetchone():
-                self.logger.logger.info("Vector table does not exist, using FTS search only")
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.info("Vector table does not exist, using FTS search only")
+                else:
+                    print("ℹ️ Vector table does not exist, using FTS search only")
                 return
 
             # Vector table exists, now check if sqlite-vec extension is available
             try:
                 import sqlite_vec
             except ImportError:
-                self.logger.logger.info(
-                    "sqlite-vec not installed but vector table exists, using FTS search only"
-                )
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.info(
+                        "sqlite-vec not installed but vector table exists, using FTS search only"
+                    )
+                else:
+                    print("ℹ️ sqlite-vec not installed but vector table exists, using FTS search only")
                 return
 
             # Try to test vector functionality without using sqlite_vec_helper
@@ -608,22 +694,34 @@ class DevStreamDirectClient:
 
                 # If we get here, vector extension is working
                 self.vector_search_available = True
-                self.logger.logger.info("Vector search extension is available and working")
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.info("Vector search extension is available and working")
+                else:
+                    print("✅ Vector search extension is available and working")
 
             except sqlite3.OperationalError as e:
                 if "no such module" in str(e) or "no such function" in str(e):
-                    self.logger.logger.info(
-                        "sqlite-vec extension not loaded in connection, using FTS search only"
-                    )
+                    if hasattr(self.logger, 'logger') and self.logger.logger:
+                        self.logger.logger.info(
+                            "sqlite-vec extension not loaded in connection, using FTS search only"
+                        )
+                    else:
+                        print("ℹ️ sqlite-vec extension not loaded in connection, using FTS search only")
                 else:
-                    self.logger.logger.warning(
-                        f"Vector extension error: {e}, using fallback search"
-                    )
+                    if hasattr(self.logger, 'logger') and self.logger.logger:
+                        self.logger.logger.warning(
+                            f"Vector extension error: {e}, using fallback search"
+                        )
+                    else:
+                        print(f"⚠️ Vector extension error: {e}, using fallback search")
 
         except Exception as e:
-            self.logger.logger.warning(
-                f"Vector search check failed: {e}, using FTS fallback"
-            )
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.warning(
+                    f"Vector search check failed: {e}, using FTS fallback"
+                )
+            else:
+                print(f"⚠️ Vector search check failed: {e}, using FTS fallback")
 
     async def store_memory(
         self,

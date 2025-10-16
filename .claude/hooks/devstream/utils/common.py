@@ -27,6 +27,14 @@ import aiohttp
 # Load environment variables
 load_dotenv()
 
+# Import project locator functions (Dependency Injection pattern)
+try:
+    from .project_locator import get_project_root, get_database_path, is_devstream_available
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append(str(Path(__file__).parent))
+    from project_locator import get_project_root, get_database_path, is_devstream_available
+
 class DevStreamHookBase:
     """
     Base class for DevStream hooks following Context7 patterns.
@@ -223,6 +231,85 @@ def get_project_context() -> Dict[str, Any]:
         context["git_repo"] = True
 
     return context
+
+
+def classify_query_type(query: str) -> str:
+    """
+    Classify user query type for processing (Context7 pattern).
+
+    Args:
+        query: User query string
+
+    Returns:
+        Query classification: 'research', 'implementation', 'debugging', 'documentation', 'general'
+    """
+    import re
+
+    query_lower = query.lower()
+
+    # Research patterns
+    research_keywords = ['how to', 'best practice', 'research', 'learn about', 'explain', 'what is', 'documentation']
+    if any(keyword in query_lower for keyword in research_keywords):
+        return 'research'
+
+    # Implementation patterns
+    implementation_keywords = ['implement', 'create', 'build', 'write', 'develop', 'code', 'add feature']
+    if any(keyword in query_lower for keyword in implementation_keywords):
+        return 'implementation'
+
+    # Debugging patterns
+    debugging_keywords = ['fix', 'debug', 'error', 'issue', 'problem', 'broken', 'not working']
+    if any(keyword in query_lower for keyword in debugging_keywords):
+        return 'debugging'
+
+    # Documentation patterns
+    documentation_keywords = ['document', 'readme', 'guide', 'manual', 'docs', 'explain code']
+    if any(keyword in query_lower for keyword in documentation_keywords):
+        return 'documentation'
+
+    return 'general'
+
+
+def generate_session_id() -> str:
+    """
+    Generate unique session identifier (Context7 pattern).
+
+    Returns:
+        Unique session ID
+    """
+    import uuid
+    return f"sess-{uuid.uuid4().hex[:12]}"
+
+
+def extract_keywords_from_text(text: str, max_keywords: int = 10) -> List[str]:
+    """
+    Extract keywords from text for memory indexing (Context7 pattern).
+
+    Args:
+        text: Text to extract keywords from
+        max_keywords: Maximum number of keywords to return
+
+    Returns:
+        List of keywords
+    """
+    import re
+
+    # Extract words and filter common words
+    words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', text.lower())
+
+    # Filter common words and short words
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+        'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did',
+        'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'what', 'how',
+        'why', 'when', 'where', 'who', 'which', 'that', 'this', 'these', 'those',
+        'i', 'you', 'we', 'they', 'me', 'us', 'them', 'a', 'an'
+    }
+
+    keywords = [word for word in words if len(word) > 2 and word not in stop_words]
+
+    # Remove duplicates and limit
+    return list(dict.fromkeys(keywords))[:max_keywords]
 
 if __name__ == "__main__":
     # Template test when run directly

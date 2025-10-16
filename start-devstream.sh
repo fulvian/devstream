@@ -695,7 +695,35 @@ from datetime import datetime
 db_path = r'$db_path'
 
 try:
+    # Connect with sqlite-vec extension if available
     conn = sqlite3.connect(db_path)
+
+    # Try to load sqlite-vec extension for project databases
+    try:
+        # Try common locations for sqlite-vec extension
+        extension_paths = [
+            '/opt/homebrew/lib/sqlite-vec.dylib',  # macOS Homebrew
+            '/usr/local/lib/sqlite-vec.dylib',      # Linux/local
+            '/usr/lib/sqlite-vec.dylib',            # System
+            './sqlite-vec.so',                      # Local
+        ]
+
+        vec_loaded = False
+        for ext_path in extension_paths:
+            try:
+                conn.enable_load_extension(True)
+                conn.load_extension(ext_path)
+                print(f"✅ Loaded sqlite-vec extension from: {ext_path}")
+                vec_loaded = True
+                break
+            except:
+                continue
+
+        if not vec_loaded:
+            print("⚠️  sqlite-vec extension not available, using fallback schema")
+    except Exception as e:
+        print(f"⚠️  Could not load sqlite-vec extension: {e}")
+
     cursor = conn.cursor()
 
     # Enable WAL mode for better concurrency (Context7 best practice)
@@ -715,12 +743,11 @@ try:
             metadata TEXT,
             embedding_id INTEGER,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (embedding_id) REFERENCES semantic_memory(id)
+            updated_at TEXT DEFAULT (datetime('now'))
         )
         """,
 
-        # Semantic memory table for vector embeddings
+        # Semantic memory table for vector embeddings (sqlite-vec)
         """
         CREATE TABLE IF NOT EXISTS semantic_memory (
             id INTEGER PRIMARY KEY,
@@ -730,8 +757,32 @@ try:
         )
         """,
 
-        # Full-text search configuration
-        """
+        # Vector table for sqlite-vec (if available)
+    ]
+
+    # Try to create vector table with sqlite-vec
+    try:
+        tables_sql.append("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_semantic_memory USING vec0(
+                embedding float[1536] PRIMARY KEY,
+                rowid INTEGER
+            )
+        """)
+        print("✅ Vector table created with sqlite-vec")
+    except Exception as e:
+        print(f"⚠️  Could not create vector table: {e}")
+        # Fallback: create basic table without vector capabilities
+        tables_sql.append("""
+            CREATE TABLE IF NOT EXISTS vec_semantic_memory_fallback (
+                id INTEGER PRIMARY KEY,
+                embedding BLOB,
+                rowid INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
+    # Add full-text search configuration
+    tables_sql.append("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
             content,
             content_type,
@@ -740,7 +791,7 @@ try:
             content=semantic_memory,
             content_rowid=id
         )
-        """,
+    """)
 
         # Tasks table for project management
         """
@@ -2455,9 +2506,79 @@ initialize_project_memory_bootstrap() {
 
   print_status "🧠 Initializing project memory bootstrap..."
 
-  local memory_bootstrap_script="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/memory/memory_bootstrap.py"
+  # Ensure project has its own memory bootstrap script (universal multi-project setup)
+  local project_memory_bootstrap="$PROJECT_ROOT/.claude/hooks/devstream/memory/memory_bootstrap.py"
+  local framework_memory_bootstrap="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/memory/memory_bootstrap.py"
 
-  # Check if memory bootstrap script exists
+  # Create project hooks directory structure
+  mkdir -p "$PROJECT_ROOT/.claude/hooks/devstream/memory"
+  mkdir -p "$PROJECT_ROOT/.claude/hooks/devstream/utils"
+
+  # Copy memory bootstrap script from framework to project if it doesn't exist or needs update
+  if [ ! -f "$project_memory_bootstrap" ] || [ "$framework_memory_bootstrap" -nt "$project_memory_bootstrap" ]; then
+    if [ -f "$framework_memory_bootstrap" ]; then
+      print_info "📋 Copying memory bootstrap script to project..."
+      cp "$framework_memory_bootstrap" "$project_memory_bootstrap"
+      print_status "✅ Memory bootstrap script copied to project"
+
+      # Make it executable
+      chmod +x "$project_memory_bootstrap"
+    else
+      print_warning "⚠️  Framework memory bootstrap script not found: $framework_memory_bootstrap"
+      return 0
+    fi
+  fi
+
+  # Also copy essential utility files from framework to project for universal access
+  local project_utils_dir="$PROJECT_ROOT/.claude/hooks/devstream/utils"
+  local framework_utils_dir="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils"
+  local framework_memory_dir="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/memory"
+
+  if [ -d "$framework_utils_dir" ]; then
+    # Copy essential utility files for memory bootstrap (from utils directory)
+    local utils_files=(
+      "direct_client.py"
+      "path_validator.py"
+      "project_locator.py"
+      "common.py"
+    )
+
+    for util_file in "${utils_files[@]}"; do
+      local framework_file="$framework_utils_dir/$util_file"
+      local project_file="$project_utils_dir/$util_file"
+
+      if [ -f "$framework_file" ]; then
+        if [ ! -f "$project_file" ] || [ "$framework_file" -nt "$project_file" ]; then
+          cp "$framework_file" "$project_file"
+          print_info "📋 Copied utility: $util_file"
+        fi
+      fi
+    done
+  fi
+
+  # Copy essential memory components from framework to project for universal access
+  local memory_components=(
+    "document_processor.py"
+    "codebase_scanner.py"
+    "incremental_indexer.py"
+  )
+
+  for component in "${memory_components[@]}"; do
+    local framework_component="$framework_memory_dir/$component"
+    local project_component="$PROJECT_ROOT/.claude/hooks/devstream/memory/$component"
+
+    if [ -f "$framework_component" ]; then
+      if [ ! -f "$project_component" ] || [ "$framework_component" -nt "$project_component" ]; then
+        cp "$framework_component" "$project_component"
+        print_info "📋 Copied memory component: $component"
+      fi
+    fi
+  done
+
+  # Use the project memory bootstrap script
+  local memory_bootstrap_script="$project_memory_bootstrap"
+
+  # Verify the script exists
   if [ ! -f "$memory_bootstrap_script" ]; then
     print_warning "⚠️  Memory bootstrap script not found: $memory_bootstrap_script"
     return 0
