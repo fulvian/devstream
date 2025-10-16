@@ -575,7 +575,89 @@ initialize_direct_db() {
   # Initialize project memory for multi-project setup (Context7 best practices)
   initialize_project_memory_bootstrap
 
+  # NEW: Context7-compliant multi-project setup for additional robustness
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    initialize_context7_multi_project_setup
+  fi
+
   print_status "✅ Direct DB Architecture initialized"
+}
+
+# NEW: Function to initialize Context7-compliant multi-project setup
+# Uses the new MultiProjectManager for comprehensive project initialization
+initialize_context7_multi_project_setup() {
+  print_status "🔧 Initializing Context7-compliant multi-project setup..."
+
+  local multi_project_manager="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils/multi_project_manager.py"
+  local hook_validator="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils/hook_system_validator.py"
+
+  # Check if the new Context7-compliant tools are available
+  if [ ! -f "$multi_project_manager" ]; then
+    print_warning "⚠️  MultiProjectManager not found, skipping Context7 setup"
+    return 0
+  fi
+
+  # Run the comprehensive multi-project setup
+  print_info "🔄 Running Context7-compliant project setup..."
+
+  local setup_result=$("$VENV_DIR/bin/python" "$multi_project_manager" \
+    "$PROJECT_ROOT" \
+    --devstream-root "$DEVSTREAM_SCRIPT_DIR" \
+    --verbose 2>&1)
+  local setup_exit_code=$?
+
+  if [ $setup_exit_code -eq 0 ]; then
+    print_status "✅ Context7-compliant multi-project setup completed"
+
+    # Show key setup results
+    if echo "$setup_result" | grep -q "✅"; then
+      local success_count=$(echo "$setup_result" | grep -c "✅" || echo "0")
+      print_info "   Completed operations: $success_count"
+    fi
+
+    if echo "$setup_result" | grep -q "Database initialized"; then
+      print_info "   Database: Ready with required tables"
+    fi
+
+    if echo "$setup_result" | grep -q "Cross-project files"; then
+      print_info "   Cross-project files: Ensured and synchronized"
+    fi
+  else
+    print_error "❌ Context7-compliant setup failed"
+    print_error "   Error: $setup_result"
+    print_warning "   Continuing with basic setup (some features may be limited)"
+  fi
+
+  # Run comprehensive hook system validation if available
+  if [ -f "$hook_validator" ]; then
+    print_info "🔍 Running comprehensive hook system validation..."
+
+    local validation_result=$("$VENV_DIR/bin/python" "$hook_validator" \
+      "$PROJECT_ROOT" \
+      --verbose 2>&1)
+    local validation_exit_code=$?
+
+    if [ $validation_exit_code -eq 0 ]; then
+      print_status "✅ Hook system validation passed"
+
+      # Show validation summary
+      if echo "$validation_result" | grep -q "tests passed"; then
+        local test_summary=$(echo "$validation_result" | grep "tests passed" | head -1)
+        print_info "   $test_summary"
+      fi
+    else
+      print_warning "⚠️  Hook system validation has issues"
+      print_warning "   Some hook features may not work correctly"
+
+      # Show critical issues
+      if echo "$validation_result" | grep -q "❌"; then
+        local critical_issues=$(echo "$validation_result" | grep "❌" | head -3 | tr '\n' '; ')
+        print_info "   Critical issues: ${critical_issues%;}"
+      fi
+    fi
+  else
+    print_info "ℹ️  Hook validator not available, skipping validation"
+  fi
 }
 
 # Function to initialize database schema with automatic validation and creation
