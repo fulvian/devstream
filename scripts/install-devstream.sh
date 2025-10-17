@@ -825,13 +825,8 @@ except Exception as e:
                        [[ "$enhanced_copy_result" == *"completed"* ]] || \
                        [[ "$enhanced_copy_result" == *"successfully"* ]]; then
                         # Check if any hooks were actually copied (lenient validation)
-                        # Context7 fix: Use relative path when TARGET_PROJECT_ROOT equals working directory
-                        local hooks_search_path
-                        if [ "$TARGET_PROJECT_ROOT" = "$(pwd)" ]; then
-                            hooks_search_path=".claude/hooks/devstream"
-                        else
-                            hooks_search_path="$TARGET_PROJECT_ROOT/.claude/hooks/devstream"
-                        fi
+                        # Context7 fix: Always use absolute path for consistent validation across all scenarios
+                        local hooks_search_path="$TARGET_PROJECT_ROOT/.claude/hooks/devstream"
                         local hooks_count=$(find "$hooks_search_path" -name "*.py" 2>/dev/null | wc -l)
                         if [ "$hooks_count" -ge 5 ]; then
                             print_success "✅ Enhanced hook copying completed successfully"
