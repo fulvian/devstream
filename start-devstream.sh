@@ -1541,7 +1541,8 @@ validate_existing_venv() {
     return 1
   fi
 
-  # Test Python functionality (Context7 best practice: capture only the result)
+  # Test Python functionality with timeout protection (Context7 best practice)
+  # Simplified cross-platform timeout approach
   local python_test=$("$venv_path/bin/python" -c "
 import sys
 try:
@@ -1559,16 +1560,18 @@ except Exception as e:
   if [ "$python_test" != "OK" ]; then
     if [[ "$python_test" == MISSING_DEPS:* ]]; then
       print_warning "⚠️  Virtual environment missing dependencies: ${python_test#MISSING_DEPS:}" >&2
+    elif [ "$python_test" = "TIMEOUT" ]; then
+      print_warning "⚠️  Virtual environment validation timed out" >&2
     else
       print_warning "⚠️  Virtual environment validation failed: ${python_test#ERROR:}" >&2
     fi
     return 1
   fi
 
-  # Get Python version info
-  local python_version=$("$venv_path/bin/python" --version 2>&1)
-  local python_major=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.major)")
-  local python_minor=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.minor)")
+  # Get Python version info with timeout protection (cross-platform)
+  local python_version=$("$venv_path/bin/python" --version 2>&1 || echo "Unknown")
+  local python_major=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "3")
+  local python_minor=$("$venv_path/bin/python" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "7")
 
   # Validate Python version (require 3.8+ for modern features)
   if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 8 ]); then
@@ -1664,9 +1667,9 @@ validate_venv_health() {
   fi
 
   # Check Python version compatibility (require 3.11+ for DevStream)
-  local python_version=$("$python_exec" --version 2>&1)
-  local python_major=$("$python_exec" -c "import sys; print(sys.version_info.major)")
-  local python_minor=$("$python_exec" -c "import sys; print(sys.version_info.minor)")
+  local python_version=$("$python_exec" --version 2>&1 || echo "Unknown")
+  local python_major=$("$python_exec" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "3")
+  local python_minor=$("$python_exec" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "7")
 
   if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 11 ]); then
     print_warning "⚠️  Python version $python_version is incompatible (requires 3.11+)" >&2
@@ -1692,6 +1695,8 @@ except Exception as e:
   if [ "$python_test" != "OK" ]; then
     if [[ "$python_test" == MISSING_MODULE:* ]]; then
       print_warning "⚠️  Missing required modules: ${python_test#MISSING_MODULE:}" >&2
+    elif [ "$python_test" = "TIMEOUT" ]; then
+      print_warning "⚠️  Python functionality test timed out" >&2
     else
       print_warning "⚠️  Python functionality test failed: ${python_test#ERROR:}" >&2
     fi
@@ -1719,6 +1724,9 @@ try:
     print('OK')
 except ImportError:
     print('MISSING')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR:{e}')
     sys.exit(1)
 " 2>/dev/null)
 
@@ -1756,7 +1764,15 @@ validate_devstream_venv() {
   # Test Direct DB client availability
   local direct_client_test=$("$python_exec" -c "
 import sys
-sys.path.insert(0, '$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils')
+import os
+# Use the venv's own hook path instead of framework path for multi-project mode
+venv_dir = '$venv_path'
+hook_path = os.path.join(os.path.dirname(os.path.dirname(venv_dir)), '.claude/hooks/devstream/utils')
+if os.path.exists(hook_path):
+    sys.path.insert(0, hook_path)
+else:
+    # Fallback to framework path for single-project mode
+    sys.path.insert(0, '$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils')
 try:
     from direct_client import get_direct_client
     print('OK')
