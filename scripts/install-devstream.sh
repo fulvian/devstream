@@ -808,6 +808,15 @@ standard_devstream_copy() {
         cp -r "$DEVSTREAM_ROOT/scripts" "$TARGET_PROJECT_ROOT/.devstream/"
         print_success "DevStream scripts installed"
     fi
+
+    # Copy requirements.txt to .devstream for validation
+    if [ -f "$TARGET_PROJECT_ROOT/.devstream/requirements-merged.txt" ]; then
+        cp "$TARGET_PROJECT_ROOT/.devstream/requirements-merged.txt" "$TARGET_PROJECT_ROOT/.devstream/requirements.txt"
+        print_verbose "Copied requirements-merged.txt to .devstream/requirements.txt"
+    elif [ -f "$DEVSTREAM_ROOT/requirements.txt" ]; then
+        cp "$DEVSTREAM_ROOT/requirements.txt" "$TARGET_PROJECT_ROOT/.devstream/requirements.txt"
+        print_verbose "Copied DevStream requirements.txt to .devstream/requirements.txt"
+    fi
 }
 
 #------------------------------------------------------------------------------
