@@ -6,12 +6,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/protocol/task_first_handler.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/protocol/task_first_handler.py",
             "timeout": 45
           }
         ]
@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/concurrency_guard.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/concurrency_guard.py",
             "timeout": 10
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py",
             "timeout": 30
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py",
             "timeout": 30
           }
         ]
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/protocol/micro_task_commit_handler.py",
+            "command": "cd \"$DEVSTREAM_PROJECT_ROOT\" && ./.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/protocol/micro_task_commit_handler.py",
             "timeout": 60
           }
         ]
@@ -87,6 +87,7 @@
     "CONTEXT7_RETRY_ATTEMPTS": "2",
     "CONTEXT7_TOKEN_BUDGET": "5000",
     "DEVSTREAM_DB_PATH": "data/devstream.db",
+    "DEVSTREAM_PROJECT_ROOT": ".",
     "DEVSTREAM_SESSION_TRACKING_ENABLED": "true",
     "DEVSTREAM_SESSION_CLEANUP_INTERVAL": "3600",
     "DEVSTREAM_MAX_SESSION_DURATION": "86400"

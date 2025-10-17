@@ -28,5 +28,15 @@ copier>=9.0.0,<10.0.0
 cchooks>=0.1.4
 aiohttp>=3.8.0
 
+# Hook system runtime dependencies
+cachetools>=6.2.0
+aiolimiter>=1.2.0
+tiktoken>=0.12.0
+anyio>=4.0.0
+
+# Protocol enforcement dependencies
+cryptography>=46.0.0
+aiofiles>=25.0.0
+
 # System monitoring and process management
 psutil>=5.9.0
