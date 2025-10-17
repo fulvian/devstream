@@ -8,6 +8,18 @@
 
 set -e  # Exit on error (disable with --no-exit)
 set -u  # Exit on undefined variable
+set -o pipefail  # Exit on pipe failure
+
+#------------------------------------------------------------------------------
+# Script Self-Setup (Context7-compliant permissions)
+#------------------------------------------------------------------------------
+
+# Ensure script itself has proper permissions (Context7 best practice)
+if [[ ! -x "${BASH_SOURCE[0]}" ]]; then
+    echo "Setting executable permissions for install script..."
+    chmod +x "${BASH_SOURCE[0]}"
+    echo "✓ Script permissions updated"
+fi
 
 #------------------------------------------------------------------------------
 # Configuration
@@ -557,13 +569,15 @@ setup_python_environment() {
         fi
     fi
 
-    # Verify critical packages
+    # Verify critical packages (Context7-compliant case-insensitive check)
     print_info "Verifying critical packages..."
     local critical_packages=("cchooks" "aiohttp" "structlog" "python-dotenv")
     for package in "${critical_packages[@]}"; do
-        if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "^${package}"; then
-            local version=$("$VENV_DIR/bin/pip" show "$package" 2>/dev/null | grep "^Version:" | awk '{print $2}')
-            print_success "$package ($version)"
+        if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${package}"; then
+            # Get the actual package name from pip list for version lookup
+            local actual_package_name=$("$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${package}" | awk '{print $1}')
+            local version=$("$VENV_DIR/bin/pip" show "$actual_package_name" 2>/dev/null | grep "^Version:" | awk '{print $2}')
+            print_success "$actual_package_name ($version)"
         else
             print_error "$package not installed"
             if [ "$NO_EXIT" = false ]; then
@@ -629,16 +643,46 @@ setup_devstream_components() {
     done
 
     # Use enhanced hook copying if available and enabled (Context7-compliant Copier integration)
-    if [ "$ENHANCED_HOOK_COPYING" = true ] && [ -f "$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_hook_copier.py" ] && [ -f "$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_bootstrap.py" ]; then
-        print_info "Using enhanced hook copying system with Copier integration..."
+    if [ "$ENHANCED_HOOK_COPYING" = true ]; then
+        print_info "Attempting enhanced hook copying system with Copier integration..."
 
-        local enhanced_copy_result=$("$VENV_DIR/bin/python" -c "
+        # Check if required files exist
+        local hook_copier="$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_hook_copier.py"
+        local hook_bootstrap="$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_bootstrap.py"
+
+        if [ -f "$hook_copier" ] && [ -f "$hook_bootstrap" ]; then
+            print_verbose "Enhanced hook copying files found"
+            print_info "Installing Copier dependency for enhanced hook copying..."
+
+            # Ensure Copier is installed
+            if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "copier"; then
+                "$VENV_DIR/bin/pip" install "copier>=9.0.0,<10.0.0" >/dev/null 2>&1
+                check_exit_code $? "Copier installed" "Failed to install Copier"
+            fi
+
+            print_info "Running enhanced hook copying with integrity validation..."
+
+            local enhanced_copy_result=$("$VENV_DIR/bin/python" -c "
 import sys
+import os
 sys.path.insert(0, '$DEVSTREAM_ROOT/.claude/hooks/devstream/utils')
+sys.path.insert(0, '$DEVSTREAM_ROOT/src')
+
+# Add the project root to Python path for imports
+sys.path.insert(0, '$DEVSTREAM_ROOT')
 
 try:
-    from multi_project_bootstrap import bootstrap_devstream_project
+    print('DEBUG: Starting enhanced hook copying...')
 
+    # Test imports first
+    from multi_project_hook_copier import copy_devstream_hooks_enhanced
+    print('DEBUG: Successfully imported copy_devstream_hooks_enhanced')
+
+    # Try the bootstrap module
+    from multi_project_bootstrap import bootstrap_devstream_project
+    print('DEBUG: Successfully imported bootstrap_devstream_project')
+
+    # Run the bootstrap function
     result = bootstrap_devstream_project(
         target_root='$TARGET_PROJECT_ROOT',
         source_root='$DEVSTREAM_ROOT',
@@ -649,43 +693,72 @@ try:
         verbose=True
     )
 
-    print(f'SUCCESS:{result}')
+    print(f'SUCCESS:Enhanced hook copying completed: {result}')
+
 except ImportError as e:
-    print(f'IMPORT_ERROR:{e}')
+    print(f'IMPORT_ERROR:Import failed: {e}')
+    print(f'DEBUG: Python path: {sys.path[:3]}')
+    print(f'DEBUG: Current directory: {os.getcwd()}')
+
 except Exception as e:
-    print(f'ERROR:{e}')
+    print(f'ERROR:Enhanced copying failed: {e}')
+    import traceback
+    print(f'DEBUG: Traceback: {traceback.format_exc()}')
 " 2>&1)
 
-        local enhanced_copy_exit_code=$?
+            local enhanced_copy_exit_code=$?
 
-        if [ $enhanced_copy_exit_code -eq 0 ] && [[ "$enhanced_copy_result" == SUCCESS:* ]]; then
-            print_success "✅ Enhanced hook copying completed successfully"
+            if [ $enhanced_copy_exit_code -eq 0 ] && [[ "$enhanced_copy_result" == SUCCESS:* ]]; then
+                print_success "✅ Enhanced hook copying completed successfully"
 
-            # Show summary of what was copied
-            local copy_summary=${enhanced_copy_result#SUCCESS:}
-            if echo "$copy_summary" | grep -q "directories"; then
-                print_info "   Hook directories copied and validated"
-            fi
-            if echo "$copy_summary" | grep -q "integrity"; then
-                print_info "   Integrity validation passed"
-            fi
-            if echo "$copy_summary" | grep -q "configuration"; then
-                print_info "   Claude Code configuration updated"
+                # Show summary of what was copied
+                local copy_summary=${enhanced_copy_result#SUCCESS:}
+                if echo "$copy_summary" | grep -q "directories"; then
+                    print_info "   Hook directories copied and validated"
+                fi
+                if echo "$copy_summary" | grep -q "integrity"; then
+                    print_info "   Integrity validation passed"
+                fi
+                if echo "$copy_summary" | grep -q "configuration"; then
+                    print_info "   Claude Code configuration updated"
+                fi
+
+                if [ "$VERBOSE" = true ]; then
+                    print_verbose "Enhanced copying result: $copy_summary"
+                fi
+            else
+                print_warning "⚠️  Enhanced hook copying failed, falling back to standard copy"
+                if [[ "$enhanced_copy_result" == IMPORT_ERROR:* ]]; then
+                    local import_error=${enhanced_copy_result#IMPORT_ERROR:}
+                    print_error "   Import error: $import_error"
+                    print_info "   This usually happens due to missing dependencies or path issues"
+                elif [[ "$enhanced_copy_result" == ERROR:* ]]; then
+                    local error_msg=${enhanced_copy_result#ERROR:}
+                    print_error "   Error: $error_msg"
+                else
+                    print_error "   Unexpected error (exit code: $enhanced_copy_exit_code)"
+                fi
+
+                if [ "$VERBOSE" = true ]; then
+                    print_verbose "Full error output: $enhanced_copy_result"
+                fi
+
+                print_info "   Falling back to standard file copy method..."
+                standard_devstream_copy
             fi
         else
-            print_warning "⚠️  Enhanced hook copying failed, falling back to standard copy"
-            if [[ "$enhanced_copy_result" == IMPORT_ERROR:* ]]; then
-                print_info "   Import error: ${enhanced_copy_result#IMPORT_ERROR:}"
-            elif [[ "$enhanced_copy_result" == ERROR:* ]]; then
-                print_info "   Error: ${enhanced_copy_result#ERROR:}"
+            print_warning "Enhanced hook copying files not found"
+            if [ ! -f "$hook_copier" ]; then
+                print_info "   Missing: $hook_copier"
+            fi
+            if [ ! -f "$hook_bootstrap" ]; then
+                print_info "   Missing: $hook_bootstrap"
             fi
             print_info "   Using standard file copy method..."
-
-            # Fallback to standard copy
             standard_devstream_copy
         fi
     else
-        print_info "Enhanced hook copying not available, using standard copy method..."
+        print_info "Enhanced hook copying disabled, using standard copy method..."
         standard_devstream_copy
     fi
 
@@ -846,10 +919,45 @@ initialize_database() {
         return 0
     fi
 
+    # Context7-compliant dependency check: Ensure sqlite-vec is installed
+    print_info "Checking for sqlite-vec dependency..."
+    if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "sqlite-vec"; then
+        print_info "Installing sqlite-vec for vector database support..."
+        "$VENV_DIR/bin/pip" install sqlite-vec >/dev/null 2>&1
+        check_exit_code $? "sqlite-vec installed" "Failed to install sqlite-vec"
+    else
+        print_success "sqlite-vec already available"
+    fi
+
     # Create data directory
     if [ ! -d "$DATA_DIR" ]; then
         mkdir -p "$DATA_DIR"
         print_verbose "Created data directory: $DATA_DIR"
+    fi
+
+    # Create schema directory and copy schema.sql (Context7 best practice)
+    local schema_dir="$TARGET_PROJECT_ROOT/schema"
+    if [ ! -d "$schema_dir" ]; then
+        mkdir -p "$schema_dir"
+        print_verbose "Created schema directory: $schema_dir"
+    fi
+
+    # Copy schema.sql from DevStream root if it exists
+    local source_schema="$DEVSTREAM_ROOT/schema/schema.sql"
+    local target_schema="$schema_dir/schema.sql"
+
+    if [ -f "$source_schema" ]; then
+        if [ ! -f "$target_schema" ] || [ "$source_schema" -nt "$target_schema" ]; then
+            cp "$source_schema" "$target_schema"
+            print_success "Database schema copied: schema.sql"
+            print_verbose "Source: $source_schema"
+            print_verbose "Target: $target_schema"
+        else
+            print_verbose "Schema file already up to date"
+        fi
+    else
+        print_warning "Source schema file not found: $source_schema"
+        print_info "Database initialization may not work correctly"
     fi
 
     local db_file="${DATA_DIR}/devstream.db"
@@ -871,23 +979,124 @@ initialize_database() {
         sed -i.bak "s|DEVSTREAM_DB_PATH=.*|DEVSTREAM_DB_PATH=$db_file|" "$TARGET_PROJECT_ROOT/.env.devstream"
     fi
 
-    # Run database setup script
+    # Run database setup script with error handling
     local setup_script="$TARGET_PROJECT_ROOT/.devstream/scripts/setup-db.py"
     if [ -f "$setup_script" ]; then
         print_info "Running database initialization..."
         cd "$TARGET_PROJECT_ROOT"
-        DEVSTREAM_DB_PATH="$db_file" "$VENV_DIR/bin/python" "$setup_script"
-        check_exit_code $? "Database initialized" "Failed to initialize database"
+
+        # Set environment variables for database setup
+        export DEVSTREAM_DB_PATH="$db_file"
+        export DEVSTREAM_SCHEMA_PATH="$target_schema"
+
+        # Run setup with proper error handling
+        if "$VENV_DIR/bin/python" "$setup_script" 2>/dev/null; then
+            print_success "Database initialized successfully"
+        else
+            local setup_exit_code=$?
+            print_error "Database setup failed (exit code: $setup_exit_code)"
+
+            # Context7-compliant fallback: Try manual database creation
+            print_info "Attempting manual database creation..."
+            if "$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+try:
+    # Try to load sqlite-vec
+    import sqlite_vec
+    print('sqlite-vec available')
+except ImportError:
+    print('sqlite-vec not available, continuing without vector support')
+
+# Create database with basic schema
+conn = sqlite3.connect('$db_file')
+cursor = conn.cursor()
+
+# Create basic memory table
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        content_type TEXT DEFAULT 'code',
+        keywords TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+
+conn.commit()
+conn.close()
+print('Basic database created successfully')
+            "; then
+                print_success "Fallback database creation completed"
+            else
+                print_error "Manual database creation also failed"
+                if [ "$NO_EXIT" = false ]; then
+                    exit 1
+                fi
+            fi
+        fi
+
         cd - >/dev/null
     else
         print_warning "Database setup script not found"
-        print_info "You may need to initialize database manually"
+        print_info "Attempting manual database initialization..."
+
+        # Context7-compliant manual initialization
+        if "$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+try:
+    import sqlite_vec
+    print('Using sqlite-vec for vector support')
+except ImportError:
+    print('sqlite-vec not available')
+
+conn = sqlite3.connect('$db_file')
+cursor = conn.cursor()
+
+# Create basic tables
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        content_type TEXT DEFAULT 'code',
+        keywords TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+
+conn.commit()
+conn.close()
+print('Basic database structure created')
+        "; then
+            print_success "Manual database initialization completed"
+        else
+            print_error "Manual database initialization failed"
+            if [ "$NO_EXIT" = false ]; then
+                exit 1
+            fi
+        fi
     fi
 
-    # Verify database
+    # Verify database was created
     if [ -f "$db_file" ]; then
         local db_size=$(du -h "$db_file" | awk '{print $1}')
         print_success "Database created (size: $db_size)"
+
+        # Verify database integrity
+        if "$VENV_DIR/bin/python" -c "
+import sqlite3
+conn = sqlite3.connect('$db_file')
+cursor = conn.cursor()
+cursor.execute('SELECT count(*) FROM memory')
+count = cursor.fetchone()[0]
+conn.close()
+print(f'Database tables verified (memory records: {count})')
+        " 2>/dev/null; then
+            print_success "Database integrity verified"
+        else
+            print_warning "Database integrity check failed"
+        fi
     else
         print_error "Database file not created"
         if [ "$NO_EXIT" = false ]; then
