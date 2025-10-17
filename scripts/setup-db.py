@@ -194,7 +194,7 @@ def create_database_directory(db_path: Path) -> None:
 
 def load_sqlite_vec_extension(conn: sqlite3.Connection) -> bool:
     """
-    Load sqlite-vec extension (vec0) for vector search.
+    Load sqlite-vec extension for vector search using Context7-compliant method.
 
     Args:
         conn: SQLite database connection
@@ -203,33 +203,62 @@ def load_sqlite_vec_extension(conn: sqlite3.Connection) -> bool:
         True if extension loaded successfully, False otherwise
 
     Note:
+        Context7 best practice: Use sqlite_vec.load() instead of load_extension()
         Not a fatal error if extension fails to load (virtual table creation will fail later)
     """
     try:
-        conn.enable_load_extension(True)
-        # Try multiple common extension names
-        extension_names = ["vec0", "vector0", "sqlite-vec"]
+        # Context7-compliant approach: Use sqlite_vec module instead of load_extension
+        import sqlite_vec
 
-        for ext_name in extension_names:
-            try:
-                conn.load_extension(ext_name)
-                logger.info("sqlite_vec_loaded", extension=ext_name)
-                return True
-            except sqlite3.OperationalError:
-                continue
+        # Enable extension loading temporarily for Context7 approach
+        conn.enable_load_extension(True)
+
+        # Try Context7-compliant loading first
+        try:
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+
+            # Verify vec_version() function works
+            vec_version = conn.execute('select vec_version()').fetchone()[0]
+            logger.info("sqlite_vec_loaded", version=vec_version, method="Context7 sqlite_vec.load()")
+            return True
+
+        except Exception as vec_e:
+            logger.warning("sqlite_vec_context7_failed", error=str(vec_e))
+            conn.enable_load_extension(False)
+
+            # Fallback: try traditional extension loading
+            extension_names = ["vec0", "vector0", "sqlite-vec"]
+            for ext_name in extension_names:
+                try:
+                    conn.load_extension(ext_name)
+                    logger.info("sqlite_vec_loaded", extension=ext_name, method="Traditional load_extension")
+                    return True
+                except sqlite3.OperationalError:
+                    continue
 
         logger.warning(
             "sqlite_vec_not_loaded",
-            message="Vector search will not be available",
+            message="Vector search will not be available - both Context7 and traditional methods failed",
             attempted_names=extension_names,
+            context7_error=str(vec_e) if 'vec_e' in locals() else "N/A"
         )
         return False
 
+    except ImportError:
+        logger.warning("sqlite_vec_module_not_available", message="sqlite-vec package not installed")
+        return False
     except sqlite3.OperationalError as e:
         logger.warning("sqlite_vec_load_failed", error=str(e))
         return False
+    except Exception as e:
+        logger.error("sqlite_vec_unexpected_error", error=str(e))
+        return False
     finally:
-        conn.enable_load_extension(False)
+        try:
+            conn.enable_load_extension(False)
+        except:
+            pass
 
 
 def execute_schema(conn: sqlite3.Connection, schema_sql: str, vec_loaded: bool) -> None:
