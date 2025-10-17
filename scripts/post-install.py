@@ -170,26 +170,51 @@ class PostInstallConfig:
 
         # Use environment variables and relative paths (Context7 best practice)
         # This makes the configuration universal and project-agnostic
+        # New Claude Code hooks format with matchers (Context7 compliant)
         settings = {
             "hooks": {
                 "PreToolUse": [
                     {
-                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/pre_tool_use.py"'
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/pre_tool_use.py"'
+                            }
+                        ]
                     }
                 ],
                 "PostToolUse": [
                     {
-                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/post_tool_use.py"'
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/post_tool_use.py"'
+                            }
+                        ]
                     }
                 ],
                 "UserPromptSubmit": [
                     {
-                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/user_query_context_enhancer.py"'
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/user_query_context_enhancer.py"'
+                            }
+                        ]
                     }
                 ],
                 "SessionStart": [
                     {
-                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/session_start.py"'
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/session_start.py"'
+                            }
+                        ]
                     }
                 ]
             }
