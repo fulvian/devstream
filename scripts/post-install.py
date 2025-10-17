@@ -222,6 +222,64 @@ class PostInstallConfig:
 
         return settings
 
+    def copy_context7_api_key(self) -> None:
+        """
+        Copy Context7 API key from DevStream repository .env to project .env.devstream.
+
+        This ensures universal Context7 MCP configuration across all projects.
+        """
+        self.log_info("Copying Context7 API key from DevStream repository...")
+
+        # Try to find DevStream repository .env file
+        devstream_env_paths = [
+            # Check if we're in the DevStream repository itself
+            Path(__file__).resolve().parent.parent / ".env",
+            # Check common DevStream installation locations
+            Path.home() / "devstream" / ".env",
+            Path("/Users/fulvioventura/devstream/.env"),
+        ]
+
+        context7_api_key: Optional[str] = None
+
+        for env_path in devstream_env_paths:
+            if env_path.exists():
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        if line.startswith('CONTEXT7_API_KEY='):
+                            context7_api_key = line.split('=', 1)[1].strip()
+                            self.log_success(f"Found Context7 API key in {env_path}")
+                            break
+                if context7_api_key:
+                    break
+
+        if not context7_api_key:
+            self.log_warning("Context7 API key not found in DevStream repository")
+            return
+
+        # Write to project .env.devstream
+        project_env_file = self.project_root / ".env.devstream"
+
+        # Read existing content or start fresh
+        existing_content = ""
+        if project_env_file.exists():
+            with open(project_env_file, 'r') as f:
+                existing_content = f.read()
+
+        # Remove existing CONTEXT7_API_KEY line if present
+        lines = existing_content.split('\n')
+        lines = [line for line in lines if not line.startswith('CONTEXT7_API_KEY=')]
+
+        # Add the new API key
+        lines.append(f"CONTEXT7_API_KEY={context7_api_key}")
+
+        # Write back to file
+        with open(project_env_file, 'w') as f:
+            f.write('\n'.join(lines))
+            if lines and lines[-1]:  # Ensure trailing newline
+                f.write('\n')
+
+        self.log_success(f"Context7 API key copied to {project_env_file}")
+
     def configure_context7_mcp(self, settings: Dict[str, Any]) -> None:
         """
         Add Context7 MCP server to Claude Code settings.
@@ -230,10 +288,14 @@ class PostInstallConfig:
             settings: Claude Code settings dictionary
 
         Note:
-            Reads CONTEXT7_API_KEY from .env.devstream file.
+            Copies CONTEXT7_API_KEY from DevStream repository .env to project .env.devstream.
+            Reads CONTEXT7_API_KEY from .env.devstream file after copying.
             Skips configuration if API key not found.
         """
         self.log_info("Configuring Context7 MCP server...")
+
+        # First, try to copy the API key from DevStream repository
+        self.copy_context7_api_key()
 
         # Read API key from .env.devstream
         env_file = self.project_root / ".env.devstream"
