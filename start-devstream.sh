@@ -1795,14 +1795,14 @@ except Exception as e:
 }
 
 # Function to copy framework virtual environment to project (Context7 best practice)
-# Context7 pattern: atomic copy with validation and rollback
+# Context7 pattern: clean venv creation with dependency installation (avoids deadlock)
 copy_framework_venv() {
   local project_root="$1"
   local project_name="$2"
   local framework_venv="$3"
   local project_venv="$project_root/.devstream"
 
-  print_info "📋 Copying DevStream framework virtual environment..."
+  print_info "📋 Creating DevStream framework virtual environment for project..."
 
   # Validate source environment
   if ! validate_devstream_venv "$framework_venv" "Framework"; then
@@ -1816,22 +1816,40 @@ copy_framework_venv() {
     rm -rf "$project_venv"
   fi
 
-  # Perform atomic copy with error handling
-  print_info "📁 Copying framework virtual environment..."
-  if cp -R "$framework_venv" "$project_venv" 2>/dev/null; then
-    print_status "✅ Framework virtual environment copied successfully"
+  # Create new virtual environment using system Python (avoids deadlock)
+  print_info "📁 Creating new framework virtual environment..."
+  if python3.11 -m venv "$project_venv" 2>/dev/null; then
+    print_status "✅ Framework virtual environment created"
   else
-    print_error "❌ Failed to copy framework virtual environment"
+    print_error "❌ Failed to create framework virtual environment"
     return 1
   fi
 
-  # Validate copied environment
-  if validate_devstream_venv "$project_venv" "Project Framework"; then
-    print_status "✅ Copied framework environment validated"
-    print_info "   Framework venv: $project_venv"
-    print_info "   Source: $framework_venv"
+  # Install required dependencies from framework
+  print_info "📦 Installing framework dependencies..."
+  local framework_python="$framework_venv/bin/python"
+  local project_python="$project_venv/bin/python"
+
+  # Install critical dependencies only (avoid over-installation)
+  local critical_deps=("cchooks>=0.1.4" "aiohttp>=3.8.0" "structlog>=23.0.0" "python-dotenv>=1.0.0")
+
+  # Install packages in project venv
+  if "$project_python" -m pip install -q "${critical_deps[@]}" 2>/dev/null; then
+    print_status "✅ Critical framework dependencies installed"
   else
-    print_error "❌ Copied framework environment validation failed"
+    print_error "❌ Failed to install framework dependencies"
+    print_error "   Rolling back..."
+    rm -rf "$project_venv"
+    return 1
+  fi
+
+  # Validate created environment
+  if validate_devstream_venv "$project_venv" "Project Framework"; then
+    print_status "✅ Project framework environment validated"
+    print_info "   Framework venv: $project_venv"
+    print_info "   Created from: $framework_venv"
+  else
+    print_error "❌ Project framework environment validation failed"
     print_error "   Rolling back..."
     rm -rf "$project_venv"
     return 1
