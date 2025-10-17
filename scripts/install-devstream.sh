@@ -1100,19 +1100,113 @@ print('Basic database structure created')
         local db_size=$(du -h "$db_file" | awk '{print $1}')
         print_success "Database created (size: $db_size)"
 
-        # Verify database integrity
+        # Context7-compliant database integrity verification using PRAGMA commands
+        print_info "Running comprehensive database integrity checks..."
         if "$VENV_DIR/bin/python" -c "
 import sqlite3
-conn = sqlite3.connect('$db_file')
-cursor = conn.cursor()
-cursor.execute('SELECT count(*) FROM memory')
-count = cursor.fetchone()[0]
-conn.close()
-print(f'Database tables verified (memory records: {count})')
+import sys
+
+def run_integrity_check(db_path):
+    '''Context7-compliant database integrity validation using PRAGMA commands'''
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 1. Check database integrity (Context7 best practice)
+        cursor.execute('PRAGMA integrity_check')
+        integrity_result = cursor.fetchone()[0]
+        if integrity_result != 'ok':
+            print(f'INTEGRITY_ERROR: Database integrity check failed: {integrity_result}')
+            return False
+
+        # 2. Check foreign key constraints
+        cursor.execute('PRAGMA foreign_key_check')
+        fk_violations = cursor.fetchall()
+        if fk_violations:
+            print(f'FOREIGN_KEY_ERROR: Found {len(fk_violations)} foreign key violations')
+            return False
+
+        # 3. Verify schema consistency
+        cursor.execute('PRAGMA schema_version')
+        schema_version = cursor.fetchone()[0]
+
+        # 4. Check table statistics
+        cursor.execute('SELECT count(*) FROM memory')
+        memory_count = cursor.fetchone()[0]
+
+        # 5. Verify database file is not corrupted
+        cursor.execute('PRAGMA quick_check')
+        quick_check_result = cursor.fetchone()[0]
+        if quick_check_result != 'ok':
+            print(f'QUICK_CHECK_ERROR: Database quick check failed: {quick_check_result}')
+            return False
+
+        print(f'SUCCESS: Database integrity verified (schema v{schema_version}, {memory_count} records)')
+        return True
+
+    except Exception as e:
+        print(f'INTEGRITY_EXCEPTION: {e}')
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+# Run the integrity check
+if run_integrity_check('$db_file'):
+    sys.exit(0)
+else:
+    sys.exit(1)
         " 2>/dev/null; then
-            print_success "Database integrity verified"
+            print_success "✅ Database integrity verified (PRAGMA checks passed)"
         else
-            print_warning "Database integrity check failed"
+            print_warning "⚠️  Database integrity check failed - attempting repair..."
+
+            # Context7-compliant database repair attempt
+            if "$VENV_DIR/bin/python" -c "
+import sqlite3
+import sys
+
+def attempt_database_repair(db_path):
+    '''Context7-compliant database repair using VACUUM and REINDEX'''
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Attempt VACUUM to rebuild database
+        cursor.execute('VACUUM')
+
+        # Rebuild indexes
+        cursor.execute('REINDEX')
+
+        # Verify repair worked
+        cursor.execute('PRAGMA integrity_check')
+        integrity_result = cursor.fetchone()[0]
+
+        conn.close()
+
+        if integrity_result == 'ok':
+            print('REPAIR_SUCCESS: Database repair completed successfully')
+            return True
+        else:
+            print(f'REPAIR_FAILED: Integrity still compromised: {integrity_result}')
+            return False
+
+    except Exception as e:
+        print(f'REPAIR_EXCEPTION: {e}')
+        return False
+
+if attempt_database_repair('$db_file'):
+    sys.exit(0)
+else:
+    sys.exit(1)
+            " 2>/dev/null; then
+                print_success "✅ Database repaired and integrity verified"
+            else
+                print_error "❌ Database repair failed - database may be corrupted"
+                if [ "$NO_EXIT" = false ]; then
+                    exit 1
+                fi
+            fi
         fi
     else
         print_error "Database file not created"
