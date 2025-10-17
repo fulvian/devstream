@@ -27,3 +27,6 @@ copier>=9.0.0,<10.0.0
 # Hook system dependencies
 cchooks>=0.1.4
 aiohttp>=3.8.0
+
+# System monitoring and process management
+psutil>=5.9.0
