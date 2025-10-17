@@ -161,53 +161,35 @@ class PostInstallConfig:
 
     def create_settings_json(self) -> Dict[str, Any]:
         """
-        Create settings.json configuration with absolute paths.
+        Create settings.json configuration with dynamic paths using environment variables.
 
         Returns:
             Dict[str, Any]: Settings configuration dictionary
         """
-        self.log_info("Creating settings.json configuration...")
+        self.log_info("Creating settings.json configuration with dynamic paths...")
 
-        # Use ABSOLUTE paths (not $CLAUDE_PROJECT_DIR - unreliable)
-        python_path = str(self.venv_python)
-        project_path = str(self.project_root)
-
+        # Use environment variables and relative paths (Context7 best practice)
+        # This makes the configuration universal and project-agnostic
         settings = {
             "hooks": {
                 "PreToolUse": [
                     {
-                        "hooks": [
-                            {
-                                "command": f'"{python_path}" "{project_path}/.claude/hooks/devstream/memory/pre_tool_use.py"'
-                            }
-                        ]
+                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/pre_tool_use.py"'
                     }
                 ],
                 "PostToolUse": [
                     {
-                        "hooks": [
-                            {
-                                "command": f'"{python_path}" "{project_path}/.claude/hooks/devstream/memory/post_tool_use.py"'
-                            }
-                        ]
+                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/memory/post_tool_use.py"'
                     }
                 ],
                 "UserPromptSubmit": [
                     {
-                        "hooks": [
-                            {
-                                "command": f'"{python_path}" "{project_path}/.claude/hooks/devstream/context/user_query_context_enhancer.py"'
-                            }
-                        ]
+                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/user_query_context_enhancer.py"'
                     }
                 ],
                 "SessionStart": [
                     {
-                        "hooks": [
-                            {
-                                "command": f'"{python_path}" "{project_path}/.claude/hooks/devstream/context/session_start.py"'
-                            }
-                        ]
+                        "command": '"$CLAUDE_PROJECT_DIR/.devstream/bin/python" "$CLAUDE_PROJECT_DIR/.claude/hooks/devstream/context/session_start.py"'
                     }
                 ]
             }
