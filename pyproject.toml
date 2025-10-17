@@ -46,6 +46,7 @@ numpy = "^1.24.0"                    # Vector operations
 orjson = "^3.9.0"                    # Fast JSON processing
 structlog = "^23.2.0"                # Structured logging
 pybreaker = "^1.0.0"                 # Circuit breaker pattern (Context7-validated)
+copier = "^9.0.0"                    # Template-based project copying for multi-project deployment
 
 # Optional dependencies for advanced features
 sqlite-vss = {version = "^0.1.2", optional = true}  # Vector similarity search
