@@ -1542,12 +1542,13 @@ validate_existing_venv() {
   fi
 
   # Test Python functionality with timeout protection (Context7 best practice)
-  # Simplified cross-platform timeout approach
+  # Simplified cross-platform timeout approach - removed setuptools due to Python 3.11 distutils issues
   local python_test=$("$venv_path/bin/python" -c "
 import sys
 try:
     import pip
-    import setuptools
+    # setuptools removed due to Python 3.11 distutils compatibility issues on macOS
+    # DevStream doesn't require setuptools for core functionality
     print('OK')
 except ImportError as e:
     print(f'MISSING_DEPS:{e}')
