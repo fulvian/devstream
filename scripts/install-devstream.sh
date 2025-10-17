@@ -38,6 +38,7 @@ DRY_RUN=false
 NO_EXIT=false
 SKIP_OPTIONAL=false
 FORCE=false
+ENHANCED_HOOK_COPYING=false
 
 #------------------------------------------------------------------------------
 # Helper Functions
@@ -160,6 +161,11 @@ parse_args() {
                 print_warning "Force mode: Auto-accept all prompts"
                 shift
                 ;;
+            --enhanced-hook-copying)
+                ENHANCED_HOOK_COPYING=true
+                print_info "Enhanced hook copying enabled (Copier integration)"
+                shift
+                ;;
             --help|-h)
                 cat << EOF
 DevStream Universal Installation Script
@@ -167,20 +173,22 @@ DevStream Universal Installation Script
 Usage: $0 [OPTIONS]
 
 Options:
-  --existing-project    Install in existing project (preserves current code)
-  --preserve-venv      Keep existing virtual environment
-  --merge-requirements Merge existing requirements.txt with DevStream deps
-  --verbose, -v        Enable verbose output
-  --dry-run           Show what would be done without making changes
-  --no-exit          Continue on errors instead of exiting
-  --skip-optional    Skip optional steps without prompting
-  --force, -f        Auto-accept all prompts (non-interactive)
-  --help, -h         Show this help message
+  --existing-project        Install in existing project (preserves current code)
+  --preserve-venv          Keep existing virtual environment
+  --merge-requirements     Merge existing requirements.txt with DevStream deps
+  --enhanced-hook-copying  Use enhanced hook copying with Copier integration
+  --verbose, -v            Enable verbose output
+  --dry-run               Show what would be done without making changes
+  --no-exit              Continue on errors instead of exiting
+  --skip-optional        Skip optional steps without prompting
+  --force, -f            Auto-accept all prompts (non-interactive)
+  --help, -h             Show this help message
 
 Examples:
   $0                              # Standard installation
   $0 --existing-project           # Install in existing project
   $0 --existing-project --force   # Non-interactive existing project install
+  $0 --enhanced-hook-copying      # Use enhanced hook copying with Copier
   $0 --dry-run                    # Test installation without changes
 
 EOF
@@ -620,6 +628,72 @@ setup_devstream_components() {
         fi
     done
 
+    # Use enhanced hook copying if available and enabled (Context7-compliant Copier integration)
+    if [ "$ENHANCED_HOOK_COPYING" = true ] && [ -f "$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_hook_copier.py" ] && [ -f "$DEVSTREAM_ROOT/.claude/hooks/devstream/utils/multi_project_bootstrap.py" ]; then
+        print_info "Using enhanced hook copying system with Copier integration..."
+
+        local enhanced_copy_result=$("$VENV_DIR/bin/python" -c "
+import sys
+sys.path.insert(0, '$DEVSTREAM_ROOT/.claude/hooks/devstream/utils')
+
+try:
+    from multi_project_bootstrap import bootstrap_devstream_project
+
+    result = bootstrap_devstream_project(
+        target_root='$TARGET_PROJECT_ROOT',
+        source_root='$DEVSTREAM_ROOT',
+        project_name='$(basename \"$TARGET_PROJECT_ROOT\")',
+        config_file=None,
+        integrity_validation=True,
+        claude_code_config=True,
+        verbose=True
+    )
+
+    print(f'SUCCESS:{result}')
+except ImportError as e:
+    print(f'IMPORT_ERROR:{e}')
+except Exception as e:
+    print(f'ERROR:{e}')
+" 2>&1)
+
+        local enhanced_copy_exit_code=$?
+
+        if [ $enhanced_copy_exit_code -eq 0 ] && [[ "$enhanced_copy_result" == SUCCESS:* ]]; then
+            print_success "✅ Enhanced hook copying completed successfully"
+
+            # Show summary of what was copied
+            local copy_summary=${enhanced_copy_result#SUCCESS:}
+            if echo "$copy_summary" | grep -q "directories"; then
+                print_info "   Hook directories copied and validated"
+            fi
+            if echo "$copy_summary" | grep -q "integrity"; then
+                print_info "   Integrity validation passed"
+            fi
+            if echo "$copy_summary" | grep -q "configuration"; then
+                print_info "   Claude Code configuration updated"
+            fi
+        else
+            print_warning "⚠️  Enhanced hook copying failed, falling back to standard copy"
+            if [[ "$enhanced_copy_result" == IMPORT_ERROR:* ]]; then
+                print_info "   Import error: ${enhanced_copy_result#IMPORT_ERROR:}"
+            elif [[ "$enhanced_copy_result" == ERROR:* ]]; then
+                print_info "   Error: ${enhanced_copy_result#ERROR:}"
+            fi
+            print_info "   Using standard file copy method..."
+
+            # Fallback to standard copy
+            standard_devstream_copy
+        fi
+    else
+        print_info "Enhanced hook copying not available, using standard copy method..."
+        standard_devstream_copy
+    fi
+
+    print_success "DevStream components setup completed"
+}
+
+# Standard DevStream copy method (fallback)
+standard_devstream_copy() {
     # Copy DevStream components
     print_info "Installing DevStream components..."
 
@@ -661,8 +735,6 @@ setup_devstream_components() {
         cp -r "$DEVSTREAM_ROOT/scripts" "$TARGET_PROJECT_ROOT/.devstream/"
         print_success "DevStream scripts installed"
     fi
-
-    print_success "DevStream components setup completed"
 }
 
 #------------------------------------------------------------------------------

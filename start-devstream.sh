@@ -575,6 +575,11 @@ initialize_direct_db() {
   # Initialize project memory for multi-project setup (Context7 best practices)
   initialize_project_memory_bootstrap
 
+  # NEW: Enhanced hook copying integration for multi-project setup
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    initialize_enhanced_hook_copying
+  fi
+
   # NEW: Context7-compliant multi-project setup for additional robustness
   if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
     initialize_context7_multi_project_setup
@@ -2692,6 +2697,162 @@ except Exception as e:
     print_error "   Error: $bootstrap_result"
     print_warning "   You can run it manually later:"
     print_warning "   $memory_bootstrap_script $PROJECT_ROOT --mode incremental"
+    return 1
+  fi
+}
+
+# Function to initialize enhanced hook copying for multi-project setup
+# Context7 best practice: Copier-based template copying with integrity validation
+initialize_enhanced_hook_copying() {
+  # Only initialize enhanced hook copying in multi-project mode
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    return 0
+  fi
+
+  print_status "🔧 Initializing enhanced hook copying (Copier integration)..."
+
+  # Check if enhanced hook copying modules are available
+  local hook_copier="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils/multi_project_hook_copier.py"
+  local bootstrap_module="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils/multi_project_bootstrap.py"
+
+  if [ ! -f "$hook_copier" ] || [ ! -f "$bootstrap_module" ]; then
+    print_warning "⚠️  Enhanced hook copying modules not found"
+    print_info "   Expected: $hook_copier"
+    print_info "   Expected: $bootstrap_module"
+    print_info "   Skipping enhanced hook copying initialization"
+    return 0
+  fi
+
+  # Check if project already has DevStream hooks properly installed
+  local project_hooks_dir="$PROJECT_ROOT/.claude/hooks/devstream"
+  local needs_hook_copying=false
+
+  if [ ! -d "$project_hooks_dir" ]; then
+    needs_hook_copying=true
+    print_info "📝 Project hooks directory not found"
+  else
+    # Check if essential hook components exist and are up to date
+    local essential_hooks=(
+      "memory/pre_tool_use.py"
+      "memory/post_tool_use.py"
+      "context/user_query_context_enhancer.py"
+      "utils/multi_project_hook_copier.py"
+      "utils/hook_integrity_validator.py"
+    )
+
+    local missing_hooks=0
+    local outdated_hooks=0
+
+    for hook_file in "${essential_hooks[@]}"; do
+      local project_hook="$project_hooks_dir/$hook_file"
+      local framework_hook="$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/$hook_file"
+
+      if [ ! -f "$project_hook" ]; then
+        missing_hooks=$((missing_hooks + 1))
+      elif [ -f "$framework_hook" ] && [ "$framework_hook" -nt "$project_hook" ]; then
+        outdated_hooks=$((outdated_hooks + 1))
+      fi
+    done
+
+    if [ $missing_hooks -gt 0 ] || [ $outdated_hooks -gt 0 ]; then
+      needs_hook_copying=true
+      print_info "📝 Found $missing_hooks missing hooks and $outdated_hooks outdated hooks"
+    else
+      print_info "✅ All essential hooks are present and up to date"
+    fi
+  fi
+
+  if [ "$needs_hook_copying" = false ]; then
+    return 0
+  fi
+
+  # Run enhanced hook copying with Copier integration
+  print_info "🔄 Running enhanced hook copying for project: $(basename "$PROJECT_ROOT")"
+
+  local enhanced_copy_result=$("$VENV_DIR/bin/python" -c "
+import sys
+import os
+sys.path.insert(0, '$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils')
+
+try:
+    from multi_project_bootstrap import bootstrap_devstream_project
+
+    result = bootstrap_devstream_project(
+        target_root='$PROJECT_ROOT',
+        source_root='$DEVSTREAM_SCRIPT_DIR',
+        project_name='$(basename \"$PROJECT_ROOT\")',
+        config_file=None,
+        integrity_validation=True,
+        claude_code_config=True,
+        verbose=False  # Reduced verbosity for startup
+    )
+
+    print(f'SUCCESS:{result}')
+except ImportError as e:
+    print(f'IMPORT_ERROR:{e}')
+except Exception as e:
+    print(f'ERROR:{e}')
+" 2>&1)
+
+  local enhanced_copy_exit_code=$?
+
+  if [ $enhanced_copy_exit_code -eq 0 ] && [[ "$enhanced_copy_result" == SUCCESS:* ]]; then
+    print_status "✅ Enhanced hook copying completed successfully"
+
+    # Show brief summary
+    local copy_summary=${enhanced_copy_result#SUCCESS:}
+    if echo "$copy_summary" | grep -q "copied"; then
+      print_info "   Hook directories copied with Copier integration"
+    fi
+    if echo "$copy_summary" | grep -q "integrity"; then
+      print_info "   Integrity validation passed"
+    fi
+    if echo "$copy_summary" | grep -q "configuration"; then
+      print_info "   Claude Code configuration updated"
+    fi
+
+    # Run a quick validation to ensure hooks are functional
+    print_info "🔍 Validating copied hooks..."
+    local hook_validation=$("$VENV_DIR/bin/python" -c "
+import sys
+import os
+sys.path.insert(0, '$PROJECT_ROOT/.claude/hooks/devstream/utils')
+
+try:
+    from hook_integrity_validator import HookIntegrityValidator
+
+    validator = HookIntegrityValidator()
+    result = validator.validate_comprehensive('$PROJECT_ROOT/.claude/hooks/devstream')
+
+    if result.get('success', False):
+        print('OK')
+    else:
+        print(f'ISSUES:{len(result.get(\"validation_details\", {}).get(\"failed_validations\", []))}')
+except ImportError:
+    print('VALIDATOR_NOT_AVAILABLE')
+except Exception as e:
+    print(f'VALIDATION_ERROR:{e}')
+" 2>&1)
+
+    if [ "$hook_validation" = "OK" ]; then
+      print_info "   Hook validation: ✓ PASSED"
+    elif [[ "$hook_validation" == VALIDATOR_NOT_AVAILABLE:* ]]; then
+      print_info "   Hook validation: ⚠ SKIP (validator not available)"
+    elif [[ "$hook_validation" == ISSUES:* ]]; then
+      local issue_count=${hook_validation#ISSUES:}
+      print_info "   Hook validation: ⚠ $issue_count minor issues (non-critical)"
+    else
+      print_warning "   Hook validation: ❌ FAILED (${hook_validation#VALIDATION_ERROR:})"
+    fi
+
+  else
+    print_warning "⚠️  Enhanced hook copying failed"
+    if [[ "$enhanced_copy_result" == IMPORT_ERROR:* ]]; then
+      print_info "   Import error: ${enhanced_copy_result#IMPORT_ERROR:}"
+    elif [[ "$enhanced_copy_result" == ERROR:* ]]; then
+      print_info "   Error: ${enhanced_copy_result#ERROR:}"
+    fi
+    print_warning "   Project will continue with standard hook copying (if available)"
     return 1
   fi
 }
