@@ -646,7 +646,7 @@ setup_python_environment() {
 
     # Verify critical packages (Context7-compliant case-insensitive check)
     print_info "Verifying critical packages..."
-    local critical_packages=("cchooks" "aiohttp" "structlog" "python-dotenv")
+    local critical_packages=("cchooks" "aiohttp" "structlog" "python-dotenv" "psutil")
     for package in "${critical_packages[@]}"; do
         if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${package}"; then
             # Get the actual package name from pip list for version lookup
