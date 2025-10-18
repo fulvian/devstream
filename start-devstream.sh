@@ -37,17 +37,148 @@ print_feature() {
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Use project root from environment if set (multi-project mode), otherwise use script directory
+# Function to find DevStream project root using upward search
+find_devstream_project_root() {
+    local start_dir="${1:-$(pwd)}"
+    local current_dir="$start_dir"
+    local max_depth=20
+    local depth=0
+
+    # Upward search for .env.devstream marker
+    while [ "$current_dir" != "/" ] && [ $depth -lt $max_depth ]; do
+        if [ -f "$current_dir/.env.devstream" ]; then
+            # Validate complete DevStream installation
+            if [ -d "$current_dir/.claude/hooks/devstream" ] && \
+               [ -d "$current_dir/.devstream" ]; then
+                echo "$current_dir"
+                return 0
+            fi
+        fi
+
+        current_dir="$(dirname "$current_dir")"
+        depth=$((depth + 1))
+    done
+
+    return 1  # Not found
+}
+
+# Multi-project detection logic
+DEVSTREAM_INSTALLATION_ROOT="$SCRIPT_DIR"
+LOCAL_PROJECT_ROOT=""
+
+# Priority 1: Explicit project root (manual override)
 if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-  PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
-  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
-  print_info "Multi-project mode: Using project directory $PROJECT_ROOT"
-  print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+
+# Priority 2: Auto-detect from current working directory
+elif LOCAL_PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
+    export DEVSTREAM_PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
+    PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
+
+# Priority 3: Use DevStream installation as project (fallback)
 else
-  PROJECT_ROOT="$SCRIPT_DIR"
-  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
-  print_info "Single-project mode: Using DevStream directory $PROJECT_ROOT"
+    PROJECT_ROOT="$DEVSTREAM_INSTALLATION_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_warning "No DevStream project found in current directory tree"
+    print_info "Falling back to DevStream installation: $PROJECT_ROOT"
 fi
+
+print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+
+# Function to validate DevStream project installation
+validate_devstream_project() {
+    local project_root="$1"
+    local validation_failed=0
+
+    print_status "Validating DevStream project at: $project_root"
+
+    # Check required directories
+    if [ ! -d "$project_root/.claude" ]; then
+        print_error "Missing: .claude directory"
+        validation_failed=1
+    fi
+
+    if [ ! -d "$project_root/.claude/hooks/devstream" ]; then
+        print_error "Missing: .claude/hooks/devstream directory"
+        validation_failed=1
+    fi
+
+    if [ ! -d "$project_root/.devstream" ]; then
+        print_error "Missing: .devstream virtual environment"
+        validation_failed=1
+    fi
+
+    # Check required files
+    if [ ! -f "$project_root/.env.devstream" ]; then
+        print_error "Missing: .env.devstream configuration"
+        validation_failed=1
+    fi
+
+    if [ ! -f "$project_root/data/devstream.db" ]; then
+        print_warning "Missing: data/devstream.db (will be created)"
+    fi
+
+    # Check Python version in venv
+    if [ -x "$project_root/.devstream/bin/python" ]; then
+        local python_version=$("$project_root/.devstream/bin/python" --version 2>&1 | awk '{print $2}')
+        if [[ ! "$python_version" =~ ^3\.11\. ]]; then
+            print_error "Wrong Python version: $python_version (expected 3.11.x)"
+            validation_failed=1
+        fi
+    else
+        print_error "Python interpreter not found in .devstream/bin/"
+        validation_failed=1
+    fi
+
+    if [ $validation_failed -eq 1 ]; then
+        print_error ""
+        print_error "DevStream installation incomplete or corrupted"
+        print_error "Run: $DEVSTREAM_ROOT/scripts/install-devstream.sh"
+        return 1
+    fi
+
+    print_status "✅ DevStream project validation passed"
+    return 0
+}
+
+# Function to display project information
+print_project_info() {
+    local project_root="$1"
+    local project_name=$(basename "$project_root")
+    local db_size="N/A"
+
+    if [ -f "$project_root/data/devstream.db" ]; then
+        db_size=$(du -h "$project_root/data/devstream.db" | awk '{print $1}')
+    fi
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🚀 DevStream Project Detected"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "   Project Name:  $project_name"
+    echo "   Location:      $project_root"
+    echo "   Database:      data/devstream.db ($db_size)"
+    echo "   Python Venv:   .devstream/"
+    echo "   Python:        $($project_root/.devstream/bin/python --version 2>&1)"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+}
+
+# Validate the detected project
+if ! validate_devstream_project "$PROJECT_ROOT"; then
+    print_error "❌ Project validation failed"
+    exit 1
+fi
+
+# Show project information
+print_project_info "$PROJECT_ROOT"
+
 # MCP server directory (kept for compatibility but not used in Direct DB mode)
 MCP_SERVER_DIR="$DEVSTREAM_SCRIPT_DIR/mcp-devstream-server"
 VENV_DIR="$DEVSTREAM_SCRIPT_DIR/.devstream"
@@ -551,13 +682,15 @@ initialize_direct_db() {
   fi
 
   # Set environment variables for Direct DB
-  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+  if [ "$PROJECT_ROOT" != "$DEVSTREAM_SCRIPT_DIR" ]; then
     export DEVSTREAM_DB_PATH="$PROJECT_ROOT/data/devstream.db"
     export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
     print_info "Direct DB configured for project: $PROJECT_ROOT"
+    print_info "Database path: $DEVSTREAM_DB_PATH"
   else
     export DEVSTREAM_DB_PATH="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
     print_info "Direct DB configured for DevStream installation"
+    print_info "Database path: $DEVSTREAM_DB_PATH"
   fi
 
   # Initialize or validate database schema (Context7 best practice)
@@ -1903,27 +2036,43 @@ ensure_devstream_venv() {
 # Function to initialize project virtual environment (Context7 best practice)
 # Context7 pattern: smart reuse of existing environments with validation
 initialize_project_venv() {
+  # Context7 Best Practice: Robust subprocess execution with proper environment management
+  # Use local scope and explicit directory handling to prevent "Shell cwd was reset" issues
+
   # Only initialize project venv in multi-project mode
-  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+  if [ "$PROJECT_ROOT" = "$DEVSTREAM_SCRIPT_DIR" ]; then
+    print_info "ℹ️  Skipping project venv initialization in single-project mode"
     return 0
   fi
 
   print_status "🐍 Initializing project virtual environment..."
 
+  # Context7 Pattern: Preserve current working directory explicitly
+  local original_pwd="$(pwd)"
   local project_name=$(basename "$PROJECT_ROOT")
   local project_venv_path="$PROJECT_ROOT/.venv"
   local framework_python="$VENV_DIR/bin/python"
   local existing_venv=""
 
+  # Context7 Pattern: Ensure we're in the correct directory before any operations
+  cd "$PROJECT_ROOT" || {
+    print_error "❌ Cannot change to project directory: $PROJECT_ROOT"
+    return 1
+  }
+
   # Step 0: Ensure DevStream framework venv is available
   if ! ensure_devstream_venv "$PROJECT_ROOT" "$project_name"; then
     print_error "❌ Failed to ensure DevStream framework environment"
+    cd "$original_pwd"  # Context7: Always restore original directory
     return 1
   fi
 
   # Step 1: Try to detect and use existing virtual environment
-  # Context7 best practice: redirect stderr to avoid capturing debug output
-  existing_venv=$(detect_existing_venv "$PROJECT_ROOT" "$project_name" 2>/dev/null)
+  # Context7 best practice: Use subshell to avoid directory contamination
+  existing_venv=$(
+    cd "$PROJECT_ROOT" 2>/dev/null || exit 1
+    detect_existing_venv "$PROJECT_ROOT" "$project_name" 2>/dev/null
+  )
 
   if [ -n "$existing_venv" ] && [ "$existing_venv" != "$project_venv_path" ]; then
     # Found existing venv in different location, create symlink for consistency
@@ -1951,8 +2100,31 @@ initialize_project_venv() {
     # Step 2: Create new virtual environment if no valid existing one found
     print_info "📁 Creating new project virtual environment: .venv"
 
-    # Create project venv using framework Python for consistency
-    "$framework_python" -m venv "$project_venv_path"
+    # Context7 Pattern: Execute venv creation in subshell to prevent directory issues
+    # Use explicit absolute paths and capture output properly
+    local venv_creation_result
+    venv_creation_result=$(
+      # Context7: Use absolute paths and explicit error handling
+      if [ -x "$framework_python" ] && [ -d "$(dirname "$framework_python")" ]; then
+        # Change to parent directory to avoid relative path issues
+        cd "$(dirname "$PROJECT_ROOT")" || exit 1
+        "$framework_python" -m venv "$project_venv_path" 2>&1
+        echo $?
+      else
+        echo "Framework Python not found: $framework_python" >&2
+        echo 1
+      fi
+    )
+
+    # Extract exit code (last line of output)
+    local venv_exit_code=$(echo "$venv_creation_result" | tail -1)
+
+    if [ "$venv_exit_code" != "0" ]; then
+      print_warning "⚠️ Failed to create project virtual environment (non-critical)"
+      print_info "   Continuing with framework environment..."
+      cd "$original_pwd"  # Context7: Restore directory before returning
+      return 0  # Non-critical failure, don't block launcher
+    fi
 
     print_info "✅ Created new project virtual environment"
 
@@ -2056,6 +2228,12 @@ EOF
   print_info "🐍 Project venv: $project_venv_path (Python $python_version)"
   print_info "🔧 Framework venv: $PROJECT_ROOT/.devstream (Python $framework_python_version)"
   print_info "📁 Project config: .env.project"
+
+  # Context7 Pattern: Always restore original working directory
+  cd "$original_pwd" || {
+    print_warning "⚠️ Could not restore original directory: $original_pwd"
+    print_warning "   Current directory: $(pwd)"
+  }
 }
 
 # Function to initialize project templates for multi-project setup
