@@ -21,6 +21,7 @@ class Colors:
     GREEN = '\033[0;32m'
     YELLOW = '\033[1;33m'
     BLUE = '\033[0;34m'
+    CYAN = '\033[0;36m'
     NC = '\033[0m'  # No Color
 
 
@@ -82,6 +83,10 @@ class PostInstallConfig:
     def log_error(self, message: str) -> None:
         """Log error message."""
         print(f"{Colors.RED}[✗]{Colors.NC} {message}", file=sys.stderr)
+
+    def log_verbose(self, message: str) -> None:
+        """Log verbose message."""
+        print(f"{Colors.CYAN}[VERBOSE]{Colors.NC} {message}")
 
     def backup_existing_settings(self) -> Optional[Path]:
         """
