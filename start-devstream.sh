@@ -146,32 +146,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Get framework location (where DevStream is installed)
 DEVSTREAM_FRAMEWORK_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Priority 1: Explicit project root (manual override)
-if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
-    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
-
-# Priority 2: Auto-detect from current working directory
-elif PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
-    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
-    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
-
-# Priority 3: Error - not in DevStream project
-else
-    print_error "❌ No DevStream project found"
-    print_error "   Searched from: $(pwd)"
-    print_error "   Looking for:   .env.devstream marker file"
-    print_error ""
-    print_error "Solutions:"
-    print_error "   1. cd to DevStream project directory first"
-    print_error "   2. Run install-devstream.sh in current directory"
-    print_error "   3. Set DEVSTREAM_PROJECT_ROOT=/path/to/project"
-    exit 1
-fi
-
 # Set framework script directory
 DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
-print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
 # MCP server directory (kept for compatibility but not used in Direct DB mode)
 MCP_SERVER_DIR="$DEVSTREAM_SCRIPT_DIR/mcp-devstream-server"
 VENV_DIR="$DEVSTREAM_SCRIPT_DIR/.devstream"
@@ -1474,7 +1450,7 @@ start_claude_with_devstream() {
     exec "$DEVSTREAM_SCRIPT_DIR/scripts/start-claude-zai.sh"
   else
     # Default Claude Code launch for Anthropic provider
-    claude
+    exec claude
   fi
 }
 
@@ -2981,6 +2957,46 @@ except Exception as e:
   fi
 }
 
+# Function to initialize project environment (Context7 best practices)
+initialize_project_environment() {
+  print_status "Initializing DevStream project environment..."
+
+  # Priority 1: Explicit project root (manual override)
+  if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+
+  # Priority 2: Auto-detect from current working directory
+  elif PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
+    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
+
+  # Priority 3: Error - not in DevStream project
+  else
+    print_error "❌ No DevStream project found"
+    print_error "   Searched from: $(pwd)"
+    print_error "   Looking for:   .env.devstream marker file"
+    print_error ""
+    print_error "Solutions:"
+    print_error "   1. cd to DevStream project directory first"
+    print_error "   2. Run install-devstream.sh in current directory"
+    print_error "   3. Set DEVSTREAM_PROJECT_ROOT=/path/to/project"
+    return 1
+  fi
+
+  # Validate the detected project
+  if ! validate_devstream_project "$PROJECT_ROOT"; then
+    print_error "❌ DevStream project validation failed"
+    return 1
+  fi
+
+  # Set global variables (Context7 pattern: centralize variable setup)
+  print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+
+  print_status "✅ Project environment initialized successfully"
+  return 0
+}
+
 # Main function
 main() {
   echo ""
@@ -2993,8 +3009,14 @@ main() {
   local provider="${2:-anthropic}"
 
   case "$command" in
-    start)
-      # Load LLM provider configuration FIRST
+    start|codex)
+      # Initialize project detection and validation FIRST (Context7 pattern)
+      initialize_project_environment || exit 1
+
+      # Show project information
+      print_project_info "$PROJECT_ROOT"
+
+      # Load LLM provider configuration
       load_llm_provider "$provider"
 
       # Check Python virtual environment
@@ -3050,6 +3072,8 @@ main() {
       ;;
 
     status)
+      # Initialize project environment for status command
+      initialize_project_environment || exit 1
       load_devstream_config
       show_direct_db_status
       show_agent_status
