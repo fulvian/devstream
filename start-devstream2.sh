@@ -37,6 +37,56 @@ print_feature() {
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Capture invocation directory for path normalization (Context7 best practice)
+INVOCATION_DIR="$(pwd -P 2>/dev/null || pwd)"
+
+# Resolve a candidate directory to an absolute canonical path
+resolve_absolute_dir() {
+  local candidate="$1"
+  local base_dir="${2:-$INVOCATION_DIR}"
+  local expanded="$candidate"
+
+  if [ -z "$expanded" ]; then
+    return 1
+  fi
+
+  # Expand leading tilde if present
+  if [[ "$expanded" == "~"* ]]; then
+    expanded="${expanded/#\~/$HOME}"
+  fi
+
+  (
+    if [[ "$expanded" == /* ]]; then
+      cd "$expanded" 2>/dev/null || exit 1
+    else
+      cd "$base_dir" 2>/dev/null || exit 1
+      cd "$expanded" 2>/dev/null || exit 1
+    fi
+    pwd -P
+  )
+}
+
+# Normalize project root to absolute path (fails if directory is invalid)
+normalize_project_root() {
+  local candidate="$1"
+  local resolved=""
+
+  if [ -z "$candidate" ]; then
+    return 1
+  fi
+
+  if ! resolved=$(resolve_absolute_dir "$candidate"); then
+    return 1
+  fi
+
+  if [ -z "$resolved" ] || [ ! -d "$resolved" ]; then
+    return 1
+  fi
+
+  echo "$resolved"
+  return 0
+}
+
 # Function to find DevStream project root using upward search
 find_devstream_project_root() {
     local start_dir="${1:-$(pwd)}"
@@ -64,27 +114,54 @@ find_devstream_project_root() {
 
 # Multi-project detection logic
 DEVSTREAM_INSTALLATION_ROOT="$SCRIPT_DIR"
+DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
 LOCAL_PROJECT_ROOT=""
+PROJECT_ROOT=""
 
 # Priority 1: Explicit project root (manual override)
 if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
-    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
-    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+  local_explicit_root="$DEVSTREAM_PROJECT_ROOT"
+  if explicit_root=$(normalize_project_root "$local_explicit_root"); then
+    PROJECT_ROOT="$explicit_root"
+    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+    if [ "$PROJECT_ROOT" != "$local_explicit_root" ]; then
+      print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+      print_warning "DEVSTREAM_PROJECT_ROOT normalized from '$local_explicit_root'"
+    else
+      print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+    fi
+  else
+    print_warning "Ignoring invalid DEVSTREAM_PROJECT_ROOT: $local_explicit_root"
+    unset DEVSTREAM_PROJECT_ROOT
+  fi
+fi
 
-# Priority 2: Auto-detect from current working directory
-elif LOCAL_PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
-    export DEVSTREAM_PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
-    PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
-    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
-    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
+# Priority 2: Auto-detect from invocation directory
+if [ -z "$PROJECT_ROOT" ]; then
+  if LOCAL_PROJECT_ROOT=$(find_devstream_project_root "$INVOCATION_DIR"); then
+    if auto_root=$(normalize_project_root "$LOCAL_PROJECT_ROOT"); then
+      PROJECT_ROOT="$auto_root"
+      export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+      print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
+    else
+      print_error "Auto-detected project root is invalid: $LOCAL_PROJECT_ROOT"
+      exit 1
+    fi
+  fi
+fi
 
 # Priority 3: Use DevStream installation as project (fallback)
-else
-    PROJECT_ROOT="$DEVSTREAM_INSTALLATION_ROOT"
-    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
-    print_warning "No DevStream project found in current directory tree"
-    print_info "Falling back to DevStream installation: $PROJECT_ROOT"
+if [ -z "$PROJECT_ROOT" ]; then
+  PROJECT_ROOT="$DEVSTREAM_INSTALLATION_ROOT"
+  print_warning "No DevStream project found in current directory tree"
+  print_info "Falling back to DevStream installation: $PROJECT_ROOT"
+fi
+
+# Final guard: ensure project root is absolute (Context7 reliability requirement)
+if [[ "$PROJECT_ROOT" != /* ]]; then
+  print_error "DevStream project root must be an absolute path (got: $PROJECT_ROOT)"
+  print_error "Unset DEVSTREAM_PROJECT_ROOT or provide an absolute path."
+  exit 1
 fi
 
 print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
@@ -1409,6 +1486,7 @@ prepare_codex_runtime() {
 }
 
 # Function to start Claude Code with DevStream
+# Context7-compliant: Robust error handling + directory management + process control
 start_claude_with_devstream() {
   print_status "🚀 Starting Claude Code with DevStream..."
   echo ""
@@ -1473,18 +1551,120 @@ start_claude_with_devstream() {
   print_status "Starting Claude Code..."
   echo ""
 
-  # Start Claude Code in the project directory
-  cd "$PROJECT_ROOT"
+  # =========================================================================
+  # CRITICAL FIX: Robust directory management and error handling
+  # Context7 best practice: Validate before execute, clear error messages
+  # =========================================================================
 
-  # Check if z.ai provider is selected and use dedicated script
-  if [ "$active_provider" = "z.ai" ]; then
-    print_info "🔄 Launching Claude Code with GLM-4.6 via dedicated script..."
-    # Use the dedicated z.ai script from DevStream installation
-    exec "$DEVSTREAM_SCRIPT_DIR/scripts/start-claude-zai.sh"
-  else
-    # Default Claude Code launch for Anthropic provider
-    claude
+  # Step 1: Validate project directory exists
+  if [ ! -d "$PROJECT_ROOT" ]; then
+    print_error "❌ Project directory not found: $PROJECT_ROOT"
+    print_error "   Expected directory does not exist"
+    print_error ""
+    print_error "   Troubleshooting:"
+    print_error "   1. Verify project path is correct"
+    print_error "   2. Check if project was moved or deleted"
+    print_error "   3. Re-run DevStream installation if needed"
+    exit 1
   fi
+
+  # Step 2: Show current state before changing directory
+  local launcher_cwd="$(pwd)"
+  print_info "🔍 Pre-launch validation:"
+  print_info "   Launcher directory: $launcher_cwd"
+  print_info "   Project directory:  $PROJECT_ROOT"
+  print_info "   Database path:      $DEVSTREAM_DB_PATH"
+  echo ""
+
+  # Step 3: Verify Claude Code command is available
+  if ! command -v claude >/dev/null 2>&1; then
+    print_error "❌ Claude Code command not found in PATH"
+    print_error "   The 'claude' command is not available"
+    print_error ""
+    print_error "   Troubleshooting:"
+    print_error "   1. Install Claude Code: brew install claude"
+    print_error "   2. Verify PATH includes: /opt/homebrew/bin"
+    print_error "   3. Run: which claude"
+    exit 1
+  fi
+
+  # Step 4: Validate database exists (warning only, non-blocking)
+  if [ ! -f "$DEVSTREAM_DB_PATH" ]; then
+    print_warning "⚠️  Database not found: $DEVSTREAM_DB_PATH"
+    print_warning "   DevStream will create it on first use"
+  else
+    local db_size=$(stat -f%z "$DEVSTREAM_DB_PATH" 2>/dev/null || stat -c%s "$DEVSTREAM_DB_PATH" 2>/dev/null || echo "unknown")
+    if [ "$db_size" != "unknown" ]; then
+      print_info "   Database verified: $(numfmt --to=iec $db_size 2>/dev/null || echo $db_size bytes)"
+    fi
+  fi
+
+  # Step 5: Change to project directory with robust error handling
+  print_status "📁 Changing to project directory..."
+
+  if ! cd "$PROJECT_ROOT" 2>/dev/null; then
+    print_error "❌ Failed to change to project directory"
+    print_error "   Target: $PROJECT_ROOT"
+    print_error "   Current: $(pwd)"
+    print_error ""
+    print_error "   Possible causes:"
+    print_error "   1. Directory permissions issue"
+    print_error "   2. Directory was deleted or moved"
+    print_error "   3. Filesystem mount issue"
+    print_error ""
+    print_error "   Try: ls -ld \"$PROJECT_ROOT\""
+    exit 1
+  fi
+
+  # Step 6: Verify we're in the correct directory
+  local actual_cwd="$(pwd)"
+  if [ "$actual_cwd" != "$PROJECT_ROOT" ]; then
+    print_error "❌ Directory change verification failed"
+    print_error "   Expected: $PROJECT_ROOT"
+    print_error "   Actual:   $actual_cwd"
+    print_error ""
+    print_error "   This indicates a serious filesystem or shell issue"
+    exit 1
+  fi
+
+  print_status "✅ Working directory set: $actual_cwd"
+  echo ""
+
+  # Step 7: Display final environment summary
+  print_feature "🚀 Launching Claude Code with DevStream"
+  print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  print_info "  Project:   $(basename "$PROJECT_ROOT")"
+  print_info "  Directory: $PROJECT_ROOT"
+  print_info "  Provider:  $active_provider"
+  print_info "  Database:  $DEVSTREAM_DB_PATH"
+  print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # Step 8: Launch Claude Code with process substitution
+  # Context7 pattern: Use exec to replace launcher process with Claude Code
+  if [ "$active_provider" = "z.ai" ]; then
+    print_info "🔄 Starting Claude Code with GLM-4.6 via z.ai script..."
+
+    # Verify z.ai script exists
+    local zai_script="$DEVSTREAM_SCRIPT_DIR/scripts/start-claude-zai.sh"
+    if [ ! -f "$zai_script" ]; then
+      print_error "❌ z.ai launcher script not found: $zai_script"
+      exit 1
+    fi
+
+    # exec replaces current process with z.ai script
+    exec "$zai_script"
+  else
+    print_info "🚀 Starting Claude Code with Anthropic provider..."
+
+    # exec replaces current process with Claude Code
+    exec claude
+  fi
+
+  # UNREACHABLE: exec replaces the process
+  print_error "❌ CRITICAL: Failed to launch Claude Code"
+  print_error "   exec command failed unexpectedly"
+  exit 1
 }
 
 # Function to start background monitors
@@ -2069,10 +2249,25 @@ initialize_project_venv() {
 
   # Step 1: Try to detect and use existing virtual environment
   # Context7 best practice: Use subshell to avoid directory contamination
+  local detect_status=0
+  set +e
   existing_venv=$(
-    cd "$PROJECT_ROOT" 2>/dev/null || exit 1
+    cd "$PROJECT_ROOT" 2>/dev/null || exit 2
     detect_existing_venv "$PROJECT_ROOT" "$project_name" 2>/dev/null
   )
+  detect_status=$?
+  set -e
+
+  if [ $detect_status -eq 2 ]; then
+    print_error "❌ Failed to access project directory during venv detection"
+    print_error "   Directory: $PROJECT_ROOT"
+    cd "$original_pwd"
+    return 1
+  fi
+
+  if [ $detect_status -ne 0 ]; then
+    existing_venv=""
+  fi
 
   if [ -n "$existing_venv" ] && [ "$existing_venv" != "$project_venv_path" ]; then
     # Found existing venv in different location, create symlink for consistency
@@ -2229,11 +2424,30 @@ EOF
   print_info "🔧 Framework venv: $PROJECT_ROOT/.devstream (Python $framework_python_version)"
   print_info "📁 Project config: .env.project"
 
-  # Context7 Pattern: Always restore original working directory
-  cd "$original_pwd" || {
-    print_warning "⚠️ Could not restore original directory: $original_pwd"
-    print_warning "   Current directory: $(pwd)"
-  }
+  # Context7 Pattern: Restore working directory for multi-project isolation
+  # EXCEPTION: In multi-project mode, we want to STAY in project directory
+  # so that subsequent operations (like starting Claude Code) work correctly
+  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
+    # Single-project mode: restore to DevStream installation directory
+    cd "$original_pwd" || {
+      print_warning "⚠️ Could not restore original directory: $original_pwd"
+      print_warning "   Current directory: $(pwd)"
+    }
+  else
+    # Multi-project mode: verify we're in project directory
+    local current_dir="$(pwd)"
+    if [ "$current_dir" != "$PROJECT_ROOT" ]; then
+      print_warning "⚠️ Not in expected project directory"
+      print_warning "   Expected: $PROJECT_ROOT"
+      print_warning "   Current:  $current_dir"
+      print_warning "   Correcting..."
+      cd "$PROJECT_ROOT" || {
+        print_error "❌ Failed to correct directory"
+        exit 1
+      }
+    fi
+    print_info "✅ Verified project directory: $(pwd)"
+  fi
 }
 
 # Function to initialize project templates for multi-project setup
@@ -3048,6 +3262,10 @@ main() {
 
   case "$command" in
     start)
+      # Context7 best practice: Auto-confirm for non-interactive launcher execution
+      # Skip interactive prompts when starting Claude Code (safe operations only)
+      export DEVSTREAM_AUTO_CONFIRM_CLAUDE_MD=true
+
       # Load LLM provider configuration FIRST
       load_llm_provider "$provider"
 
