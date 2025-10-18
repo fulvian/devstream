@@ -34,20 +34,144 @@ print_feature() {
   echo -e "${CYAN}[FEATURE]${NC} $1"
 }
 
+# Function to find DevStream project root using upward search
+find_devstream_project_root() {
+    local start_dir="${1:-$(pwd)}"
+    local current_dir="$start_dir"
+    local max_depth=20
+    local depth=0
+
+    # Upward search for .env.devstream marker
+    while [ "$current_dir" != "/" ] && [ $depth -lt $max_depth ]; do
+        if [ -f "$current_dir/.env.devstream" ]; then
+            # Validate complete DevStream installation
+            if [ -d "$current_dir/.claude/hooks/devstream" ] && \
+               [ -d "$current_dir/.devstream" ]; then
+                echo "$current_dir"
+                return 0
+            fi
+        fi
+
+        current_dir="$(dirname "$current_dir")"
+        depth=$((depth + 1))
+    done
+
+    return 1  # Not found
+}
+
+# Function to validate DevStream project installation
+validate_devstream_project() {
+    local project_root="$1"
+    local validation_failed=0
+
+    print_status "Validating DevStream project at: $project_root"
+
+    # Check required directories
+    if [ ! -d "$project_root/.claude" ]; then
+        print_error "Missing: .claude directory"
+        validation_failed=1
+    fi
+
+    if [ ! -d "$project_root/.claude/hooks/devstream" ]; then
+        print_error "Missing: .claude/hooks/devstream directory"
+        validation_failed=1
+    fi
+
+    if [ ! -d "$project_root/.devstream" ]; then
+        print_error "Missing: .devstream virtual environment"
+        validation_failed=1
+    fi
+
+    # Check required files
+    if [ ! -f "$project_root/.env.devstream" ]; then
+        print_error "Missing: .env.devstream configuration"
+        validation_failed=1
+    fi
+
+    if [ ! -f "$project_root/data/devstream.db" ]; then
+        print_warning "Missing: data/devstream.db (will be created)"
+    fi
+
+    # Check Python version in venv
+    if [ -x "$project_root/.devstream/bin/python" ]; then
+        local python_version=$("$project_root/.devstream/bin/python" --version 2>&1 | awk '{print $2}')
+        if [[ ! "$python_version" =~ ^3\.11\. ]]; then
+            print_error "Wrong Python version: $python_version (expected 3.11.x)"
+            validation_failed=1
+        fi
+    else
+        print_error "Python interpreter not found in .devstream/bin/"
+        validation_failed=1
+    fi
+
+    if [ $validation_failed -eq 1 ]; then
+        print_error ""
+        print_error "DevStream installation incomplete or corrupted"
+        print_error "Run: $DEVSTREAM_FRAMEWORK_ROOT/scripts/install-devstream.sh"
+        return 1
+    fi
+
+    print_status "✅ DevStream project validation passed"
+    return 0
+}
+
+# Function to display project information
+print_project_info() {
+    local project_root="$1"
+    local project_name=$(basename "$project_root")
+    local db_size="N/A"
+
+    if [ -f "$project_root/data/devstream.db" ]; then
+        db_size=$(du -h "$project_root/data/devstream.db" | awk '{print $1}')
+    fi
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🚀 DevStream Project Detected"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "   Project Name:  $project_name"
+    echo "   Location:      $project_root"
+    echo "   Database:      data/devstream.db ($db_size)"
+    echo "   Python Venv:   .devstream/"
+    echo "   Python:        $($project_root/.devstream/bin/python --version 2>&1)"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+}
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Use project root from environment if set (multi-project mode), otherwise use script directory
+# Get framework location (where DevStream is installed)
+DEVSTREAM_FRAMEWORK_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Priority 1: Explicit project root (manual override)
 if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-  PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
-  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
-  print_info "Multi-project mode: Using project directory $PROJECT_ROOT"
-  print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
+    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
+
+# Priority 2: Auto-detect from current working directory
+elif PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
+    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
+    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
+
+# Priority 3: Error - not in DevStream project
 else
-  PROJECT_ROOT="$SCRIPT_DIR"
-  DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
-  print_info "Single-project mode: Using DevStream directory $PROJECT_ROOT"
+    print_error "❌ No DevStream project found"
+    print_error "   Searched from: $(pwd)"
+    print_error "   Looking for:   .env.devstream marker file"
+    print_error ""
+    print_error "Solutions:"
+    print_error "   1. cd to DevStream project directory first"
+    print_error "   2. Run install-devstream.sh in current directory"
+    print_error "   3. Set DEVSTREAM_PROJECT_ROOT=/path/to/project"
+    exit 1
 fi
+
+# Set framework script directory
+DEVSTREAM_SCRIPT_DIR="$SCRIPT_DIR"
+print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
 # MCP server directory (kept for compatibility but not used in Direct DB mode)
 MCP_SERVER_DIR="$DEVSTREAM_SCRIPT_DIR/mcp-devstream-server"
 VENV_DIR="$DEVSTREAM_SCRIPT_DIR/.devstream"

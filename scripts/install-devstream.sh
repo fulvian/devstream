@@ -945,9 +945,23 @@ standard_devstream_copy() {
     # Copy DevStream components
     print_info "Installing DevStream components..."
 
-    # Copy hooks
+    # Copy hooks (exclude venv directories and cache files)
     if [ -d "$DEVSTREAM_ROOT/.claude/hooks" ]; then
-        cp -r "$DEVSTREAM_ROOT/.claude/hooks/"* "$TARGET_PROJECT_ROOT/.claude/hooks/"
+        # Use rsync with exclusions to prevent copying venv directories
+        if command -v rsync >/dev/null 2>&1; then
+            rsync -av \
+                --exclude '.devstream/' \
+                --exclude '__pycache__/' \
+                --exclude '*.pyc' \
+                "$DEVSTREAM_ROOT/.claude/hooks/"* "$TARGET_PROJECT_ROOT/.claude/hooks/"
+        else
+            # Fallback to find + cp if rsync not available
+            find "$DEVSTREAM_ROOT/.claude/hooks" -type f \
+                ! -path "*/.devstream/*" \
+                ! -path "*/__pycache__/*" \
+                ! -name "*.pyc" \
+                -exec cp --parents {} "$TARGET_PROJECT_ROOT/" \;
+        fi
         print_success "DevStream hooks installed"
     fi
 
