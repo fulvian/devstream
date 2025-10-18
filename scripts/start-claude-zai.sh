@@ -167,12 +167,6 @@ fi
 
 print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
 
-# Validate detected project
-validate_devstream_project "$PROJECT_ROOT"
-
-# Display project information
-print_project_info "$PROJECT_ROOT"
-
 # Function to validate required environment variables
 validate_environment() {
   print_status "Validating Z.AI environment..."
@@ -327,6 +321,10 @@ main() {
   setup_zai_environment
   launch_claude_code
 }
+
+# Initialization logic (moved here to ensure functions are defined first)
+validate_devstream_project "$PROJECT_ROOT"
+print_project_info "$PROJECT_ROOT"
 
 # Handle script execution
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
