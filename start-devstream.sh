@@ -1480,10 +1480,29 @@ start_claude_with_devstream() {
   if [ "$active_provider" = "z.ai" ]; then
     print_info "🔄 Launching Claude Code with GLM-4.6 via dedicated script..."
     # Use the dedicated z.ai script from DevStream installation
+    # Context7 Pattern: Use exec to replace shell process and ensure proper environment inheritance
     exec "$DEVSTREAM_SCRIPT_DIR/scripts/start-claude-zai.sh"
   else
     # Default Claude Code launch for Anthropic provider
-    claude
+    # Context7 Pattern: Use exec to replace shell process and prevent blocking
+    # Ensure environment variables are properly passed to Claude Code
+    print_info "🔄 Launching Claude Code with Anthropic provider..."
+
+    # Context7 Best Practice: Execute Claude with proper environment handling
+    # Use exec to replace the current shell process with Claude Code
+    # This prevents the launcher script from hanging and ensures clean process replacement
+    if command -v claude >/dev/null 2>&1; then
+      # Context7: Ensure all DevStream environment variables are available to Claude
+      export VIRTUAL_ENV PATH PYTHONPATH DEVSTREAM_DB_PATH DEVSTREAM_PROJECT_ROOT
+
+      # Context7 Pattern: Use exec for clean process replacement
+      exec claude
+    else
+      print_error "❌ Claude Code not found in PATH"
+      print_info "   Please install Claude Code: https://claude.ai/download"
+      print_info "   Or ensure it's available in your PATH"
+      exit 1
+    fi
   fi
 }
 
