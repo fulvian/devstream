@@ -13,6 +13,7 @@ import sys
 import os
 import sqlite3
 import argparse
+import subprocess
 from pathlib import Path
 
 def create_sessions_table(db_path: str) -> bool:
@@ -119,8 +120,14 @@ def initialize_database(db_path: str) -> bool:
     schema_info = check_database_schema(db_path)
 
     if not schema_info['exists']:
-        print(f"❌ Database does not exist: {schema_info.get('error', 'Unknown error')}")
-        return False
+        print("ℹ️  Database not found, attempting to create it with setup-db.py")
+        if not run_setup_db(Path(db_path)):
+            print("❌ Unable to create database via setup-db.py")
+            return False
+        schema_info = check_database_schema(db_path)
+        if not schema_info['exists']:
+            print("❌ Database still unavailable after setup")
+            return False
 
     print(f"📊 Current tables: {', '.join(schema_info['tables'])}")
 
@@ -148,13 +155,60 @@ def initialize_database(db_path: str) -> bool:
     missing_critical = [t for t in expected_tables if t not in final_schema['tables']]
 
     if missing_critical:
-        print(f"❌ Missing critical tables: {', '.join(missing_critical)}")
-        success = False
+        print(f"⚠️  Missing critical tables detected: {', '.join(missing_critical)}")
+        print("ℹ️  Running setup-db.py to apply full schema...")
+        if not run_setup_db(Path(db_path), force=True):
+            print("❌ Unable to apply full schema with setup-db.py")
+            success = False
+        else:
+            final_schema = check_database_schema(db_path)
+            missing_critical = [t for t in expected_tables if t not in final_schema['tables']]
+            if missing_critical:
+                print(f"❌ Still missing tables after setup: {', '.join(missing_critical)}")
+                success = False
+            else:
+                print("✅ All critical tables present after schema update")
     else:
         print("✅ All critical tables present")
         print(f"📋 Final schema: {', '.join(final_schema['tables'])}")
 
     return success
+
+
+def run_setup_db(db_path: Path, force: bool = False) -> bool:
+    """
+    Attempt to run setup-db.py to create or update the database schema.
+
+    Args:
+        db_path: Target database path
+        force: Whether to force overwrite prompts
+
+    Returns:
+        True if setup completed successfully, False otherwise.
+    """
+    setup_candidates = [
+        Path(__file__).resolve().parent / "setup-db.py",
+        Path.cwd() / ".devstream" / "scripts" / "setup-db.py"
+    ]
+
+    for candidate in setup_candidates:
+        if candidate.exists():
+            cmd = [sys.executable, str(candidate), "--db-path", str(db_path)]
+            schema_file = Path(db_path).parent.parent / "schema" / "schema.sql"
+            if schema_file.exists():
+                cmd.extend(["--schema-file", str(schema_file)])
+            if force:
+                cmd.append("--force")
+            try:
+                result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+                if result.returncode == 0:
+                    return True
+                else:
+                    print(result.stdout)
+                    print(result.stderr, file=sys.stderr)
+            except OSError as e:
+                print(f"⚠️  Failed to execute {candidate}: {e}")
+    return False
 
 def main():
     """Main initialization function."""

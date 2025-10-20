@@ -34,6 +34,12 @@ cd /path/to/existing-project
 # Avvio sessione
 export DEVSTREAM_PROJECT_ROOT="$(pwd)"
 /Users/fulvioventura/devstream/start-devstream.sh start anthropic
+
+# Verifica DB puntando al progetto
+env | grep DEVSTREAM_DB_PATH
+
+# I protocolli DevStream copiati in locale sono disponibili in sessions/protocols/
+ls sessions/protocols
 ```
 
 ### Avvio Sessione DevStream System

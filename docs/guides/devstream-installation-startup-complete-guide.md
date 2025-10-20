@@ -151,15 +151,23 @@ git status
 
 **Cosa succede automaticamente:**
 - ✅ **Preserve Existing Code**: Mantiene tutto il codice esistente intatto
-- ✅ **Merge Requirements**: Unisce requirements.txt esistenti con dipendenze DevStream
+- ✅ **Merge Requirements**: Unisce requirements.txt esistenti con dipendenze DevStream (con backup automatico)
 - ✅ **Enhanced Hook Copying**: Installa hook DevStream con validazione integrità
 - ✅ **Project Type Detection**: Rileva automaticamente Python/TS/Go/Rust/Java
-- ✅ **Codebase Scanning**: Analizza automaticamente TUTTI i file del progetto
-- ✅ **Memory Database Population**: Indicizza il codebase nel database vettoriale
+- ✅ **Codebase Scanning Smart**: Seleziona automaticamente le directory principali (src/, app/, frontend/, …) e salva la configurazione in `.env.devstream`
+- ✅ **Protocol Copying**: Copia in progetto i protocolli `sessions/protocols/*.md` per mantenere la documentazione locale
+- ✅ **Memory Database Population**: Indicizza il codebase nel database vettoriale (solo se non già popolato)
 - ✅ **CLAUDE.md Generation**: Crea protocollo DevStream specifico per il progetto
-- ✅ **Virtual Environment**: Crea .devstream/ venv se non esiste
+- ✅ **Virtual Environment**: Crea `.devstream/` venv se non esiste
 
-#### Step 3: Verifica Popolamento Database
+#### Step 3: Gestione database esistente
+Quando nel progetto è già presente `data/devstream.db`:
+- Lo script segnala la presenza del DB e chiede se mantenerlo o ricrearlo.
+- In caso di **mantenimento**, viene applicato lo schema aggiornato (senza distruggere i dati).
+- In caso di **ricreazione**, il DB viene rigenerato e il bootstrap di memoria riparte da zero.
+- È sempre possibile cambiare idea più tardi con `make db-reset` o `python scripts/init-project-db.py`.
+
+#### Step 4: Verifica Popolamento Database
 ```bash
 # Verifica che il database sia stato popolato
 ls -la data/devstream.db
@@ -172,9 +180,13 @@ print(f'Found {len(result[\"results\"])} indexed items')
 
 # Output atteso:
 # Found 15 indexed items (o simile)
+ 
+# Verifica che la variabile d'ambiente punti al DB di progetto
+env | grep DEVSTREAM_DB_PATH
+# -> DEVSTREAM_DB_PATH=/path/to/project/data/devstream.db
 ```
 
-#### Step 4: Avvio Sessione
+#### Step 5: Avvio Sessione
 ```bash
 # Imposta il progetto corrente
 export DEVSTREAM_PROJECT_ROOT="$(pwd)"
@@ -188,7 +200,8 @@ export DEVSTREAM_PROJECT_ROOT="$(pwd)"
 **Vantaggi del progetto esistente con DevStream:**
 - 🧠 **Context Immediately Available**: Il codebase è già indicizzato e disponibile
 - 🎯 **Project-Aware Protocol**: CLAUDE.md contiene comandi specifici per il tuo progetto
-- 📊 **Smart Memory**: Ricerca semantica funziona subito sul tuo codice
+- 📊 **Smart Memory**: Ricerca semantica funziona subito sul tuo codice (o riparte da zero se hai scelto il reset)
+- 📚 **Protocolli Locali**: I file `sessions/protocols/*.md` sono copiati nel progetto e sempre aggiornati
 - 🔧 **Enhanced Features**: Hook system con validazione e Copier integration
 
 ---
@@ -268,6 +281,8 @@ cd /path/to/your-project
 ```
 
 **Use case:** Sviluppo su progetti esterni con DevStream integration
+
+> ℹ️ `start-devstream.sh` copia automaticamente i protocolli in `sessions/protocols`, esporta `DEVSTREAM_DB_PATH` e aggiorna `PYTHONPATH` con gli hook condivisi. Non è più necessario eseguire passaggi manuali dopo l’avvio.
 
 ### 3. Avvio Multi-Project Mode
 

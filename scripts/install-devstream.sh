@@ -200,6 +200,121 @@ prompt_continue() {
 }
 
 #------------------------------------------------------------------------------
+# Helper: Compute smart codebase scan directories
+#------------------------------------------------------------------------------
+
+compute_codebase_scan_dirs() {
+    local project_root="$1"
+    local max_dirs="${2:-10}"
+    local max_depth="${3:-3}"
+    local -a result=()
+
+    add_scan_dir() {
+        local dir_path="$1"
+        [ -z "$dir_path" ] && return
+        dir_path="${dir_path%/}"
+        if [ "$dir_path" = "$project_root" ]; then
+            dir_path="."
+        else
+            dir_path="${dir_path#$project_root/}"
+            dir_path="${dir_path#./}"
+        fi
+        [ -z "$dir_path" ] && dir_path="."
+        if [ "$dir_path" != "." ]; then
+            dir_path="${dir_path%/}"
+        fi
+
+        local existing
+        for existing in "${result[@]}"; do
+            if [ "$existing" = "$dir_path" ]; then
+                return
+            fi
+        done
+
+        result+=("$dir_path")
+    }
+
+    local default_dirs=("src" "app" "backend" "frontend" "server" "client" "services" "packages" "lib")
+    local dir
+    for dir in "${default_dirs[@]}"; do
+        if [ -d "$project_root/$dir" ]; then
+            add_scan_dir "$project_root/$dir"
+            if [ "${#result[@]}" -ge "$max_dirs" ]; then
+                break
+            fi
+        fi
+    done
+
+    if [ "${#result[@]}" -lt "$max_dirs" ]; then
+        local search_patterns=("*.py" "*.ts" "*.tsx" "*.js" "*.jsx" "*.go" "*.rs" "*.java" "*.rb" "*.php")
+        local pattern
+        for pattern in "${search_patterns[@]}"; do
+            while IFS= read -r file_path; do
+                add_scan_dir "$(dirname "$file_path")"
+                if [ "${#result[@]}" -ge "$max_dirs" ]; then
+                    break 2
+                fi
+            done < <(find "$project_root" -maxdepth "$max_depth" -type f -name "$pattern" 2>/dev/null)
+        done
+    fi
+
+    if [ "${#result[@]}" -eq 0 ]; then
+        result=(".")
+    elif [ "${#result[@]}" -gt "$max_dirs" ]; then
+        result=("${result[@]:0:$max_dirs}")
+    fi
+
+    local joined
+    joined=$(IFS=,; echo "${result[*]}")
+    echo "$joined"
+}
+
+#------------------------------------------------------------------------------
+# Helper: Install packages via pip with error handling
+#------------------------------------------------------------------------------
+
+pip_install_packages() {
+    local description="$1"
+    shift
+    print_info "$description"
+    print_verbose "pip install $*"
+    set +e
+    "$VENV_DIR/bin/pip" install --disable-pip-version-check "$@"
+    local pip_status=$?
+    set -e
+    if [ $pip_status -ne 0 ]; then
+        print_error "$description failed (exit code: $pip_status)"
+        [ "$NO_EXIT" = false ] && exit $pip_status
+        return $pip_status
+    fi
+    print_success "$description completata"
+    return 0
+}
+
+install_requirements_file() {
+    local requirements_file="$1"
+    local title="$2"
+
+    if [ ! -f "$requirements_file" ]; then
+        print_warning "$title: file non trovato ($requirements_file)"
+        return 0
+    fi
+
+    print_info "$title"
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -z "$line" ] || echo "$line" | grep -q '^#'; then
+            continue
+        fi
+        if echo "$line" | grep -qi '^warn skipped invalid'; then
+            continue
+        fi
+        pip_install_packages "  • $line" "$line"
+    done < "$requirements_file"
+    print_success "$title completata"
+}
+
+#------------------------------------------------------------------------------
 # Parse Arguments
 #------------------------------------------------------------------------------
 
@@ -498,6 +613,7 @@ process_requirements() {
     local requirements_file="$TARGET_PROJECT_ROOT/requirements.txt"
     local devstream_requirements="$DEVSTREAM_ROOT/requirements.txt"
     local merged_requirements="$TARGET_PROJECT_ROOT/.devstream/requirements-merged.txt"
+    local merged_requirements_backup="$TARGET_PROJECT_ROOT/requirements-devstream-merged.txt"
 
     if [ "$DRY_RUN" = true ]; then
         print_info "[DRY-RUN] Would merge requirements.txt with DevStream dependencies"
@@ -508,52 +624,119 @@ process_requirements() {
     mkdir -p "$TARGET_PROJECT_ROOT/.devstream"
 
     if [ -f "$requirements_file" ]; then
-        print_info "Merging existing requirements with DevStream dependencies..."
+        print_info "Merging existing requirements con manifest DevStream..."
 
-        # Create backup of original requirements
+        # Backup requirements original
         cp "$requirements_file" "$TARGET_PROJECT_ROOT/requirements-pre-devstream.txt"
-        print_verbose "Backed up original requirements.txt"
+        print_verbose "Backup creato: requirements-pre-devstream.txt"
 
-        # Get unique package names from both files
-        local existing_packages=$(grep -v '^#' "$requirements_file" | grep -v '^$' | cut -d'=' -f1 | sort -u)
-        local devstream_packages=$(grep -v '^#' "$devstream_requirements" | grep -v '^$' | cut -d'=' -f1 | sort -u)
+        local python_cmd="python3"
+        command_exists python3 || python_cmd="python"
 
-        # Start with DevStream requirements
-        cp "$devstream_requirements" "$merged_requirements"
+        if ! command_exists "$python_cmd"; then
+            print_warning "Python interpreter non disponibile, uso requirements DevStream senza merge"
+            cp "$devstream_requirements" "$merged_requirements"
+        else
+            local merge_output
+            set +e
+            merge_output=$(cat <<'PY' | "$VENV_DIR/bin/python" - "$devstream_requirements" "$requirements_file" "$merged_requirements"
+import sys
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from pathlib import Path
 
-        # Add packages from existing requirements that aren't in DevStream
-        echo "" >> "$merged_requirements"
-        echo "# Packages from existing project" >> "$merged_requirements"
+warnings = []
 
-        while IFS= read -r package; do
-            if ! echo "$devstream_packages" | grep -q "^${package}$"; then
-                grep "^${package}" "$requirements_file" >> "$merged_requirements" || echo "$package" >> "$merged_requirements"
-                print_verbose "Added existing package: $package"
+def parse_line(line: str):
+    line = line.strip()
+    if not line or line.startswith('#'):
+        return None
+    spec = line.split(';', 1)[0].strip()
+    try:
+        req = Requirement(spec)
+        name = canonicalize_name(req.name)
+        if req.extras:
+            extras = '[' + ','.join(sorted(req.extras)).lower() + ']'
+            name += extras
+        return name
+    except Exception as exc:
+        warnings.append(f"WARN Skipped invalid requirement: {line} ({exc})")
+        return None
+
+def merge(dev_path: str, existing_path: str, output_path: str):
+    dev_path = Path(dev_path)
+    existing_path = Path(existing_path)
+    output_path = Path(output_path)
+
+    dev_lines = dev_path.read_text().splitlines() if dev_path.exists() else []
+    existing_lines = existing_path.read_text().splitlines() if existing_path.exists() else []
+
+    final_lines = []
+    seen = set()
+    dev_count = 0
+    extra_count = 0
+
+    for line in dev_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#'):
+            name = parse_line(line)
+            key = name or stripped.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            dev_count += 1
+        final_lines.append(line.rstrip())
+
+    extra_lines = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        name = parse_line(line)
+        if not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        extra_lines.append(line.rstrip())
+
+    if extra_lines:
+        extra_count = len(extra_lines)
+        if final_lines and final_lines[-1].strip():
+            final_lines.append('')
+        final_lines.append('# Packages from existing project')
+        final_lines.extend(extra_lines)
+
+    output_path.write_text('\n'.join(final_lines) + ('\n' if final_lines else ''))
+    total_packages = sum(1 for line in final_lines if line.strip() and not line.lstrip().startswith('#'))
+    print(dev_count, extra_count, total_packages)
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+
+merge(sys.argv[1], sys.argv[2], sys.argv[3])
+PY
+            )
+            local merge_status=$?
+            set -e
+
+            if [ $merge_status -ne 0 ]; then
+                print_error "Merge requirements fallito:"
+                echo "$merge_output"
+                cp "$devstream_requirements" "$merged_requirements"
+                print_warning "Usando requirements DevStream senza merge"
+            else
+                local devstream_count existing_added total_packages
+                read -r devstream_count existing_added total_packages <<< "$merge_output"
+                print_success "Requirements merged:"
+                print_info "  Pacchetti DevStream: $devstream_count"
+                print_info "  Pacchetti aggiunti dal progetto: $existing_added"
+                print_info "  Totale pacchetti unici: $total_packages"
+                cp "$merged_requirements" "$merged_requirements_backup"
+                print_verbose "Backup merged requirements salvato: $merged_requirements_backup"
             fi
-        done <<< "$existing_packages"
-
-        # Count final packages
-        local total_packages=$(grep -v '^#' "$merged_requirements" | grep -v '^$' | wc -l)
-        local existing_count=$(grep -v '^#' "$requirements_file" | grep -v '^$' | wc -l)
-        local devstream_count=$(grep -v '^#' "$devstream_requirements" | grep -v '^$' | wc -l)
-
-        print_success "Requirements merged:"
-        print_info "  Existing packages: $existing_count"
-        print_info "  DevStream packages: $devstream_count"
-        print_info "  Total unique packages: $total_packages"
-
-        if [ "$VERBOSE" = true ]; then
-            echo ""
-            echo "Merged requirements preview:"
-            head -20 "$merged_requirements" | sed 's/^/  /'
-            if [ $total_packages -gt 20 ]; then
-                echo "  ... and $((total_packages - 20)) more packages"
-            fi
-            echo ""
         fi
-
     else
-        print_warning "No existing requirements.txt found, using DevStream requirements only"
+        print_warning "Nessun requirements.txt trovato, uso requirements DevStream"
         cp "$devstream_requirements" "$merged_requirements"
     fi
 
@@ -630,31 +813,40 @@ setup_python_environment() {
     # Install requirements
     if [ "$EXISTING_PROJECT" = true ] && [ "$MERGE_REQUIREMENTS" = true ]; then
         local requirements_file="$TARGET_PROJECT_ROOT/.devstream/requirements-merged.txt"
+        local requirements_backup="$TARGET_PROJECT_ROOT/requirements-devstream-merged.txt"
+        if [ ! -f "$requirements_file" ] && [ -f "$requirements_backup" ]; then
+            mkdir -p "$TARGET_PROJECT_ROOT/.devstream"
+            cp "$requirements_backup" "$requirements_file"
+            print_verbose "Restored merged requirements from backup"
+        fi
         if [ -f "$requirements_file" ]; then
-            print_info "Installing merged requirements..."
-            "$VENV_DIR/bin/pip" install -r "$requirements_file" >/dev/null 2>&1
-            check_exit_code $? "Merged requirements installed" "Failed to install merged requirements"
+            install_requirements_file "$requirements_file" "Installazione requirements del progetto (sequenziale)"
         fi
     else
         # Install DevStream requirements
         if [ -f "$DEVSTREAM_ROOT/requirements.txt" ]; then
-            print_info "Installing DevStream requirements..."
-            "$VENV_DIR/bin/pip" install -r "$DEVSTREAM_ROOT/requirements.txt" >/dev/null 2>&1
-            check_exit_code $? "DevStream requirements installed" "Failed to install DevStream requirements"
+            install_requirements_file "$DEVSTREAM_ROOT/requirements.txt" "Installazione requirements DevStream"
         fi
     fi
 
     # Verify critical packages (Context7-compliant case-insensitive check)
     print_info "Verifying critical packages..."
-    local critical_packages=("cchooks" "aiohttp" "structlog" "python-dotenv" "psutil")
-    for package in "${critical_packages[@]}"; do
-        if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${package}"; then
-            # Get the actual package name from pip list for version lookup
-            local actual_package_name=$("$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${package}" | awk '{print $1}')
+    local critical_packages=("cchooks>=0.1.4" "aiohttp>=3.8.0" "structlog>=23.0.0" "python-dotenv>=1.0.0" "psutil")
+    for spec in "${critical_packages[@]}"; do
+        local pkg_name="${spec%%[*>=<]*}"
+        if [ -z "$pkg_name" ]; then
+            pkg_name="$spec"
+        fi
+        if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "^${pkg_name}"; then
+            pip_install_packages "Installazione dipendenza critica: $spec" "$spec"
+        fi
+
+        if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "^${pkg_name}"; then
+            local actual_package_name=$("$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${pkg_name}" | awk '{print $1}')
             local version=$("$VENV_DIR/bin/pip" show "$actual_package_name" 2>/dev/null | grep "^Version:" | awk '{print $2}')
             print_success "$actual_package_name ($version)"
         else
-            print_error "$package not installed"
+            print_error "Unable to install required package: $spec"
             if [ "$NO_EXIT" = false ]; then
                 exit 1
             fi
@@ -731,8 +923,7 @@ setup_devstream_components() {
 
             # Ensure Copier is installed
             if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "copier"; then
-                "$VENV_DIR/bin/pip" install "copier>=9.0.0,<10.0.0" >/dev/null 2>&1
-                check_exit_code $? "Copier installed" "Failed to install Copier"
+                pip_install_packages "Installazione Copier (enhanced hook copying)" "copier>=9.0.0,<10.0.0"
             fi
 
             print_info "Running enhanced hook copying with integrity validation..."
@@ -860,9 +1051,9 @@ except Exception as e:
 
                     # Context7 research: Try dependency recovery
                     if echo "$import_error" | grep -qi "copier"; then
-                        print_info "   Attempting Copier dependency recovery..."
-                        if "$VENV_DIR/bin/pip" install "copier>=9.0.0,<10.0.0" >/dev/null 2>&1; then
-                            print_info "   Copier dependency recovered, retrying enhanced copy..."
+                        print_info "   Attempto recupero dipendenza Copier..."
+                        if pip_install_packages "Recupero Copier" "copier>=9.0.0,<10.0.0"; then
+                            print_info "   Copier recuperato, nuovo tentativo di enhanced copy..."
                             # Retry once after dependency recovery
                             local retry_result=$("$VENV_DIR/bin/python" -c "
 import sys
@@ -1022,6 +1213,9 @@ create_environment_config() {
 
     local env_file="$TARGET_PROJECT_ROOT/.env.devstream"
     local env_example="$DEVSTREAM_ROOT/.env.example"
+    local codebase_scan_dirs
+    codebase_scan_dirs=$(compute_codebase_scan_dirs "$TARGET_PROJECT_ROOT")
+    local codebase_scan_patterns="*.py,*.ts,*.tsx,*.js,*.jsx,*.go,*.rs,*.java,*.md"
 
     # Start with example file if it exists
     if [ -f "$env_example" ]; then
@@ -1074,9 +1268,9 @@ DEVSTREAM_MERGE_REQUIREMENTS=$MERGE_REQUIREMENTS
 
 # Codebase Scanning (IMPORTANT for existing projects)
 DEVSTREAM_CODEBASE_SCAN_ENABLED=true
-DEVSTREAM_CODEBASE_SCAN_DIRECTORIES=$(find "$TARGET_PROJECT_ROOT" -maxdepth 2 -type d -name "*.py" -exec dirname {} \; | sort -u | head -5 | paste -sd, - | sed 's|$TARGET_PROJECT_ROOT/||g')
+DEVSTREAM_CODEBASE_SCAN_DIRECTORIES="$codebase_scan_dirs"
 DEVSTREAM_CODEBASE_SCAN_EXCLUDE=.git,.venv,venv,__pycache__,node_modules,dist,build,.devstream
-DEVSTREAM_CODEBASE_SCAN_FILE_PATTERNS=*.py
+DEVSTREAM_CODEBASE_SCAN_FILE_PATTERNS="$codebase_scan_patterns"
 
 # Instance Identification
 DEVSTREAM_INSTANCE_NAME=$(basename "$TARGET_PROJECT_ROOT")
@@ -1090,9 +1284,26 @@ EOF
         [ -d "$TARGET_PROJECT_ROOT/lib" ] && framework_dirs+=("lib")
 
         if [ ${#framework_dirs[@]} -gt 0 ]; then
-            local scan_dirs=$(IFS=,; echo "${framework_dirs[*]}")
-            sed -i.bak "s|DEVSTREAM_CODEBASE_SCAN_DIRECTORIES=.*|DEVSTREAM_CODEBASE_SCAN_DIRECTORIES=$scan_dirs|" "$env_file"
-            print_info "Detected framework directories: $scan_dirs"
+        local merged_dirs=("${framework_dirs[@]}")
+        IFS=',' read -r -a computed_dirs_array <<< "$codebase_scan_dirs"
+        local item existing already=false
+        for item in "${computed_dirs_array[@]}"; do
+            [ -z "$item" ] && continue
+            already=false
+            for existing in "${merged_dirs[@]}"; do
+                if [ "$existing" = "$item" ]; then
+                    already=true
+                    break
+                fi
+            done
+            if [ "$already" = false ] && [ "${#merged_dirs[@]}" -lt 10 ]; then
+                merged_dirs+=("$item")
+            fi
+        done
+        local scan_dirs=$(IFS=,; echo "${merged_dirs[*]}")
+        sed -i.bak "s|DEVSTREAM_CODEBASE_SCAN_DIRECTORIES=.*|DEVSTREAM_CODEBASE_SCAN_DIRECTORIES=$scan_dirs|" "$env_file"
+        codebase_scan_dirs="$scan_dirs"
+        print_info "Detected framework directories: $scan_dirs"
         fi
 
         print_success "Existing project configuration added"
@@ -1121,8 +1332,7 @@ initialize_database() {
     print_info "Checking for sqlite-vec dependency..."
     if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "sqlite-vec"; then
         print_info "Installing sqlite-vec for vector database support..."
-        "$VENV_DIR/bin/pip" install sqlite-vec >/dev/null 2>&1
-        check_exit_code $? "sqlite-vec installed" "Failed to install sqlite-vec"
+        pip_install_packages "Installazione sqlite-vec" sqlite-vec
     else
         print_success "sqlite-vec already available"
     fi
