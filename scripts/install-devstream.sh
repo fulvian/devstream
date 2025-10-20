@@ -309,6 +309,28 @@ install_requirements_file() {
         if echo "$line" | grep -qi '^warn skipped invalid'; then
             continue
         fi
+
+        if ! "$VENV_DIR/bin/python" -c "import sys
+line = sys.argv[1].strip()
+if not line or line.startswith('#'):
+    sys.exit(0)
+spec = line.split(';', 1)[0].strip()
+if spec.endswith('>') and spec.split('>')[-1].strip() == '':
+    sys.exit(1)
+try:
+    from packaging.requirements import Requirement
+    Requirement(spec)
+except Exception:
+    # packaging might not be available yet; fall back to simple heuristic
+    if spec.endswith('>') and spec.split('>')[-1].strip() == '':
+        sys.exit(1)
+    sys.exit(0)
+sys.exit(0)
+" "$line" >/dev/null 2>&1; then
+            print_warning "   • Skipping invalid requirement entry: $line"
+            continue
+        fi
+
         pip_install_packages "  • $line" "$line"
     done < "$requirements_file"
     print_success "$title completata"
@@ -641,27 +663,49 @@ process_requirements() {
             set +e
             merge_output=$(cat <<'PY' | "$VENV_DIR/bin/python" - "$devstream_requirements" "$requirements_file" "$merged_requirements"
 import sys
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
 from pathlib import Path
 
 warnings = []
 
+try:
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+except ModuleNotFoundError:
+    Requirement = None
+    def canonicalize_name(name: str) -> str:
+        return name.lower().replace('_', '-')
+
+def fallback_normalize(spec: str) -> str:
+    base = spec
+    extras = ''
+    if '[' in base and ']' in base:
+        start = base.index('[')
+        end = base.index(']')
+        extras = base[start:end+1].lower()
+        base = base[:start]
+    base = canonicalize_name(base.strip())
+    return base + extras
+
 def parse_line(line: str):
-    line = line.strip()
-    if not line or line.startswith('#'):
+    stripped = line.strip()
+    if not stripped or stripped.startswith('#'):
         return None
-    spec = line.split(';', 1)[0].strip()
-    try:
-        req = Requirement(spec)
-        name = canonicalize_name(req.name)
-        if req.extras:
-            extras = '[' + ','.join(sorted(req.extras)).lower() + ']'
-            name += extras
-        return name
-    except Exception as exc:
-        warnings.append(f"WARN Skipped invalid requirement: {line} ({exc})")
+    spec = stripped.split(';', 1)[0].strip()
+    if Requirement is not None:
+        try:
+            req = Requirement(spec)
+            name = canonicalize_name(req.name)
+            extras = ''
+            if req.extras:
+                extras = '[' + ','.join(sorted(req.extras)).lower() + ']'
+            return name + extras
+        except Exception as exc:
+            warnings.append(f"WARN Skipped invalid requirement: {stripped} ({exc})")
+            return None
+    if spec.endswith('>') and spec.split('>')[-1].strip() == '':
+        warnings.append(f"WARN Skipped invalid requirement: {stripped} (missing version)")
         return None
+    return fallback_normalize(spec)
 
 def merge(dev_path: str, existing_path: str, output_path: str):
     dev_path = Path(dev_path)
@@ -689,9 +733,6 @@ def merge(dev_path: str, existing_path: str, output_path: str):
 
     extra_lines = []
     for line in existing_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
         name = parse_line(line)
         if not name:
             continue
