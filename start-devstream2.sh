@@ -2372,6 +2372,9 @@ initialize_project_venv() {
     if ! grep -q "DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT" "$project_env_file"; then
       needs_config_update=true
     fi
+    if ! grep -q "DEVSTREAM_DB_PATH=$PROJECT_ROOT/data/devstream.db" "$project_env_file"; then
+      needs_config_update=true
+    fi
     if ! grep -q "DEVSTREAM_HOOK_UTILS_PATH=" "$project_env_file"; then
       needs_config_update=true
     fi
@@ -2401,6 +2404,7 @@ DEVSTREAM_PROJECT_DEVSTREAM_VENV_PIP=$PROJECT_ROOT/.devstream/bin/pip
 # Project paths
 DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT
 DEVSTREAM_PROJECT_NAME=$project_name
+DEVSTREAM_DB_PATH=$PROJECT_ROOT/data/devstream.db
 
 # Framework paths (for reference)
 DEVSTREAM_FRAMEWORK_PATH=$DEVSTREAM_SCRIPT_DIR
@@ -2422,6 +2426,7 @@ EOF
   export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PIP="$PROJECT_ROOT/.devstream/bin/pip"
   export DEVSTREAM_HOOK_UTILS_PATH="${DEVSTREAM_HOOK_UTILS_PATH:-$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils}"
   export DEVSTREAM_PROJECT_SRC_PATH="${DEVSTREAM_PROJECT_SRC_PATH:-$PROJECT_ROOT/src}"
+  export DEVSTREAM_DB_PATH="${DEVSTREAM_DB_PATH:-$PROJECT_ROOT/data/devstream.db}"
 
   # Update PATH to prioritize project venv and framework venv
   export PATH="$project_venv_path/bin:$PROJECT_ROOT/.devstream/bin:$PATH"
