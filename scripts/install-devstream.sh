@@ -207,7 +207,8 @@ compute_codebase_scan_dirs() {
     local project_root="$1"
     local max_dirs="${2:-10}"
     local max_depth="${3:-3}"
-    local -a result=()
+    local -a result
+    result=()
 
     add_scan_dir() {
         local dir_path="$1"
