@@ -169,7 +169,7 @@ Quando nel progetto è già presente `data/devstream.db`:
 
 #### Step 4: Verifica Popolamento Database
 ```bash
-# Verifica che il database sia stato popolato
+# Il bootstrap full parte in automatico a fine installazione
 ls -la data/devstream.db
 .devstream/bin/python -c "
 from .claude.hooks.devstream.utils.direct_client import get_direct_client
@@ -178,8 +178,9 @@ result = client.search_memory('main function', limit=5)
 print(f'Found {len(result[\"results\"])} indexed items')
 "
 
-# Output atteso:
-# Found 15 indexed items (o simile)
+# Output atteso (bootstrap già eseguito):
+# Found 15 indexed items (o di più)
+# Log dettagliato: ~/.claude/logs/devstream/memory_bootstrap.log
  
 # Verifica che la variabile d'ambiente punti al DB di progetto
 env | grep DEVSTREAM_DB_PATH
@@ -198,7 +199,7 @@ export DEVSTREAM_PROJECT_ROOT="$(pwd)"
 ```
 
 **Vantaggi del progetto esistente con DevStream:**
-- 🧠 **Context Immediately Available**: Il codebase è già indicizzato e disponibile
+- 🧠 **Context Immediately Available**: Il codebase è già indicizzato e disponibile appena avvii Claude Code
 - 🎯 **Project-Aware Protocol**: CLAUDE.md contiene comandi specifici per il tuo progetto
 - 📊 **Smart Memory**: Ricerca semantica funziona subito sul tuo codice (o riparte da zero se hai scelto il reset)
 - 📚 **Protocolli Locali**: I file `sessions/protocols/*.md` sono copiati nel progetto e sempre aggiornati

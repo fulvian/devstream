@@ -40,6 +40,11 @@ env | grep DEVSTREAM_DB_PATH
 
 # I protocolli DevStream copiati in locale sono disponibili in sessions/protocols/
 ls sessions/protocols
+
+# Conteggio rapido delle memorie indicizzate automaticamente
+sqlite3 data/devstream.db "SELECT COUNT(*) FROM semantic_memory;"
+# Controlla quante memorie sono state indicizzate automaticamente
+.devstream/bin/python -c "from .claude.hooks.devstream.utils.direct_client import get_direct_client; print(len(get_direct_client().semantic_memory_entries()))"
 ```
 
 ### Avvio Sessione DevStream System

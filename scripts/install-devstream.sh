@@ -1167,6 +1167,69 @@ except Exception as e:
     print_success "DevStream components setup completed"
 }
 
+#------------------------------------------------------------------------------
+# Step 6.1: Automatic Memory Bootstrap
+#------------------------------------------------------------------------------
+
+run_memory_bootstrap() {
+    print_header "Step 6.1: Populating DevStream Memory"
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would run DevStream memory bootstrap for full codebase"
+        return 0
+    fi
+
+    local bootstrap_script="$TARGET_PROJECT_ROOT/.claude/hooks/devstream/memory/memory_bootstrap.py"
+    if [ ! -f "$bootstrap_script" ]; then
+        print_warning "⚠️  Memory bootstrap script not found at $bootstrap_script"
+        print_warning "   Skipping automatic population (run manually if needed)"
+        return 0
+    fi
+
+    print_info "🔄 Running memory bootstrap for project: $(basename "$TARGET_PROJECT_ROOT")"
+    print_info "   This will scan the existing codebase and populate DevStream memory"
+
+    local bootstrap_result=$("$VENV_DIR/bin/python" "$bootstrap_script" \
+        "$TARGET_PROJECT_ROOT" \
+        --mode full \
+        --cleanup incremental \
+        --batch-size 50 \
+        --output summary \
+        2>&1)
+    local bootstrap_exit_code=$?
+
+    if [ $bootstrap_exit_code -eq 0 ]; then
+        print_status "✅ Project memory bootstrap completed successfully"
+        if echo "$bootstrap_result" | grep -q "Total files:"; then
+            local files_info=$(echo "$bootstrap_result" | grep "Total files:" | head -1)
+            print_info "   $files_info"
+        fi
+        if echo "$bootstrap_result" | grep -q "Total chunks:"; then
+            local chunks_info=$(echo "$bootstrap_result" | grep "Total chunks:" | head -1)
+            print_info "   $chunks_info"
+        fi
+
+        "$VENV_DIR/bin/python" -c "
+from pathlib import Path
+import sqlite3
+db_path = Path('$TARGET_PROJECT_ROOT/data/devstream.db')
+if db_path.exists():
+    conn = sqlite3.connect(db_path)
+    try:
+        memory_count = conn.execute('SELECT COUNT(*) FROM semantic_memory').fetchone()[0]
+        print(f'✅ Semantic memory entries stored: {memory_count}')
+    finally:
+        conn.close()
+"
+        print_info "   Memory is now searchable via DevStream hooks"
+    else
+        print_error "❌ Memory bootstrap failed"
+        print_error "   Error: $bootstrap_result"
+        print_warning "   You can rerun manually with:"
+        print_warning "   $bootstrap_script $TARGET_PROJECT_ROOT --mode full --cleanup incremental"
+    fi
+}
+
 # Standard DevStream copy method (fallback)
 standard_devstream_copy() {
     # Copy DevStream components
@@ -2221,6 +2284,7 @@ main() {
     setup_devstream_components
     create_environment_config
     initialize_database
+    run_memory_bootstrap
     configure_claude_code
     validate_existing_project
     validate_installation
