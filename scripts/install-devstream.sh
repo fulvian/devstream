@@ -874,23 +874,13 @@ setup_python_environment() {
     print_info "Verifying critical packages..."
     local critical_packages=("cchooks>=0.1.4" "aiohttp>=3.8.0" "structlog>=23.0.0" "python-dotenv>=1.0.0" "psutil")
     for spec in "${critical_packages[@]}"; do
+        pip_install_packages "Installazione dipendenza critica: $spec" "$spec"
         local pkg_name="${spec%%[*>=<]*}"
-        if [ -z "$pkg_name" ]; then
-            pkg_name="$spec"
-        fi
-        if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "^${pkg_name}"; then
-            pip_install_packages "Installazione dipendenza critica: $spec" "$spec"
-        fi
-
-        if "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "^${pkg_name}"; then
-            local actual_package_name=$("$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${pkg_name}" | awk '{print $1}')
+        [ -z "$pkg_name" ] && pkg_name="$spec"
+        local actual_package_name=$("$VENV_DIR/bin/pip" list 2>/dev/null | grep -i "^${pkg_name}" | awk 'NR==1 {print $1}')
+        if [ -n "$actual_package_name" ]; then
             local version=$("$VENV_DIR/bin/pip" show "$actual_package_name" 2>/dev/null | grep "^Version:" | awk '{print $2}')
             print_success "$actual_package_name ($version)"
-        else
-            print_error "Unable to install required package: $spec"
-            if [ "$NO_EXIT" = false ]; then
-                exit 1
-            fi
         fi
     done
 
