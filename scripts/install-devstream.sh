@@ -1189,6 +1189,14 @@ run_memory_bootstrap() {
     print_info "🔄 Running memory bootstrap for project: $(basename "$TARGET_PROJECT_ROOT")"
     print_info "   This will scan the existing codebase and populate DevStream memory"
 
+    local prev_db_path="${DEVSTREAM_DB_PATH:-}"
+    local prev_project_root="${DEVSTREAM_PROJECT_ROOT:-}"
+    local prev_log_dir="${DEVSTREAM_LOG_DIR:-}"
+    mkdir -p "$TARGET_PROJECT_ROOT/.devstream/logs/devstream"
+    export DEVSTREAM_DB_PATH="$DATA_DIR/devstream.db"
+    export DEVSTREAM_PROJECT_ROOT="$TARGET_PROJECT_ROOT"
+    export DEVSTREAM_LOG_DIR="$TARGET_PROJECT_ROOT/.devstream/logs/devstream"
+
     local bootstrap_result=$("$VENV_DIR/bin/python" "$bootstrap_script" \
         "$TARGET_PROJECT_ROOT" \
         --mode full \
@@ -1198,8 +1206,12 @@ run_memory_bootstrap() {
         2>&1)
     local bootstrap_exit_code=$?
 
+    if [ -n "$prev_db_path" ]; then export DEVSTREAM_DB_PATH="$prev_db_path"; else unset DEVSTREAM_DB_PATH; fi
+    if [ -n "$prev_project_root" ]; then export DEVSTREAM_PROJECT_ROOT="$prev_project_root"; else unset DEVSTREAM_PROJECT_ROOT; fi
+    if [ -n "$prev_log_dir" ]; then export DEVSTREAM_LOG_DIR="$prev_log_dir"; else unset DEVSTREAM_LOG_DIR; fi
+
     if [ $bootstrap_exit_code -eq 0 ]; then
-        print_status "✅ Project memory bootstrap completed successfully"
+        print_success "✅ Project memory bootstrap completed successfully"
         if echo "$bootstrap_result" | grep -q "Total files:"; then
             local files_info=$(echo "$bootstrap_result" | grep "Total files:" | head -1)
             print_info "   $files_info"
@@ -1564,8 +1576,14 @@ except Exception as e:
     fi
 
     # Run database setup script with error handling
-    local setup_script="$TARGET_PROJECT_ROOT/.devstream/scripts/setup-db.py"
-    if [ -f "$setup_script" ]; then
+    local setup_script=""
+    if [ -f "$TARGET_PROJECT_ROOT/.devstream/scripts/setup-db.py" ]; then
+        setup_script="$TARGET_PROJECT_ROOT/.devstream/scripts/setup-db.py"
+    elif [ -f "$DEVSTREAM_ROOT/scripts/setup-db.py" ]; then
+        setup_script="$DEVSTREAM_ROOT/scripts/setup-db.py"
+    fi
+
+    if [ -n "$setup_script" ] && [ -f "$setup_script" ]; then
         print_info "Running database initialization..."
         cd "$TARGET_PROJECT_ROOT"
 
@@ -2290,7 +2308,7 @@ final_steps() {
     echo ""
     echo "• Hook errors: Check logs at ~/.claude/logs/devstream/"
     echo "• Import errors: $VENV_DIR/bin/pip install -r .devstream/requirements.txt"
-    echo "• Database issues: $VENV_DIR/bin/python .devstream/scripts/setup-db.py"
+    echo "• Database issues: $VENV_DIR/bin/python $DEVSTREAM_ROOT/scripts/setup-db.py"
     echo "• MCP server: Check $TARGET_PROJECT_ROOT/.claude/mcp_servers.json"
     echo ""
 
