@@ -664,7 +664,7 @@ process_requirements() {
         else
             local merge_output
             set +e
-            merge_output=$(cat <<'PY' | "$VENV_DIR/bin/python" - "$devstream_requirements" "$requirements_file" "$merged_requirements"
+            merge_output=$(cat <<'PY' | "$python_cmd" - "$devstream_requirements" "$requirements_file" "$merged_requirements"
 import sys
 from pathlib import Path
 
@@ -865,11 +865,13 @@ setup_python_environment() {
         fi
         if [ -f "$requirements_file" ]; then
             install_requirements_file "$requirements_file" "Installazione requirements del progetto (sequenziale)"
+            cp "$requirements_file" "$TARGET_PROJECT_ROOT/.devstream/requirements.txt"
         fi
     else
         # Install DevStream requirements
         if [ -f "$DEVSTREAM_ROOT/requirements.txt" ]; then
             install_requirements_file "$DEVSTREAM_ROOT/requirements.txt" "Installazione requirements DevStream"
+            cp "$DEVSTREAM_ROOT/requirements.txt" "$TARGET_PROJECT_ROOT/.devstream/requirements.txt"
         fi
     fi
 
