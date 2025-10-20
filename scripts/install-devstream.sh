@@ -225,12 +225,14 @@ compute_codebase_scan_dirs() {
             dir_path="${dir_path%/}"
         fi
 
-        local existing
-        for existing in "${result[@]}"; do
-            if [ "$existing" = "$dir_path" ]; then
-                return
-            fi
-        done
+        if [ "${#result[@]}" -gt 0 ]; then
+            local existing
+            for existing in "${result[@]}"; do
+                if [ "$existing" = "$dir_path" ]; then
+                    return
+                fi
+            done
+        fi
 
         result+=("$dir_path")
     }
