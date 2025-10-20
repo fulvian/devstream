@@ -157,6 +157,7 @@ git status
 - ✅ **Codebase Scanning Smart**: Seleziona automaticamente le directory principali (src/, app/, frontend/, …) e salva la configurazione in `.env.devstream`
 - ✅ **Protocol Copying**: Copia in progetto i protocolli `sessions/protocols/*.md` per mantenere la documentazione locale
 - ✅ **Memory Database Population**: Indicizza il codebase nel database vettoriale (solo se non già popolato)
+- ✅ **Project Migrations (Alembic)**: Se `alembic.ini` e `migrations/` sono presenti, lo script esegue `alembic upgrade head`
 - ✅ **CLAUDE.md Generation**: Crea protocollo DevStream specifico per il progetto
 - ✅ **Virtual Environment**: Crea `.devstream/` venv se non esiste
 
@@ -178,9 +179,10 @@ result = client.search_memory('main function', limit=5)
 print(f'Found {len(result[\"results\"])} indexed items')
 "
 
-# Output atteso (bootstrap già eseguito):
+# Output atteso (bootstrap e migrazioni già eseguiti):
 # Found 15 indexed items (o di più)
-# Log dettagliato: ~/.claude/logs/devstream/memory_bootstrap.log
+# Log bootstrap: ~/.claude/logs/devstream/memory_bootstrap.log
+# Log migrazioni (se fallite): controlla in installazione Step 6.2
  
 # Verifica che la variabile d'ambiente punti al DB di progetto
 env | grep DEVSTREAM_DB_PATH

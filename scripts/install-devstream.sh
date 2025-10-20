@@ -1230,6 +1230,54 @@ if db_path.exists():
     fi
 }
 
+#------------------------------------------------------------------------------
+# Step 6.2: Project-specific migrations (Alembic)
+#------------------------------------------------------------------------------
+
+run_project_migrations() {
+    print_header "Step 6.2: Running Project Database Migrations"
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would run alembic upgrade head (if configuration present)"
+        return 0
+    fi
+
+    if [ ! -f "$TARGET_PROJECT_ROOT/alembic.ini" ] || [ ! -d "$TARGET_PROJECT_ROOT/migrations" ]; then
+        print_info "No Alembic configuration detected in project; skipping migrations"
+        return 0
+    fi
+
+    if ! "$VENV_DIR/bin/pip" show alembic >/dev/null 2>&1; then
+        pip_install_packages "Installazione Alembic" alembic
+    fi
+
+    local original_pythonpath="${PYTHONPATH:-}"
+    export PYTHONPATH="$TARGET_PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+    print_info "🔧 Executing alembic upgrade head..."
+    set +e
+    local migration_output
+    migration_output=$("$VENV_DIR/bin/python" -m alembic upgrade head 2>&1)
+    local migration_status=$?
+    set -e
+
+    export PYTHONPATH="$original_pythonpath"
+
+    if [ $migration_status -eq 0 ]; then
+        print_status "✅ Project migrations completed"
+        echo "$migration_output" | grep -E "Running upgrade" || true
+    else
+        print_warning "⚠️  Project migrations reported errors"
+        echo "$migration_output"
+        if echo "$migration_output" | grep -qi "vector"; then
+            print_error "   The PostgreSQL extension 'vector' is missing."
+            print_info "   Run: psql -c \"CREATE EXTENSION IF NOT EXISTS vector;\" (requires pgvector installation)"
+        fi
+        print_warning "   You can rerun manually after fixing the issue:"
+        print_warning "   $VENV_DIR/bin/python -m alembic upgrade head"
+    fi
+}
+
 # Standard DevStream copy method (fallback)
 standard_devstream_copy() {
     # Copy DevStream components
@@ -2285,6 +2333,7 @@ main() {
     create_environment_config
     initialize_database
     run_memory_bootstrap
+    run_project_migrations
     configure_claude_code
     validate_existing_project
     validate_installation

@@ -43,6 +43,10 @@ ls sessions/protocols
 
 # Conteggio rapido delle memorie indicizzate automaticamente
 sqlite3 data/devstream.db "SELECT COUNT(*) FROM semantic_memory;"
+
+# Se il progetto usa Alembic, le migrazioni vengono eseguite automaticamente.
+# Per rilanciarle manualmente:
+# .venv/bin/python -m alembic upgrade head
 # Controlla quante memorie sono state indicizzate automaticamente
 .devstream/bin/python -c "from .claude.hooks.devstream.utils.direct_client import get_direct_client; print(len(get_direct_client().semantic_memory_entries()))"
 ```
