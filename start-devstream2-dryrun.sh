@@ -37,56 +37,6 @@ print_feature() {
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Capture invocation directory for path normalization (Context7 best practice)
-INVOCATION_DIR="$(pwd -P 2>/dev/null || pwd)"
-
-# Resolve a candidate directory to an absolute canonical path
-resolve_absolute_dir() {
-  local candidate="$1"
-  local base_dir="${2:-$INVOCATION_DIR}"
-  local expanded="$candidate"
-
-  if [ -z "$expanded" ]; then
-    return 1
-  fi
-
-  # Expand leading tilde if present
-  if [[ "$expanded" == "~"* ]]; then
-    expanded="${expanded/#\~/$HOME}"
-  fi
-
-  (
-    if [[ "$expanded" == /* ]]; then
-      cd "$expanded" 2>/dev/null || exit 1
-    else
-      cd "$base_dir" 2>/dev/null || exit 1
-      cd "$expanded" 2>/dev/null || exit 1
-    fi
-    pwd -P
-  )
-}
-
-# Normalize project root to absolute path (fails if directory is invalid)
-normalize_project_root() {
-  local candidate="$1"
-  local resolved=""
-
-  if [ -z "$candidate" ]; then
-    return 1
-  fi
-
-  if ! resolved=$(resolve_absolute_dir "$candidate"); then
-    return 1
-  fi
-
-  if [ -z "$resolved" ] || [ ! -d "$resolved" ]; then
-    return 1
-  fi
-
-  echo "$resolved"
-  return 0
-}
-
 # Function to find DevStream project root using upward search
 find_devstream_project_root() {
     local start_dir="${1:-$(pwd)}"
@@ -114,54 +64,27 @@ find_devstream_project_root() {
 
 # Multi-project detection logic
 DEVSTREAM_INSTALLATION_ROOT="$SCRIPT_DIR"
-DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
 LOCAL_PROJECT_ROOT=""
-PROJECT_ROOT=""
 
 # Priority 1: Explicit project root (manual override)
 if [ -n "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-  local_explicit_root="$DEVSTREAM_PROJECT_ROOT"
-  if explicit_root=$(normalize_project_root "$local_explicit_root"); then
-    PROJECT_ROOT="$explicit_root"
-    export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
-    if [ "$PROJECT_ROOT" != "$local_explicit_root" ]; then
-      print_info "Multi-project mode (explicit): $PROJECT_ROOT"
-      print_warning "DEVSTREAM_PROJECT_ROOT normalized from '$local_explicit_root'"
-    else
-      print_info "Multi-project mode (explicit): $PROJECT_ROOT"
-    fi
-  else
-    print_warning "Ignoring invalid DEVSTREAM_PROJECT_ROOT: $local_explicit_root"
-    unset DEVSTREAM_PROJECT_ROOT
-  fi
-fi
+    PROJECT_ROOT="$DEVSTREAM_PROJECT_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_info "Multi-project mode (explicit): $PROJECT_ROOT"
 
-# Priority 2: Auto-detect from invocation directory
-if [ -z "$PROJECT_ROOT" ]; then
-  if LOCAL_PROJECT_ROOT=$(find_devstream_project_root "$INVOCATION_DIR"); then
-    if auto_root=$(normalize_project_root "$LOCAL_PROJECT_ROOT"); then
-      PROJECT_ROOT="$auto_root"
-      export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
-      print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
-    else
-      print_error "Auto-detected project root is invalid: $LOCAL_PROJECT_ROOT"
-      exit 1
-    fi
-  fi
-fi
+# Priority 2: Auto-detect from current working directory
+elif LOCAL_PROJECT_ROOT=$(find_devstream_project_root "$(pwd)"); then
+    export DEVSTREAM_PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
+    PROJECT_ROOT="$LOCAL_PROJECT_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_info "Multi-project mode (auto-detected): $PROJECT_ROOT"
 
 # Priority 3: Use DevStream installation as project (fallback)
-if [ -z "$PROJECT_ROOT" ]; then
-  PROJECT_ROOT="$DEVSTREAM_INSTALLATION_ROOT"
-  print_warning "No DevStream project found in current directory tree"
-  print_info "Falling back to DevStream installation: $PROJECT_ROOT"
-fi
-
-# Final guard: ensure project root is absolute (Context7 reliability requirement)
-if [[ "$PROJECT_ROOT" != /* ]]; then
-  print_error "DevStream project root must be an absolute path (got: $PROJECT_ROOT)"
-  print_error "Unset DEVSTREAM_PROJECT_ROOT or provide an absolute path."
-  exit 1
+else
+    PROJECT_ROOT="$DEVSTREAM_INSTALLATION_ROOT"
+    DEVSTREAM_SCRIPT_DIR="$DEVSTREAM_INSTALLATION_ROOT"
+    print_warning "No DevStream project found in current directory tree"
+    print_info "Falling back to DevStream installation: $PROJECT_ROOT"
 fi
 
 print_info "DevStream installation: $DEVSTREAM_SCRIPT_DIR"
@@ -762,15 +685,10 @@ initialize_direct_db() {
   if [ "$PROJECT_ROOT" != "$DEVSTREAM_SCRIPT_DIR" ]; then
     export DEVSTREAM_DB_PATH="$PROJECT_ROOT/data/devstream.db"
     export DEVSTREAM_PROJECT_ROOT="$PROJECT_ROOT"
-    export DEVSTREAM_LOG_DIR="$PROJECT_ROOT/.devstream/logs/devstream"
-    mkdir -p "$DEVSTREAM_LOG_DIR" || true
     print_info "Direct DB configured for project: $PROJECT_ROOT"
     print_info "Database path: $DEVSTREAM_DB_PATH"
   else
     export DEVSTREAM_DB_PATH="$DEVSTREAM_SCRIPT_DIR/data/devstream.db"
-    export DEVSTREAM_PROJECT_ROOT="$DEVSTREAM_SCRIPT_DIR"
-    export DEVSTREAM_LOG_DIR="$DEVSTREAM_SCRIPT_DIR/.devstream/logs/devstream"
-    mkdir -p "$DEVSTREAM_LOG_DIR" || true
     print_info "Direct DB configured for DevStream installation"
     print_info "Database path: $DEVSTREAM_DB_PATH"
   fi
@@ -780,9 +698,6 @@ initialize_direct_db() {
 
   # Initialize project templates for multi-project setup
   initialize_project_templates
-
-  # Initialize protocol reference docs for multi-project setup
-  initialize_project_protocols
 
   # Initialize project virtual environment for multi-project setup (Context7 best practice)
   initialize_project_venv
@@ -1211,18 +1126,6 @@ try:
 
         for index_name in missing_indexes:
             print(f"✅ Created missing index: {index_name}")
-
-    # Column-level validations per schema evolution (Context7 compliance)
-    semantic_memory_columns = set()
-    cursor.execute("PRAGMA table_info(semantic_memory)")
-    for row in cursor.fetchall():
-        semantic_memory_columns.add(row[1])
-
-    if 'session_id' not in semantic_memory_columns:
-        print("🔧 Adding session_id column to semantic_memory")
-        cursor.execute("ALTER TABLE semantic_memory ADD COLUMN session_id TEXT")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_semantic_memory_session_id ON semantic_memory(session_id)")
-        upgrade_needed = True
 
     if extra_tables:
         print(f"ℹ️  Extra tables found: {', '.join(sorted(extra_tables))}")
@@ -1673,12 +1576,12 @@ start_claude_with_devstream() {
     fi
 
     # exec replaces current process with z.ai script
-    exec "$zai_script"
+    echo "🔍 DRY-RUN: Would exec z.ai script: $zai_script" && return 0
   else
     print_info "🚀 Starting Claude Code with Anthropic provider..."
 
     # exec replaces current process with Claude Code
-    exec claude
+    echo "🔍 DRY-RUN: Would exec claude in directory: $(pwd)" && echo "   DEVSTREAM_DB_PATH: $DEVSTREAM_DB_PATH" && return 0
   fi
 
   # UNREACHABLE: exec replaces the process
@@ -2269,25 +2172,10 @@ initialize_project_venv() {
 
   # Step 1: Try to detect and use existing virtual environment
   # Context7 best practice: Use subshell to avoid directory contamination
-  local detect_status=0
-  set +e
   existing_venv=$(
-    cd "$PROJECT_ROOT" 2>/dev/null || exit 2
+    cd "$PROJECT_ROOT" 2>/dev/null || exit 1
     detect_existing_venv "$PROJECT_ROOT" "$project_name" 2>/dev/null
   )
-  detect_status=$?
-  set -e
-
-  if [ $detect_status -eq 2 ]; then
-    print_error "❌ Failed to access project directory during venv detection"
-    print_error "   Directory: $PROJECT_ROOT"
-    cd "$original_pwd"
-    return 1
-  fi
-
-  if [ $detect_status -ne 0 ]; then
-    existing_venv=""
-  fi
 
   if [ -n "$existing_venv" ] && [ "$existing_venv" != "$project_venv_path" ]; then
     # Found existing venv in different location, create symlink for consistency
@@ -2372,12 +2260,6 @@ initialize_project_venv() {
     if ! grep -q "DEVSTREAM_PROJECT_ROOT=$PROJECT_ROOT" "$project_env_file"; then
       needs_config_update=true
     fi
-    if ! grep -q "DEVSTREAM_HOOK_UTILS_PATH=" "$project_env_file"; then
-      needs_config_update=true
-    fi
-    if ! grep -q "DEVSTREAM_PROJECT_SRC_PATH=" "$project_env_file"; then
-      needs_config_update=true
-    fi
   fi
 
   if [ "$needs_config_update" = true ]; then
@@ -2407,8 +2289,7 @@ DEVSTREAM_FRAMEWORK_PATH=$DEVSTREAM_SCRIPT_DIR
 DEVSTREAM_FRAMEWORK_VENV_PATH=$VENV_DIR
 
 # Python configuration
-DEVSTREAM_HOOK_UTILS_PATH=$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils
-DEVSTREAM_PROJECT_SRC_PATH=$PROJECT_ROOT/src
+PYTHONPATH=${PYTHONPATH:-}:$PROJECT_ROOT/src
 EOF
     print_info "✅ Created/updated project configuration"
   fi
@@ -2420,8 +2301,6 @@ EOF
   export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PATH="$PROJECT_ROOT/.devstream"
   export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PYTHON="$PROJECT_ROOT/.devstream/bin/python"
   export DEVSTREAM_PROJECT_DEVSTREAM_VENV_PIP="$PROJECT_ROOT/.devstream/bin/pip"
-  export DEVSTREAM_HOOK_UTILS_PATH="${DEVSTREAM_HOOK_UTILS_PATH:-$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils}"
-  export DEVSTREAM_PROJECT_SRC_PATH="${DEVSTREAM_PROJECT_SRC_PATH:-$PROJECT_ROOT/src}"
 
   # Update PATH to prioritize project venv and framework venv
   export PATH="$project_venv_path/bin:$PROJECT_ROOT/.devstream/bin:$PATH"
@@ -2432,15 +2311,6 @@ EOF
     source "$project_env_file"
     set +a
     print_info "✅ Loaded project environment configuration"
-  fi
-
-  # Ensure Python path includes project sources and shared DevStream hook utilities
-  local project_src="${DEVSTREAM_PROJECT_SRC_PATH:-$PROJECT_ROOT/src}"
-  local hook_utils="${DEVSTREAM_HOOK_UTILS_PATH:-$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream/utils}"
-  if [ -z "${PYTHONPATH:-}" ]; then
-    export PYTHONPATH="$project_src:$hook_utils"
-  else
-    export PYTHONPATH="$project_src:$hook_utils:$PYTHONPATH"
   fi
 
   # Final verification
@@ -2565,51 +2435,6 @@ initialize_project_templates() {
     print_info "   Available templates: $(IFS=', '; echo "${template_files[*]}")"
   else
     print_info "✅ All project templates are up to date"
-  fi
-}
-
-# Function to initialize protocol reference docs for multi-project setup
-initialize_project_protocols() {
-  if [ -z "${DEVSTREAM_PROJECT_ROOT:-}" ]; then
-    return 0
-  fi
-
-  print_status "📚 Initializing project protocols..."
-
-  local protocols_source_dir="$DEVSTREAM_SCRIPT_DIR/sessions/protocols"
-  local protocols_target_dir="$PROJECT_ROOT/sessions/protocols"
-
-  if [ ! -d "$protocols_source_dir" ]; then
-    print_warning "⚠️  Protocol templates not found: $protocols_source_dir"
-    return 0
-  fi
-
-  mkdir -p "$protocols_target_dir"
-
-  local copied_count=0
-  local updated_count=0
-
-  for protocol_file in "$protocols_source_dir"/*.md; do
-    [ -f "$protocol_file" ] || continue
-    local filename
-    filename=$(basename "$protocol_file")
-    local target_file="$protocols_target_dir/$filename"
-
-    if [ ! -f "$target_file" ]; then
-      cp "$protocol_file" "$target_file"
-      copied_count=$((copied_count + 1))
-    elif [ "$protocol_file" -nt "$target_file" ]; then
-      cp "$protocol_file" "$target_file"
-      updated_count=$((updated_count + 1))
-    fi
-  done
-
-  if [ $copied_count -eq 0 ] && [ $updated_count -eq 0 ]; then
-    print_info "✅ Project protocols are already up to date"
-  else
-    print_info "   Protocol files copied: $copied_count"
-    print_info "   Protocol files updated: $updated_count"
-    print_info "   Protocol directory: $protocols_target_dir"
   fi
 }
 
@@ -3296,11 +3121,8 @@ sys.path.insert(0, '$PROJECT_ROOT/.claude/hooks/devstream/utils')
 try:
     from hook_integrity_validator import HookIntegrityValidator
 
-    validator = HookIntegrityValidator('$DEVSTREAM_SCRIPT_DIR')
-    result = validator.validate_comprehensive(
-        '$PROJECT_ROOT/.claude/hooks/devstream',
-        devstream_root='$DEVSTREAM_SCRIPT_DIR/.claude/hooks/devstream'
-    )
+    validator = HookIntegrityValidator()
+    result = validator.validate_comprehensive('$PROJECT_ROOT/.claude/hooks/devstream')
 
     if result.get('success', False):
         print('OK')
@@ -3331,7 +3153,7 @@ except Exception as e:
       print_info "   Error: ${enhanced_copy_result#ERROR:}"
     fi
     print_warning "   Project will continue with standard hook copying (if available)"
-    return 0
+    return 1
   fi
 }
 
@@ -3348,10 +3170,6 @@ main() {
 
   case "$command" in
     start)
-      # Context7 best practice: Auto-confirm for non-interactive launcher execution
-      # Skip interactive prompts when starting Claude Code (safe operations only)
-      export DEVSTREAM_AUTO_CONFIRM_CLAUDE_MD=true
-
       # Load LLM provider configuration FIRST
       load_llm_provider "$provider"
 

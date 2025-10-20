@@ -249,8 +249,14 @@ configure_claude_settings() {
 
   # Backup existing settings
   if [ -f "$settings_file" ]; then
-    cp "$settings_file" "$settings_file.backup-zai-$(date +%Y%m%d_%H%M%S)"
-    print_info "✅ Backed up existing settings"
+    local backup_file="$settings_file.backup-zai-$(date +%Y%m%d_%H%M%S)"
+    if cp "$settings_file" "$backup_file" >/dev/null 2>&1 || true; then
+      if [ -f "$backup_file" ]; then
+        print_info "✅ Backed up existing settings"
+      else
+        print_warning "⚠️  Unable to backup existing settings (continuing without backup)"
+      fi
+    fi
   fi
 
   # Use Python for JSON manipulation (following Context7 best practices)

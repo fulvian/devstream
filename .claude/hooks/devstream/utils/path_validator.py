@@ -222,7 +222,7 @@ def validate_db_path(
     
     # Default project root to current working directory
     if project_root is None:
-        project_root = os.getcwd()
+        project_root = os.getenv('DEVSTREAM_PROJECT_ROOT', os.getcwd())
     
     # Canonicalize project root (resolve symlinks)
     canonical_project_root = os.path.realpath(project_root)

@@ -27,10 +27,12 @@ import hashlib
 try:
     # Try relative import first (when run as module)
     from .direct_client import DevStreamDirectClient, DatabaseException
+    from .mcp_client import DevStreamMCPClient
 except ImportError:
     try:
         # Fallback to absolute import (when run as script)
         from direct_client import DevStreamDirectClient, DatabaseException
+        from mcp_client import DevStreamMCPClient
     except ImportError as e:
         # Final fallback - define dummy classes for graceful degradation
         import logging
@@ -678,12 +680,8 @@ class UnifiedClient:
     def _get_mcp_client(self) -> Any:
         """Get or create MCP client."""
         if self._mcp_client is None:
-            # MCP CLIENT DEPRECATED - NOT USED ANYMORE
-            # MCP is deprecated and disabled - only Direct DB is used
-            self.logger.info("MCP client deprecated - using Direct DB only")
-            if self._direct_client is None:
-                self._direct_client = DevStreamDirectClient(self.db_path)
-            return self._direct_client
+            self.logger.info("Initializing DevStream MCP facade (direct client)")
+            self._mcp_client = DevStreamMCPClient(self.db_path)
 
         return self._mcp_client
 

@@ -11,7 +11,6 @@ configuration management, and system initialization.
 import asyncio
 import json
 import logging
-import structlog
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union
@@ -28,11 +27,56 @@ try:
     from .hook_integrity_validator import HookIntegrityValidator
     ENHANCED_HOOK_COPYING_AVAILABLE = True
 except ImportError as e:
-    print(f"Warning: Enhanced hook copying not available: {e}")
-    ENHANCED_HOOK_COPYING_AVAILABLE = False
+    try:
+        from multi_project_hook_copier import (
+            copy_devstream_hooks_enhanced,
+            HookCopyError,
+            DependencyError,
+            HookValidationError
+        )
+        from hook_integrity_validator import HookIntegrityValidator
+        ENHANCED_HOOK_COPYING_AVAILABLE = True
+    except ImportError as e2:
+        print(f"Warning: Enhanced hook copying not available: {e2}")
+        ENHANCED_HOOK_COPYING_AVAILABLE = False
 
 # Setup structured logging
-logger = structlog.get_logger(__name__)
+import logging
+
+
+class SimpleLogger:
+    def __init__(self, base_logger: logging.Logger):
+        self._base = base_logger
+
+    @staticmethod
+    def _format_message(message: str, fields: Dict[str, Any]) -> str:
+        if fields:
+            pairs = " ".join(f"{key}={value}" for key, value in fields.items())
+            return f"{message} | {pairs}"
+        return message
+
+    def info(self, message: str, **fields: Any) -> None:
+        self._base.info(self._format_message(message, fields))
+
+    def debug(self, message: str, **fields: Any) -> None:
+        self._base.debug(self._format_message(message, fields))
+
+    def warning(self, message: str, **fields: Any) -> None:
+        self._base.warning(self._format_message(message, fields))
+
+    def error(self, message: str, **fields: Any) -> None:
+        self._base.error(self._format_message(message, fields))
+
+
+_base_logger = logging.getLogger(__name__)
+if not _base_logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(message)s')
+    handler.setFormatter(formatter)
+    _base_logger.addHandler(handler)
+_base_logger.setLevel(logging.INFO)
+
+logger = SimpleLogger(_base_logger)
 
 
 class MultiProjectBootstrap:
@@ -60,19 +104,7 @@ class MultiProjectBootstrap:
         self.source_root = source_root
         self.config_file = config_file
         self.log_level = log_level
-
-        # Configure structured logging
-        structlog.configure(
-            processors=[
-                structlog.stdlib.filter_by_level,
-                structlog.stdlib.add_logger_name,
-                structlog.stdlib.add_log_level,
-                structlog.processors.JSONRenderer(),
-                structlog.processors.format_exc_info,
-            ],
-            wrapper_class=structlog.stdlib.LoggerFactory(),
-            cache_logger_on_first_use=True,
-        )
+        _base_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
         # Load configuration
         self.config = self._load_configuration()
@@ -139,7 +171,7 @@ class MultiProjectBootstrap:
             "Starting multi-project bootstrap",
             project=project_name,
             target_root=target_root,
-            enhanced_copying=ENHANCED_HOOKING_HOOK_COPYING_AVAILABLE
+            enhanced_copying=ENHANCED_HOOK_COPYING_AVAILABLE
         )
 
         try:
@@ -340,7 +372,7 @@ class MultiProjectBootstrap:
                     "project_root": str(target_root),
                     "source_root": str(copy_result.get("source_root", "unknown")),
                     "hook_copying": {
-                        "enhanced": ENHANCED_HOOKING_HOOK_COPYING_AVAILABLE,
+                        "enhanced": ENHANCED_HOOK_COPYING_AVAILABLE,
                         "directories": copy_result.get("copied_directories", []),
                         "integrity_validated": copy_result.get("integrity", {}).get("overall_valid", False)
                     }

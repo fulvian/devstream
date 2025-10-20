@@ -764,8 +764,3 @@ DEVSTREAM_VECTOR_DB_ENABLED=true
 ---
 
 *These rules are the foundation of the DevStream system. Violating them causes automatic system malfunctions and rollback.*
-<!--
-Generated with DevStream v2.0 - Context7-compliant multi-project setup
-Generation timestamp: Sun Oct 19 10:17:02 CEST 2025
-Template: template_processor.py
--->

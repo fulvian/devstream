@@ -27,6 +27,15 @@ from devstream_base import DevStreamHookBase, FeedbackLevel
 from context7_client import Context7Client
 from unified_client import get_unified_client
 
+try:
+    from mcp_client import get_mcp_client
+    MCP_CLIENT_AVAILABLE = True
+    _MCP_IMPORT_ERROR = ""
+except Exception as e:  # pragma: no cover - defensive import guard
+    MCP_CLIENT_AVAILABLE = False
+    _MCP_IMPORT_ERROR = str(e)
+    get_mcp_client = None  # type: ignore[assignment]
+
 # Agent Auto-Delegation imports (with graceful degradation)
 try:
     sys.path.insert(0, str(Path(__file__).parent.parent / 'agents'))
@@ -59,8 +68,15 @@ class UserPromptSubmitHook:
 
     def __init__(self):
         self.base = DevStreamHookBase("user_prompt_submit")
+        if MCP_CLIENT_AVAILABLE and get_mcp_client is not None:
+            self.mcp_client = get_mcp_client()
+        else:
+            self.mcp_client = None
+            self.base.debug_log(
+                f"MCP client unavailable for Context7 integration: {_MCP_IMPORT_ERROR}"
+            )
         self.unified_client = get_unified_client()
-        self.context7 = Context7Client(self.unified_client)
+        self.context7 = Context7Client(self.mcp_client)
 
         # Agent Auto-Delegation components (graceful degradation)
         self.pattern_matcher = None
@@ -120,6 +136,10 @@ class UserPromptSubmitHook:
             Formatted Context7 docs or None
         """
         try:
+            if not self.context7.enabled:
+                self.base.debug_log("Context7 integration disabled; skipping research")
+                return None
+
             self.base.debug_log("Context7 triggered - searching for docs")
 
             # Search and retrieve documentation
@@ -1455,7 +1475,7 @@ This query appears to be related to task management. Consider using TodoWrite fo
             return
 
         # Extract user input
-        user_input = context.user_input
+        user_input = getattr(context, 'user_input', getattr(context, 'prompt', ''))
 
         if not user_input or len(user_input) < 10:
             self.base.debug_log("User input too short for enhancement")
@@ -1545,6 +1565,8 @@ def main():
         # Run async processing
         asyncio.run(hook.process(ctx))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         # Graceful failure - non-blocking
         print(f"⚠️  DevStream: UserPromptSubmit error", file=sys.stderr)
         ctx.output.exit_non_block(f"Hook error: {str(e)[:100]}")

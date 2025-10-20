@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from dotenv import load_dotenv
+from mcp_client import get_mcp_client
 import aiohttp
 
 # Load environment variables
@@ -130,20 +131,12 @@ class DevStreamHookBase:
             MCP response or None on failure
         """
         try:
-            # In real implementation, this would use MCP protocol
-            # For now, simulate the call structure
-            self.logger.info(f"Calling MCP tool: {tool} with {parameters}")
-
-            # This is where we'd implement actual MCP client call
-            # Using placeholder structure based on observed MCP responses
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": f"✅ MCP call to {tool} completed successfully"
-                }]
-            }
+            client = get_mcp_client()
+            result = await client.call_tool(tool, parameters)
+            self.logger.info(f"DevStream direct call completed: {tool}")
+            return result
         except Exception as e:
-            self.logger.error(f"MCP call failed: {e}")
+            self.logger.error(f"Direct DevStream call failed: {e}")
             return None
 
     def output_context(self, context: str) -> None:

@@ -32,15 +32,16 @@ class Context7Client:
     Provides library resolution, documentation retrieval, and graceful fallback.
     """
 
-    def __init__(self, mcp_client: Any):
+    def __init__(self, mcp_client: Optional[Any]):
         """
         Initialize Context7 client.
 
         Args:
-            mcp_client: MCP client instance
+            mcp_client: MCP client instance (optional)
         """
         self.mcp_client = mcp_client
-        self.enabled = True  # Can be disabled for testing
+        self.enabled = mcp_client is not None
+        self.disabled_reason = None if self.enabled else "MCP client unavailable"
 
     async def should_trigger_context7(self, query: str) -> bool:
         """
@@ -52,6 +53,9 @@ class Context7Client:
         Returns:
             True if Context7 should be triggered
         """
+        if not self.enabled:
+            return False
+
         triggers = [
             r"how to.*(?:implement|use|setup|configure)",
             r"best practice",
@@ -126,6 +130,9 @@ class Context7Client:
         Returns:
             Context7 library ID or None
         """
+        if not self.enabled or self.mcp_client is None:
+            return None
+
         try:
             result = await self.mcp_client.call_tool(
                 "mcp__context7__resolve-library-id",
@@ -164,6 +171,9 @@ class Context7Client:
         Returns:
             Documentation string or None
         """
+        if not self.enabled or self.mcp_client is None:
+            return None
+
         try:
             params = {
                 "context7CompatibleLibraryID": library_id,
@@ -208,7 +218,7 @@ class Context7Client:
                 docs="",
                 snippets=[],
                 success=False,
-                error="Context7 disabled"
+                error=self.disabled_reason or "Context7 disabled"
             )
 
         # Extract library if not provided

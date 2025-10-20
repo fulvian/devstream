@@ -1,6 +1,6 @@
 {
-  "task": "debug-critical-multi-project-bootstrap-failure",
-  "branch": "feature/protocol-enforcement-integration", 
-  "services": ["devstream-framework", "launcher"],
-  "updated": "2025-10-17"
+  "task": "definire-nuove-modalita-format-aggiornamento-claude-md",
+  "branch": "feature/protocol-enforcement-integration",
+  "services": ["documentation", "devstream-core"],
+  "updated": "2025-10-19"
 }
