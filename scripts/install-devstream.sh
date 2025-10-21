@@ -1276,7 +1276,7 @@ run_project_migrations() {
     export PYTHONPATH="$original_pythonpath"
 
     if [ $migration_status -eq 0 ]; then
-        print_status "✅ Project migrations completed"
+        print_success "✅ Project migrations completed"
         echo "$migration_output" | grep -E "Running upgrade" || true
     else
         print_warning "⚠️  Project migrations reported errors"
@@ -1634,13 +1634,22 @@ def create_comprehensive_database(db_path):
         # Create semantic memory table with vector support
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS semantic_memory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
-                content_type TEXT DEFAULT 'code',
+                content_type TEXT NOT NULL,
                 keywords TEXT,
-                embedding BLOB,
+                session_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                access_count INTEGER DEFAULT 0,
+                relevance_score REAL DEFAULT 1.0,
+                importance_score REAL DEFAULT 0.0,
+                last_accessed_at TIMESTAMP,
+                metadata TEXT,
+                source TEXT,
+                embedding_blob BLOB,
+                embedding_model TEXT,
+                embedding_dimension INTEGER
             )
         ''')
 
@@ -1648,10 +1657,9 @@ def create_comprehensive_database(db_path):
         cursor.execute('''
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
                 content,
-                keywords,
-                content_type,
-                content=semantic_memory,
-                content_rowid=id
+                content_type UNINDEXED,
+                memory_id UNINDEXED,
+                created_at UNINDEXED
             )
         ''')
 
@@ -1659,8 +1667,8 @@ def create_comprehensive_database(db_path):
         cursor.execute('''
             CREATE TRIGGER IF NOT EXISTS sync_insert_memory AFTER INSERT ON semantic_memory
             BEGIN
-                INSERT INTO fts_semantic_memory(rowid, content, keywords, content_type)
-                VALUES (new.id, new.content, new.keywords, new.content_type);
+                INSERT INTO fts_semantic_memory(content, content_type, memory_id, created_at)
+                VALUES (new.content, new.content_type, new.id, COALESCE(new.created_at, CURRENT_TIMESTAMP));
             END
         ''')
 
@@ -1669,25 +1677,30 @@ def create_comprehensive_database(db_path):
             BEGIN
                 UPDATE fts_semantic_memory SET
                     content = new.content,
-                    keywords = new.keywords,
-                    content_type = new.content_type
-                WHERE rowid = new.id;
+                    content_type = new.content_type,
+                    memory_id = new.id,
+                    created_at = COALESCE(new.updated_at, CURRENT_TIMESTAMP)
+                WHERE memory_id = old.id;
             END
         ''')
 
         cursor.execute('''
             CREATE TRIGGER IF NOT EXISTS sync_delete_memory AFTER DELETE ON semantic_memory
             BEGIN
-                DELETE FROM fts_semantic_memory WHERE rowid = old.id;
+                DELETE FROM fts_semantic_memory WHERE memory_id = old.id;
             END
         ''')
 
-        # Create sessions table for Context7 compliance
+        # Create sessions table for Context7 compliance (matches launcher schema)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                tokens_used INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                files_modified INTEGER DEFAULT 0,
+                tasks_completed INTEGER DEFAULT 0,
                 metadata TEXT
             )
         ''')
@@ -1714,7 +1727,8 @@ def create_comprehensive_database(db_path):
         # Create indexes for performance
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_semantic_memory_content_type ON semantic_memory(content_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_semantic_memory_created_at ON semantic_memory(created_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at)')
 
         conn.commit()
 

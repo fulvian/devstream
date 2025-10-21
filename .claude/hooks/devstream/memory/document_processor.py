@@ -497,11 +497,15 @@ class DocumentProcessor:
             '.tox', '.mypy_cache', '.ruff_cache', 'htmlcov',
             '.eggs', '*.egg-info', '.DS_Store'
         }
+        # Additional exclusions for virtualenv/vendor directories
+        virtual_env_markers = {'.accountabilly', 'site-packages'}
 
         # Context7 Pattern: Path part inspection (primary strategy)
         # Most reliable for directory-based exclusions
         for part in relative_path.parts:
             if part in exclude_dirs:
+                return True
+            if part in virtual_env_markers:
                 return True
             # Handle .egg-info and similar patterns
             if part.endswith('.egg-info') or part.endswith('.dist-info'):
@@ -571,10 +575,17 @@ class DocumentProcessor:
         content_type = processed_doc.content_type
 
         # Choose appropriate splitter
-        if content_type == 'code' and LANGCHAIN_AVAILABLE:
-            chunks = self.code_splitter.split_text(processed_doc.content)
+        if LANGCHAIN_AVAILABLE:
+            if content_type == 'code':
+                chunks = self.code_splitter.split_text(processed_doc.content)
+            else:
+                chunks = self.text_splitter.split_text(processed_doc.content)
         else:
-            chunks = self.text_splitter.split_text(processed_doc.content)
+            # Fallback splitter is a callable function
+            chunks = self.text_splitter(processed_doc.content)
+
+        if not chunks:
+            chunks = [processed_doc.content]
 
         # Create Document objects with enriched metadata
         documents = []

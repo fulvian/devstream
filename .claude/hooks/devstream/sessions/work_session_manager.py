@@ -14,6 +14,7 @@ import sys
 import os
 import aiosqlite
 import structlog
+import sqlite3
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -115,6 +116,7 @@ class WorkSessionManager:
             self.db_path = db_path
 
         self.logger.info(f"WorkSessionManager initialized with DB: {self.db_path}")
+        self._ensure_session_schema()
 
     def _get_dynamic_db_path(self) -> str:
         """
@@ -160,6 +162,86 @@ class WorkSessionManager:
 
         self.logger.debug(f"Using fallback DB path: {fallback_path}")
         return fallback_path
+
+    def _ensure_session_schema(self) -> None:
+        """
+        Ensure sessions table matches Context7 schema expectations.
+
+        Adds missing columns/indexes on legacy databases so SessionStart
+        hook can operate even if database was created with older scripts.
+        """
+        required_columns = {
+            "tokens_used": "INTEGER DEFAULT 0",
+            "status": "TEXT DEFAULT 'active'",
+            "started_at": "TEXT DEFAULT CURRENT_TIMESTAMP",
+            "ended_at": "TEXT",
+            "files_modified": "INTEGER DEFAULT 0",
+            "tasks_completed": "INTEGER DEFAULT 0",
+            "metadata": "TEXT",
+        }
+
+        db_file = Path(self.db_path)
+        if not db_file.exists():
+            self.logger.debug(
+                "Skipping session schema check - database file missing",
+                db_path=self.db_path,
+            )
+            return
+
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Create table if it does not exist
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    tokens_used INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'active',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    files_modified INTEGER DEFAULT 0,
+                    tasks_completed INTEGER DEFAULT 0,
+                    metadata TEXT
+                )
+                """
+            )
+
+            # Inspect existing columns and add missing ones
+            cursor.execute("PRAGMA table_info(sessions)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+
+            for column, column_def in required_columns.items():
+                if column not in existing_columns:
+                    cursor.execute(f"ALTER TABLE sessions ADD COLUMN {column} {column_def}")
+                    self.logger.info(
+                        "Added missing column to sessions table",
+                        column=column,
+                        definition=column_def,
+                    )
+
+            # Ensure indexes exist
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at)"
+            )
+
+            conn.commit()
+
+        except sqlite3.Error as error:
+            self.logger.warning(
+                "Failed to ensure sessions schema", error=str(error)
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _get_connection(self) -> aiosqlite.Connection:
         """

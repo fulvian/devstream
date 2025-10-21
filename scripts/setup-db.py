@@ -25,7 +25,7 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 import structlog
 
@@ -484,6 +484,224 @@ def verify_schema_version(conn: sqlite3.Connection) -> Optional[str]:
         return None
 
 
+def ensure_context7_tables(conn: sqlite3.Connection) -> None:
+    """
+    Ensure Context7-era tables and columns required by hooks exist.
+
+    Currently enforces the schema for:
+      - sessions (work session tracking used by SessionStartHook)
+      - implementation_plans (needed by plan management hooks)
+      - semantic_memory (direct DB access used by bootstrap and hooks)
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    existing_tables: Set[str] = {row[0] for row in cursor.fetchall()}
+
+    updated_tables: List[str] = []
+
+    # Ensure sessions table has expected columns
+    required_session_columns = {
+        "id",
+        "tokens_used",
+        "status",
+        "started_at",
+        "ended_at",
+        "files_modified",
+        "tasks_completed",
+        "metadata",
+    }
+    recreate_sessions = False
+
+    if "sessions" not in existing_tables:
+        logger.info("sessions_table_missing", action="create")
+        recreate_sessions = True
+    else:
+        cursor.execute("PRAGMA table_info(sessions)")
+        current_columns = {row[1] for row in cursor.fetchall()}
+        if not required_session_columns.issubset(current_columns):
+            logger.warning(
+                "sessions_table_outdated",
+                missing=list(required_session_columns - current_columns),
+                existing=list(current_columns),
+            )
+            cursor.execute("DROP TABLE IF EXISTS sessions")
+            recreate_sessions = True
+
+    if recreate_sessions:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                tokens_used INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                files_modified INTEGER DEFAULT 0,
+                tasks_completed INTEGER DEFAULT 0,
+                metadata TEXT
+            )
+            """
+        )
+        updated_tables.append("sessions")
+
+    # Ensure supporting indexes exist (idempotent)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at)")
+
+    # Ensure implementation_plans table schema
+    required_impl_columns = {
+        "id",
+        "task_id",
+        "model_type",
+        "plan_title",
+        "plan_content",
+        "plan_status",
+        "created_at",
+        "updated_at",
+        "metadata",
+    }
+    recreate_impl = False
+
+    if "implementation_plans" not in existing_tables:
+        logger.info("implementation_plans_table_missing", action="create")
+        recreate_impl = True
+    else:
+        cursor.execute("PRAGMA table_info(implementation_plans)")
+        current_columns = {row[1] for row in cursor.fetchall()}
+        if not required_impl_columns.issubset(current_columns):
+            logger.warning(
+                "implementation_plans_table_outdated",
+                missing=list(required_impl_columns - current_columns),
+                existing=list(current_columns),
+            )
+            cursor.execute("DROP TABLE IF EXISTS implementation_plans")
+            recreate_impl = True
+
+    if recreate_impl:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS implementation_plans (
+                id TEXT PRIMARY KEY,
+                task_id TEXT,
+                model_type TEXT NOT NULL,
+                plan_title TEXT NOT NULL,
+                plan_content TEXT,
+                plan_status TEXT DEFAULT 'draft',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                metadata TEXT,
+                FOREIGN KEY (task_id) REFERENCES tasks (id)
+            )
+            """
+        )
+        updated_tables.append("implementation_plans")
+
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_task_id ON implementation_plans(task_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_status ON implementation_plans(plan_status)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_implementation_plans_model_type ON implementation_plans(model_type)"
+    )
+
+    # Ensure semantic_memory table schema aligns with direct_client expectations
+    required_semantic_columns: Dict[str, str] = {
+        "content": "TEXT NOT NULL",
+        "content_type": "TEXT NOT NULL",
+        "keywords": "TEXT",
+        "session_id": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "access_count": "INTEGER DEFAULT 0",
+        "relevance_score": "REAL DEFAULT 1.0",
+        "importance_score": "REAL DEFAULT 0.0",
+        "last_accessed_at": "TIMESTAMP",
+        "metadata": "TEXT",
+        "source": "TEXT",
+        "embedding_blob": "BLOB",
+        "embedding_model": "TEXT",
+        "embedding_dimension": "INTEGER",
+    }
+
+    semantic_columns_added: List[str] = []
+
+    if "semantic_memory" not in existing_tables:
+        logger.info("semantic_memory_table_missing", action="create")
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS semantic_memory (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                keywords TEXT,
+                session_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                access_count INTEGER DEFAULT 0,
+                relevance_score REAL DEFAULT 1.0,
+                importance_score REAL DEFAULT 0.0,
+                last_accessed_at TIMESTAMP,
+                metadata TEXT,
+                source TEXT,
+                embedding_blob BLOB,
+                embedding_model TEXT,
+                embedding_dimension INTEGER
+            )
+            """
+        )
+        updated_tables.append("semantic_memory")
+    else:
+        cursor.execute("PRAGMA table_info(semantic_memory)")
+        current_columns = {row[1] for row in cursor.fetchall()}
+        for column, definition in required_semantic_columns.items():
+            if column not in current_columns:
+                cursor.execute(f"ALTER TABLE semantic_memory ADD COLUMN {column} {definition}")
+                semantic_columns_added.append(column)
+
+    if semantic_columns_added:
+        logger.info(
+            "semantic_memory_columns_added",
+            missing=semantic_columns_added
+        )
+        updated_tables.append("semantic_memory")
+
+    # Ensure FTS table matches expected layout (drop/recreate if outdated)
+    cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='fts_semantic_memory'"
+    )
+    fts_definition_row = cursor.fetchone()
+    expected_tokens = ("content", "content_type", "memory_id", "created_at")
+    needs_fts_refresh = False
+    if not fts_definition_row or fts_definition_row[0] is None:
+        needs_fts_refresh = True
+    else:
+        definition_sql = fts_definition_row[0]
+        if any(token not in definition_sql for token in expected_tokens) or "keywords" in definition_sql:
+            needs_fts_refresh = True
+
+    if needs_fts_refresh:
+        cursor.execute("DROP TABLE IF EXISTS fts_semantic_memory")
+        cursor.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
+                content,
+                content_type UNINDEXED,
+                memory_id UNINDEXED,
+                created_at UNINDEXED
+            )
+            """
+        )
+        updated_tables.append("fts_semantic_memory")
+
+    if updated_tables:
+        conn.commit()
+        logger.info("context7_tables_updated", tables=updated_tables)
+    else:
+        logger.info("context7_tables_already_current")
+
+
 def print_summary_report(
     tables: List[str],
     virtual_tables: Dict[str, str],
@@ -618,6 +836,10 @@ def setup_database(
             # Step 7: Execute schema
             logger.info("step_6_executing_schema")
             execute_schema(conn, schema_sql, vec_loaded)
+
+            # Step 7b: Ensure Context7 supplemental tables/columns exist
+            logger.info("step_6b_ensuring_context7_tables")
+            ensure_context7_tables(conn)
 
             # Step 8: Verification
             logger.info("step_7_verifying_database")
