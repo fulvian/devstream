@@ -12,7 +12,7 @@ Features principali:
 - Context Injection: Memoria rilevante iniettata automaticamente
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __author__ = "Claude AI Assistant"
 __email__ = "noreply@anthropic.com"
 __license__ = "MIT"

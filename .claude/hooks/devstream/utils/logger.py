@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 import structlog
+import os
+import tempfile
 
 class DevStreamLogger:
     """
@@ -35,8 +37,24 @@ class DevStreamLogger:
             log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
         """
         self.hook_name = hook_name
-        self.log_dir = Path.home() / '.claude' / 'logs' / 'devstream'
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        log_dir_env = os.getenv('DEVSTREAM_LOG_DIR')
+        if log_dir_env:
+            candidate_dir = Path(log_dir_env).expanduser()
+        else:
+            project_root = os.getenv('DEVSTREAM_PROJECT_ROOT')
+            if project_root:
+                candidate_dir = Path(project_root) / '.claude' / 'logs' / 'devstream'
+            else:
+                candidate_dir = Path.home() / '.claude' / 'logs' / 'devstream'
+
+        try:
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            self.log_dir = candidate_dir
+        except PermissionError:
+            fallback_dir = Path(tempfile.gettempdir()) / 'devstream' / 'logs'
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            self.log_dir = fallback_dir
 
         # Setup structured logging
         self._setup_structlog(log_level)
@@ -97,18 +115,32 @@ class DevStreamLogger:
         # Setup standard logging handlers manually (Context7 pattern - avoid basicConfig)
         root_logger = logging.getLogger()
 
-        # Check if we already have our hook-specific handler to avoid duplicates
         hook_handler_name = f'devstream_{self.hook_name}_handler'
-        for handler in root_logger.handlers:
+        expected_path = self.log_dir / f'{self.hook_name}.jsonl'
+        for handler in list(root_logger.handlers):
             if getattr(handler, 'name', None) == hook_handler_name:
-                return  # Handler already exists
+                current_path = Path(getattr(handler, 'baseFilename', expected_path))
+                if current_path != expected_path:
+                    root_logger.removeHandler(handler)
+                    handler.close()
+                else:
+                    return  # Handler already configured with correct path
 
         # Set level if not already set
         if not root_logger.level or root_logger.level == logging.NOTSET:
             root_logger.setLevel(getattr(logging, log_level.upper()))
 
         # Add file handler with unique name
-        file_handler = logging.FileHandler(self.log_dir / f'{self.hook_name}.jsonl')
+        log_file_path = self.log_dir / f'{self.hook_name}.jsonl'
+        try:
+            file_handler = logging.FileHandler(log_file_path)
+        except PermissionError:
+            fallback_dir = Path(tempfile.gettempdir()) / 'devstream' / 'logs'
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            self.log_dir = fallback_dir
+            log_file_path = self.log_dir / f'{self.hook_name}.jsonl'
+            file_handler = logging.FileHandler(log_file_path)
+
         file_handler.setFormatter(logging.Formatter('%(message)s'))
         file_handler.name = hook_handler_name  # Name to track and avoid duplicates
         root_logger.addHandler(file_handler)
@@ -316,6 +348,55 @@ class DevStreamLogger:
             memory_usage_mb=memory_usage_mb,
             api_calls=api_calls
         )
+
+    def log_direct_call(
+        self,
+        operation: str,
+        parameters: Dict[str, Any],
+        success: bool,
+        duration_ms: float,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        Log direct database call (replacing MCP calls).
+
+        Args:
+            operation: Database operation performed
+            parameters: Operation parameters
+            success: Operation success status
+            duration_ms: Duration in milliseconds
+            result: Operation result if successful
+            error: Error message if failed
+        """
+        self.logger.info(
+            "Direct database call",
+            hook_event="direct_call",
+            hook=self.hook_name,
+            operation=operation,
+            parameters=parameters,
+            success=success,
+            duration_ms=duration_ms,
+            result=result or {},
+            error=error
+        )
+
+    # Delegate methods for standard logging (Context7 pattern)
+    def info(self, event: str, **kwargs) -> None:
+        """Log info message with structured context."""
+        self.logger.info(event, hook=self.hook_name, **kwargs)
+
+    def debug(self, event: str, **kwargs) -> None:
+        """Log debug message with structured context."""
+        self.logger.debug(event, hook=self.hook_name, **kwargs)
+
+    def warning(self, event: str, **kwargs) -> None:
+        """Log warning message with structured context."""
+        self.logger.warning(event, hook=self.hook_name, **kwargs)
+
+    def error(self, event: str, **kwargs) -> None:
+        """Log error message with structured context."""
+        self.logger.error(event, hook=self.hook_name, **kwargs)
 
 def get_devstream_logger(hook_name: str, log_level: str = "INFO") -> DevStreamLogger:
     """

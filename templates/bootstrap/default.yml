@@ -1,0 +1,49 @@
+# DevStream bootstrap configuration (default)
+# Adjust include/exclude lists per project requirements.
+
+document_processor:
+  include_directories:
+    - src
+    - app
+    - backend
+    - frontend
+    - docs
+    - config
+    - tests
+  exclude_directories:
+    - .venv
+    - venv
+    - env
+    - node_modules
+    - dist
+    - build
+    - .git
+    - .devstream
+    - data
+    - logs
+    - __pycache__
+    - site-packages
+  include_extensions:
+    - .py
+    - .pyi
+    - .ts
+    - .tsx
+    - .js
+    - .jsx
+    - .md
+    - .rst
+    - .txt
+    - .json
+    - .toml
+    - .yml
+    - .yaml
+    - .cfg
+    - .ini
+  max_file_size_bytes: 2097152  # 2 MB
+
+indexer:
+  cleanup_mode: incremental
+  force_reindex: false
+
+code_analysis:
+  enabled: true

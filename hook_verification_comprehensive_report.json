@@ -1,0 +1,246 @@
+{
+  "timestamp": "2025-10-22T09:54:00.339363",
+  "performance_summary": {
+    "total_tests": 14,
+    "successful_tests": 7,
+    "success_rate": 50.0,
+    "average_execution_time_ms": 81.91682611192975,
+    "total_test_time_ms": 1146.8355655670166
+  },
+  "categories": {
+    "syntax_tests": [
+      "<__main__.HookVerificationResult object at 0x1037eb350>",
+      "<__main__.HookVerificationResult object at 0x1037e9250>",
+      "<__main__.HookVerificationResult object at 0x1037ea6d0>",
+      "<__main__.HookVerificationResult object at 0x1037e99d0>",
+      "<__main__.HookVerificationResult object at 0x102cbbf90>",
+      "<__main__.HookVerificationResult object at 0x102990750>"
+    ],
+    "execution_tests": [
+      "<__main__.HookVerificationResult object at 0x102d2b150>",
+      "<__main__.HookVerificationResult object at 0x1037eaed0>",
+      "<__main__.HookVerificationResult object at 0x1037e8f90>",
+      "<__main__.HookVerificationResult object at 0x1037eae90>",
+      "<__main__.HookVerificationResult object at 0x1037e8f10>",
+      "<__main__.HookVerificationResult object at 0x1037e8c90>"
+    ],
+    "sequence_tests": [
+      "<__main__.HookVerificationResult object at 0x1037e8ed0>"
+    ],
+    "memory_tests": [
+      "<__main__.HookVerificationResult object at 0x1037eb8d0>"
+    ]
+  },
+  "execution_summary": {
+    "total_traces": 24,
+    "hooks_executed": "{'.claude/hooks/devstream/concurrency_guard.py', '.claude/hooks/devstream/memory/pre_tool_use.py', '.claude/hooks/devstream/memory/post_tool_use.py', '.claude/hooks/devstream/context/user_query_context_enhancer.py', '.claude/hooks/devstream/protocol/task_first_handler.py', '.claude/hooks/devstream/protocol/micro_task_commit_handler.py'}",
+    "total_duration": 0,
+    "errors": [],
+    "hook_statistics": {
+      ".claude/hooks/devstream/memory/pre_tool_use.py": {
+        "count": 5,
+        "total_duration": 0,
+        "errors": 0
+      },
+      ".claude/hooks/devstream/memory/post_tool_use.py": {
+        "count": 5,
+        "total_duration": 0,
+        "errors": 0
+      },
+      ".claude/hooks/devstream/context/user_query_context_enhancer.py": {
+        "count": 5,
+        "total_duration": 0,
+        "errors": 0
+      },
+      ".claude/hooks/devstream/protocol/task_first_handler.py": {
+        "count": 3,
+        "total_duration": 0,
+        "errors": 0
+      },
+      ".claude/hooks/devstream/protocol/micro_task_commit_handler.py": {
+        "count": 3,
+        "total_duration": 0,
+        "errors": 0
+      },
+      ".claude/hooks/devstream/concurrency_guard.py": {
+        "count": 3,
+        "total_duration": 0,
+        "errors": 0
+      }
+    }
+  },
+  "individual_results": [
+    {
+      "test_name": "syntax_task_first_handler.py",
+      "success": true,
+      "duration_ms": 34.44814682006836,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "syntax_pre_tool_use.py",
+      "success": true,
+      "duration_ms": 40.51709175109863,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "syntax_user_query_context_enhancer.py",
+      "success": true,
+      "duration_ms": 39.22009468078613,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "syntax_post_tool_use.py",
+      "success": true,
+      "duration_ms": 42.09184646606445,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "syntax_concurrency_guard.py",
+      "success": true,
+      "duration_ms": 32.219886779785156,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "syntax_micro_task_commit_handler.py",
+      "success": true,
+      "duration_ms": 33.73408317565918,
+      "error_message": "",
+      "debug_info": {},
+      "performance_metrics": {
+        "syntax_valid": true
+      }
+    },
+    {
+      "test_name": "hook_execution_pre_tool_use.py",
+      "success": false,
+      "duration_ms": 193.5272216796875,
+      "error_message": "Hook exited with code 1: \u2705 DevStream: SemanticCacheKeys initialized with Context7 patterns\nFailed to parse JSON input: Invalid JSON input: Expecting value: line 1 column 1 (char 0)",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "hook_execution_post_tool_use.py",
+      "success": false,
+      "duration_ms": 166.5511131286621,
+      "error_message": "Hook exited with code 1: Failed to parse JSON input: Invalid JSON input: Expecting value: line 1 column 1 (char 0)\n\u26a0\ufe0f  DevStream: No hook input, using fallback mode\nTraceback (most recent call last):\n  File \"/Users/fulvioventura/devstream/.claude/hooks/devstream/memory/post_tool_use.py\", line 1377, in <module>\n    main()\n  File \"/Users/fulvioventura/devstream/.claude/hooks/devstream/memory/post_tool_use.py\", line 1358, in main\n    hook = PostToolUseHook()\n           ^^^^^^^^^^^^^^^^^\n  File \"/Users/fulvioventura/devstream/.claude/hooks/devstream/memory/post_tool_use.py\", line 181, in __init__\n    self._init_db_pool()\n    ^^^^^^^^^^^^^^^^^^\nAttributeError: 'PostToolUseHook' object has no attribute '_init_db_pool'",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "hook_execution_user_query_context_enhancer.py",
+      "success": false,
+      "duration_ms": 160.5210304260254,
+      "error_message": "Hook exited with code 1: Failed to parse JSON input: Invalid JSON input: Expecting value: line 1 column 1 (char 0)",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "hook_execution_task_first_handler.py",
+      "success": false,
+      "duration_ms": 150.18296241760254,
+      "error_message": "Hook exited with code 1: Traceback (most recent call last):\n  File \"/Users/fulvioventura/devstream/.claude/hooks/devstream/protocol/task_first_handler.py\", line 767, in <module>\n    asyncio.run(test_task_first_handler())\n  File \"/opt/homebrew/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py\", line 190, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/asyncio/base_events.py\", line 654, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"/Users/fulvioventura/devstream/.claude/hooks/devstream/protocol/task_first_handler.py\", line 726, in test_task_first_handler\n    assert should_create == False\n           ^^^^^^^^^^^^^^^^^^^^^^\nAssertionError",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "hook_execution_micro_task_commit_handler.py",
+      "success": false,
+      "duration_ms": 134.71531867980957,
+      "error_message": "Hook exited with code 1: {\"hook\": \"__main__\", \"event\": \"no_todo_data_provided\", \"logger\": \"__main__\", \"level\": \"error\", \"timestamp\": \"2025-10-22T07:54:00.202257Z\"}",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "hook_execution_concurrency_guard.py",
+      "success": false,
+      "duration_ms": 118.57414245605469,
+      "error_message": "Hook exited with code 1: {\"error\": \"Expecting value: line 1 column 1 (char 0)\", \"event\": \"Concurrency guard failed\", \"logger\": \"__main__\", \"level\": \"error\", \"timestamp\": \"2025-10-22T07:54:00.323610Z\"}\n{\"status\": \"blocked\", \"error\": \"Expecting value: line 1 column 1 (char 0)\", \"retry_suggested\": false}",
+      "debug_info": {},
+      "performance_metrics": {}
+    },
+    {
+      "test_name": "execution_sequence",
+      "success": true,
+      "duration_ms": 0.15473365783691406,
+      "error_message": "",
+      "debug_info": {
+        "sequence_data": [
+          {
+            "hook": "pre_tool_use.py",
+            "sequence_position": 0,
+            "execution_time_ms": 0.07700920104980469,
+            "status": "success"
+          },
+          {
+            "hook": "post_tool_use.py",
+            "sequence_position": 1,
+            "execution_time_ms": 0.010967254638671875,
+            "status": "success"
+          },
+          {
+            "hook": "user_query_context_enhancer.py",
+            "sequence_position": 2,
+            "execution_time_ms": 0.009059906005859375,
+            "status": "success"
+          },
+          {
+            "hook": "task_first_handler.py",
+            "sequence_position": 3,
+            "execution_time_ms": 0.010967254638671875,
+            "status": "success"
+          },
+          {
+            "hook": "micro_task_commit_handler.py",
+            "sequence_position": 4,
+            "execution_time_ms": 0.007867813110351562,
+            "status": "success"
+          },
+          {
+            "hook": "concurrency_guard.py",
+            "sequence_position": 5,
+            "execution_time_ms": 0.007152557373046875,
+            "status": "success"
+          }
+        ]
+      },
+      "performance_metrics": {
+        "total_hooks_tested": 6,
+        "successful_hooks": 6,
+        "sequence_integrity": true,
+        "average_hook_time_ms": 0.020503997802734375
+      }
+    },
+    {
+      "test_name": "memory_leak_detection",
+      "success": false,
+      "duration_ms": 0.37789344787597656,
+      "error_message": "Memory leak test error: Snapshot.compare_to() missing 1 required positional argument: 'key_type'",
+      "debug_info": {},
+      "performance_metrics": {}
+    }
+  ],
+  "recommendations": [
+    "Investigate potential memory leaks in hook system"
+  ],
+  "overall_status": "NEEDS_ATTENTION"
+}

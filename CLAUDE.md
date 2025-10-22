@@ -1,609 +1,443 @@
-# CLAUDE.md - DevStream Project Rules
+# CLAUDE.md - DevStream Project Rules (Optimized)
 
-**Version**: 2.2.0 | **Date**: 2025-10-09 | **Status**: Production Ready - Protocol v2.2.0 (Strategic Choice Gate)
+**Version**: 2.2.0 | **Date**: 2025-10-09 | **Status**: Production Ready
 
-⚠️ **CRITICAL**: These rules are **MANDATORY** and integrated into the DevStream system through automatic hooks. Violating them may cause system malfunctions.
-
----
-
-## 🎯 DevStream System Architecture
-
-DevStream combines: (1) Task Lifecycle Management, (2) Semantic Memory System, (3) Context Injection (Context7 + DevStream Memory), (4) Hook Automation (PreToolUse, PostToolUse, UserPromptSubmit via cchooks).
-
-**🔄 Automatic System**: Hooks automatically execute memory storage and context injection without manual intervention.
+⚠️ **MANDATORY SYSTEM RULES** - Non-negotiable, integrated via automatic hooks. Violations cause system malfunctions and rollback.
 
 ---
 
-## 🤖 Custom Agent System - Multi-Stack Development
+## 🚨 MemoryManager System (CRITICAL)
 
-**Status**: Phase 3 Complete ✅ | 8 Agents + Auto-Delegation Production Ready
+**MemoryManager** is MANDATORY and EXCLUSIVE for DevStream project memory database queries.
 
-### Agent Architecture (4-Level Hierarchy)
+### Usage Rules
+✅ **ALWAYS**: `from .claude.hooks.devstream.utils.direct_client import get_direct_client`
+❌ **NEVER**: Python Specialist, MCP Tools, Direct SQL, bypassing MemoryManager
 
-```
-Level 1: ORCHESTRATOR (@tech-lead) - Task decomposition, multi-agent coordination, architectural decisions
-         └── TIER-BASED DELEGATION (Protocol v2.2.0 ✅) - Complexity-based intelligent routing
-Level 2: DOMAIN SPECIALISTS (6 agents ✅)
-  @python-specialist     - Python 3.11+, FastAPI, Django, async, pytest, type-safe
-  @typescript-specialist - TypeScript, React, Next.js, Server Components, hooks, optimization
-  @rust-specialist       - Ownership, async/await, zero-cost abstractions, cargo, memory safety
-  @go-specialist         - Goroutines, channels, cloud-native, idiomatic Go, table-driven tests
-  @database-specialist   - PostgreSQL/MySQL/SQLite, schema design, indexing, query tuning
-  @devops-specialist     - Docker, Kubernetes, CI/CD, IaC, GitOps, production deployment
-Level 3: TASK SPECIALISTS (Phase 3+) - @api-architect, @performance-optimizer, @testing-specialist
-Level 4: QUALITY ASSURANCE - @code-reviewer (OWASP Top 10, performance, architecture - MANDATORY before commits)
+### Correct Pattern
+```python
+from .claude.hooks.devstream.utils.direct_client import get_direct_client
+
+def search_project_memory(query: str):
+    client = get_direct_client()
+    return client.search_memory(query, limit=10)
 ```
 
-### Agent Usage Patterns
+### Direct DB Commands
+```bash
+# Search memory
+.devstream/bin/python -c "
+import asyncio, sys
+sys.path.append('.claude/hooks/devstream/utils')
+from direct_client import get_direct_client
 
-**Direct Invocation** (single-language): `@python-specialist Create FastAPI endpoint for user auth`
-**Orchestrated Workflow** (multi-stack): `@tech-lead Build full-stack user management system` → tech-lead delegates @python-specialist (backend) → @typescript-specialist (frontend) → @code-reviewer (validation)
-**Quality Gate** (MANDATORY): `@code-reviewer Review implementation in src/api/users.py:45-120`
+async def search():
+    client = get_direct_client()
+    result = await client.search_memory('query', limit=10)
+    print(result)
+asyncio.run(search())
+"
+
+# Store memory
+.devstream/bin/python -c "
+import asyncio, sys
+sys.path.append('.claude/hooks/devstream/utils')
+from direct_client import get_direct_client
+
+async def store():
+    client = get_direct_client()
+    result = await client.store_memory(
+        content='content',
+        content_type='code',
+        keywords=['kw1', 'kw2']
+    )
+    print(result)
+asyncio.run(store())
+"
+
+# Task management
+.devstream/bin/python -c "
+import asyncio, sys
+sys.path.append('.claude/hooks/devstream/utils')
+from direct_client import get_direct_client
+
+async def task_ops():
+    client = get_direct_client()
+    # Create task
+    result = await client.create_task(
+        title='Task Title',
+        description='Description',
+        task_type='development',
+        priority=5,
+        phase_name='Implementation'
+    )
+    # List tasks
+    tasks = await client.list_tasks(status='pending')
+    print(result, tasks)
+asyncio.run(task_ops())
+"
+```
+
+---
+
+## 🤖 Agent System (17/17 Production Ready)
+
+### Hierarchy (4 Levels)
+1. **Orchestrator**: `@tech-lead` - Multi-agent coordination
+2. **Domain Specialists** (6): Python, TypeScript, Rust, Go, Database, DevOps
+3. **Task Specialists** (5): API Architect, Performance, Testing, Documentation, Refactoring
+4. **Quality Assurance** (6): Code Reviewer (MANDATORY), Security, Debugger, Integration, Migration
+
+### Usage Patterns
+- **Direct**: `@python-specialist Create FastAPI endpoint`
+- **Orchestrated**: `@tech-lead Build full-stack feature` → delegates to specialists
+- **Quality Gate**: `@code-reviewer Review src/api/users.py:45-120` (MANDATORY before commits)
 
 ### Agent Capabilities
+| Agent | Use | Tools | Restrictions |
+|-------|-----|-------|--------------|
+| @tech-lead | Multi-stack coordination | Task, Read, Glob, Grep | Planning only |
+| Domain Specialists | Language implementation | Full access | None |
+| Task Specialists | Specialized operations | Full access | None |
+| @code-reviewer | Quality gate (MANDATORY) | Read, Grep, Glob, Bash | Analysis only |
 
-| Agent | Use Case | Capability | Tools |
-|-------|----------|------------|-------|
-| **@tech-lead** | Multi-stack features, architectural decisions | Task decomposition, agent delegation, coordination | Task, Read, Glob, Grep (restricted) |
-| **@python-specialist** | Python 3.11+, FastAPI, async development | Type-safe Python, async patterns, pytest testing | Full tool access |
-| **@typescript-specialist** | TypeScript, React, Next.js APIs | Server Components, hooks, performance optimization | Full tool access |
-| **@rust-specialist** | Rust systems programming | Ownership, async/await, zero-cost abstractions | Full tool access |
-| **@go-specialist** | Go cloud-native services | Goroutines, channels, simplicity-first design | Full tool access |
-| **@database-specialist** | Database design, optimization | PostgreSQL/MySQL/SQLite, schema, query tuning | Full tool access |
-| **@devops-specialist** | Containerization, CI/CD | Docker, Kubernetes, IaC, GitOps | Full tool access |
-| **@code-reviewer** | Quality, security validation | OWASP Top 10, performance, architecture review | Read, Grep, Glob, Bash (restricted) |
+---
 
-### When to Use Which Agent
+## 🎯 Tier-Based Delegation (Token Optimization)
 
-- **@tech-lead**: Feature spans Python + TypeScript, architectural decisions, multi-specialist coordination
-- **@python-specialist**: Pure Python (FastAPI, async, testing), backend API, database models
-- **@typescript-specialist**: Pure TypeScript/React, frontend components, Next.js Server Components
-- **@code-reviewer**: BEFORE every git commit (MANDATORY), security-sensitive code, performance-critical paths
+**Purpose**: -70% token overhead (0-7K → 1K avg, 28→100 tasks/5h)
 
-### Example Workflow: JWT Authentication
+### Tiers
+1. **Tier 1** (60%): Monolithic, no agents (simple tasks)
+2. **Tier 2** (30%): Single specialist (file-specific)
+3. **Tier 3** (5%): Multi-agent orchestration (@tech-lead)
+4. **Tier 4** (5%): Quality gate (@code-reviewer, MANDATORY)
 
+### File Mapping (Tier 2)
+- `.py` → @python-specialist
+- `.ts/.tsx` → @typescript-specialist
+- `.sql` → @database-specialist
+- `.rs` → @rust-specialist
+- `.go` → @go-specialist
+- `.md` docs → @documentation-specialist
+
+### Config (.env.devstream)
 ```bash
-# Step 1: Orchestration
-@tech-lead Analyze requirements and delegate implementation
-# Output: Python backend (JWT auth, password hashing) + TypeScript frontend (login form, auth context)
-
-# Step 2: Backend → Task(@python-specialist): Implement FastAPI JWT auth (endpoints, token generation, user model)
-# Step 3: Frontend → Task(@typescript-specialist): Implement React auth UI (LoginForm, AuthContext, ProtectedRoute)
-# Step 4: Quality Review → @code-reviewer Review auth implementation (OWASP checks, JWT secret management)
+DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true
+DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95
+DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70
+DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true
 ```
 
-### Agent Configuration
+---
 
-**Location**: `.claude/agents/` → `orchestrator/tech-lead.md`, `domain/{python,typescript,rust,go,database,devops}-specialist.md`, `qa/code-reviewer.md`
+## 📋 7-Step Workflow (MANDATORY)
 
-### Agent Principles (MANDATORY)
+### Step 0: Enforcement Gate
+**Triggers**: >15min, code implementation, architectural decisions, multi-file, Context7 research
+**Flow**: User request → Complexity analysis → IF criteria met → Protocol/Override/Cancel choice
 
-1. **Isolated Context**: Each agent has independent context window
-2. **Tool Inheritance**: Domain specialists have full tool access (omit `tools:` field)
-3. **Tool Restriction**: Orchestrators/QA restrict tools for focus (specify `tools:` field)
-4. **Delegation Pattern**: Use `Task` tool for orchestrator → specialist invocation
-5. **Quality First**: ALWAYS invoke @code-reviewer before task completion
+### Step 1: Discussion (MANDATORY)
+- Present problem/objective
+- Discuss trade-offs
+- Obtain consensus
+- **NEW**: Task creation at Step 1 (prevents data loss)
 
-### Memory Optimization
+### Step 2: Analysis (MANDATORY)
+- Analyze codebase patterns
+- Identify files to modify
+- Estimate complexity
+- Define acceptance criteria
 
-**Problem Solved**: JavaScript heap exhaustion during agent execution
-**Fix**: `node --max-old-space-size=8192 --expose-gc start-production.js` (8GB heap, explicit GC, memory cleanup)
-**Status**: Production stable ✅
+### Step 3: Research (MANDATORY - Context7)
+- Use Context7 for technical decisions
+- Research best practices
+- Document findings
+- Validate approach
 
-### Tier-Based Delegation Policy (Protocol v2.2.0 - Token Optimization)
+### Step 4: Planning (MANDATORY)
+- Create TodoWrite list (10-15 min micro-tasks)
+- Define dependencies/completion criteria
+- **NEW**: Generate implementation plan (model-specific)
 
-**Purpose**: Optimize token consumption while preserving all 17 agents via strategic tier-based delegation.
+### Step 5: Approval (MANDATORY + Strategic Choice)
+- Present complete plan + Context7 findings
+- Obtain explicit approval
+- **NEW**: Choose implementation model:
+  - **Option A**: Continue with Sonnet 4.5 (architectural)
+  - **Option B**: Handoff to GLM-4.6 (execution, ~70% cost savings)
 
-**Status**: ✅ Production Ready | **Impact**: -70% token overhead average (-5700 tokens/task)
+### Step 6: Implementation (MANDATORY)
+- One micro-task at a time
+- Mark "in_progress" → work → "completed"
+- Document with docstrings + type hints
 
-#### Policy Structure (4 Tiers)
+### Step 7: Verification (MANDATORY)
+- Tests for EVERY feature
+- 95%+ coverage requirement
+- Validate performance
+- E2E integration tests
+- Error handling verification
 
-**TIER 1: Monolithic First** (60% of tasks - 0 overhead)
-- **Trigger**: Single file, <50K tokens, <1h duration, straightforward implementation
-- **Agent**: NONE (Sonnet 4.5 solo, no delegation)
-- **Token Overhead**: 0 tokens
-- **Examples**: Bug fixes, single endpoint implementation, documentation updates, config changes
-- **Decision**: Default for simple, well-defined tasks
+---
 
-**TIER 2: Single Specialist** (30% of tasks - 2K overhead)
-- **Trigger**: File pattern match (*.py → @python-specialist) + single-language focus
-- **Agent**: 1 specialist ONLY (no @tech-lead coordination)
-- **Token Overhead**: ~2K tokens (Context7 + Memory for 1 specialist)
-- **File Pattern Mapping**:
-  - `.py` → @python-specialist
-  - `.ts/.tsx` → @typescript-specialist
-  - `.sql` schema → @database-specialist
-  - `.md` docs → @documentation-specialist
-  - `.rs` → @rust-specialist
-  - `.go` → @go-specialist
-- **Decision**: Clear language-specific task, no multi-stack coordination
+## 📄 Task Lifecycle
 
-**TIER 3: Multi-Agent Orchestration** (5% of tasks - 7K overhead)
-- **Trigger**: Multi-stack (Python + TypeScript + DB) OR >100K context OR architectural decisions
-- **Agent**: @tech-lead → delegates N specialists
-- **Token Overhead**: ~7K tokens (Context7 5K + Memory 2K)
-- **Examples**: Full-stack features, system-wide refactoring, cross-component changes
-- **Decision**: Requires coordination across multiple languages/domains
+### Creation (Step 1 - MANDATORY)
+**When**: Work >15 min OR code/architecture/research
+**Process**:
+- `task_first_handler.py` enforces at Step 1
+- Automatic complexity detection
+- Interactive enforcement gate
+- Use `get_direct_client().create_task()`
+- Define: title, description, task_type, priority (1-10), phase_name
+- Draft cleanup: >7 days auto-archived
 
-**TIER 4: Quality Gate** (5% of tasks - MANDATORY - 1K overhead)
-- **Trigger**: `git commit` command (automatic detection)
-- **Agent**: @code-reviewer (ALWAYS, non-negotiable)
-- **Token Overhead**: ~1K tokens (code analysis only)
-- **Examples**: EVERY commit, EVERY security-sensitive change
-- **Decision**: Mandatory quality gate (cannot be skipped)
+### Execution
+- Mark "active" via `get_direct_client().update_task()`
+- Follow 7-step workflow
+- Update progress continuously
+- Register decisions/learnings
+- TodoWrite real-time tracking
 
-#### Configuration (.env.devstream)
+### Completion
+- Verify TodoWrite "completed"
+- Tests 100% pass
+- Mark "completed"
+- Register lessons learned
+- Commit and push (if requested)
 
-```bash
-# Tier-Based Delegation (Protocol v2.2.0)
-DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true   # Monolithic first (default)
-DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95 # Single specialist confidence
-DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70 # Multi-agent coordination
-DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true    # Mandatory @code-reviewer
-```
+---
 
-#### Decision Algorithm
+## 💾 Memory System
 
+### Automatic Storage (PostToolUse Hook)
+**When**: After EVERY tool execution
+**Content Types**: code, documentation, context, output, error, decision, learning
+**Process**: Automatic
+1. PostToolUse hook
+2. Content preview (300 chars)
+3. Keywords extraction
+4. Vector embeddings (Ollama)
+5. SQLite + sqlite-vec storage
+
+### Memory Search (PreToolUse Hook)
+**Flow**:
+1. Detect libraries (Context7)
+2. Search DevStream memory
+3. Assemble hybrid context
+4. Inject in Claude context
+5. Token budget management
+**Algorithm**: Hybrid search (semantic + keyword) via RRF
+**Threshold**: 0.5 relevance
+**Token Budget**: Context7 5000 + Memory 2000
+
+### Manual Operations (OPTIONAL)
+**MANDATORY Access Pattern**:
 ```python
-def get_delegation_tier(context: Dict[str, Any]) -> Tuple[int, Optional[str], float]:
-    """
-    Determine delegation tier based on task context.
-
-    Returns:
-        (tier_number, agent_name, confidence)
-    """
-    # Tier 1: Monolithic (no delegation)
-    if is_simple_task(context):
-        # Single file, <50K tokens, <1h, straightforward
-        return (1, None, 1.0)
-
-    # Tier 2: Single specialist
-    if has_clear_file_pattern(context) and is_single_language(context):
-        # File pattern match: *.py → @python-specialist
-        agent = match_specialist_by_file(context["file_path"])
-        return (2, agent, 0.95)
-
-    # Tier 3: Multi-agent orchestration
-    if is_multi_stack(context) or context.get("context_size", 0) > 100_000:
-        # Python + TypeScript + DB OR >100K tokens
-        return (3, "@tech-lead", 0.70)
-
-    # Tier 4: Quality gate (MANDATORY)
-    if is_commit_operation(context):
-        # Every git commit triggers @code-reviewer
-        return (4, "@code-reviewer", 1.0)
-
-    # Default: Tier 1 (monolithic)
-    return (1, None, 1.0)
+from .claude.hooks.devstream.utils.direct_client import get_direct_client
+client = get_direct_client()
 ```
 
-#### Token Optimization Impact
-
-**Before (Always Multi-Agent)**:
-- Average task: 7K tokens overhead per task
-- Claude Code Max limit: 28 tasks/5h
-- Token budget: 200K tokens
-- Overhead: ~28% of context (56K/200K)
-
-**After (Tier-Based)**:
-- Tier 1 (60%): 0 tokens × 60% = 0 tokens
-- Tier 2 (30%): 2K tokens × 30% = 600 tokens
-- Tier 3 (5%): 7K tokens × 5% = 350 tokens
-- Tier 4 (5%): 1K tokens × 5% = 50 tokens
-- **Average**: 1000 tokens/task (-86% reduction)
-- **Claude Code Max**: 28 → 100 tasks/5h (3.5x improvement)
-- **Token budget**: 5K → 1K overhead (-70% average)
-
-#### Usage Examples
-
-**Example 1: Tier 1 (Monolithic - Bug Fix)**
-```bash
-# User request
-"Fix typo in error message in src/utils/logger.py line 42"
-
-# Delegation Decision
-Context Analysis:
-  - Single file: ✅
-  - <50K tokens: ✅
-  - <1h duration: ✅ (~5 min)
-  - Straightforward: ✅
-
-Decision: TIER 1 (Monolithic)
-Agent: None (Sonnet 4.5 solo)
-Token Overhead: 0 tokens
-Execution: Direct implementation, no agent delegation
-```
-
-**Example 2: Tier 2 (Single Specialist - Python)**
-```bash
-# User request
-"Refactor src/api/users.py to use async/await patterns"
-
-# Delegation Decision
-Context Analysis:
-  - File pattern: *.py → @python-specialist
-  - Single language: ✅ (Python only)
-  - Confidence: 0.95
-
-Decision: TIER 2 (Single Specialist)
-Agent: @python-specialist
-Token Overhead: 2K tokens
-Execution: Direct specialist delegation, no @tech-lead
-```
-
-**Example 3: Tier 3 (Multi-Agent - Full-Stack)**
-```bash
-# User request
-"Build user dashboard with Python backend, React frontend, and PostgreSQL"
-
-# Delegation Decision
-Context Analysis:
-  - Multi-stack: ✅ (Python + TypeScript + SQL)
-  - Languages: 3 (Python, TypeScript, SQL)
-  - Coordination required: ✅
-
-Decision: TIER 3 (Multi-Agent Orchestration)
-Agent: @tech-lead → delegates @python-specialist, @typescript-specialist, @database-specialist
-Token Overhead: 7K tokens
-Execution: @tech-lead coordinates sequential delegation
-```
-
-**Example 4: Tier 4 (Quality Gate - MANDATORY)**
-```bash
-# User request
-"Commit the authentication changes"
-
-# Delegation Decision
-Context Analysis:
-  - Git commit detected: ✅
-  - Mandatory quality gate: ✅
-
-Decision: TIER 4 (Quality Gate)
-Agent: @code-reviewer (MANDATORY)
-Token Overhead: 1K tokens
-Execution: OWASP Top 10 + performance + architecture review
-Bypass: FORBIDDEN (enforced by hook system)
-```
-
-#### All 17 Agents Preserved
-
-**CRITICAL**: This policy does NOT reduce the number of agents. All 17 agents remain available:
-
-**Level 1 - Orchestrator**: @tech-lead
-**Level 2 - Domain Specialists** (6 agents):
-- @python-specialist
-- @typescript-specialist
-- @rust-specialist
-- @go-specialist
-- @database-specialist
-- @devops-specialist
-
-**Level 3 - Task Specialists** (5 agents):
-- @api-architect
-- @performance-optimizer
-- @testing-specialist
-- @documentation-specialist
-- @refactoring-specialist
-
-**Level 4 - QA Specialists** (5 agents):
-- @code-reviewer (MANDATORY quality gate)
-- @security-auditor
-- @debugger
-- @integration-specialist
-- @migration-specialist
-
-**Optimization Strategy**: Use agents *strategically* based on task complexity, not *always*.
-
-#### Cost Analysis (Claude Code Pro Max $100/month)
-
-**Token Budget**: 200K tokens/session
-
-**Before Optimization**:
-- Task overhead: 7K tokens (always multi-agent)
-- Tasks per session: 200K / 7K ≈ 28 tasks
-- Tasks per 5h: 28 tasks
-- Monthly capacity: ~28 × 30 = 840 tasks
-
-**After Optimization**:
-- Task overhead: 1K tokens average (tier-based)
-- Tasks per session: 200K / 1K ≈ 200 tasks
-- Tasks per 5h: 100 tasks (3.5x improvement)
-- Monthly capacity: ~100 × 30 = 3000 tasks (3.5x increase)
-
-**Cost Savings**: $100 now covers 3.5x more work (equivalent to $280 value at old rate)
-
-### Future Phases
-
-**Phase 4** (Advanced): @security-auditor, @debugger, @refactoring-specialist, @integration-specialist
-**Phase 5** (Specialization): Fine-tuning pattern matcher, learning from delegation history
+**Direct DB Tools**:
+- `get_direct_client().store_memory()` (content, content_type, keywords)
+- `get_direct_client().search_memory()` (query, content_type, limit)
 
 ---
 
-## 📋 PRESCRIPTIVE RULES - DevStream Methodology
-
-### 🚨 ENFORCEMENT GATE - Protocol Compliance (MANDATORY)
-
-**CRITICAL**: DevStream protocol is MANDATORY for all non-trivial tasks. Claude Code will STOP and request confirmation before proceeding.
-
-#### Enforcement Trigger Criteria
-
-Protocol enforcement triggers when **ANY** of these conditions are met:
-1. Estimated task duration > 15 minutes
-2. Task requires code implementation (Write, Edit tools)
-3. Task requires architectural decisions
-4. Task involves multiple files or components
-5. Task requires Context7 research
-
-#### Enforcement Flow
-
-```
-User Request
-    ↓
-Claude Code Complexity Analysis
-    ↓
-┌────────────────────────────────────────────┐
-│ IF task meets enforcement criteria         │
-└────────────────────────────────────────────┘
-    ↓
-🔒 MANDATORY PROTOCOL GATE (STOP EXECUTION)
-    ↓
-"⚠️ DevStream Protocol Required
-
-This task requires following the DevStream 7-step workflow:
-DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION
-
-OPTIONS:
-✅ [RECOMMENDED] Follow DevStream protocol (research-driven, quality-assured)
-⚠️  [OVERRIDE] Skip protocol (quick fix, NO quality assurance, NO Context7, NO testing)
-
-Risks of override:
-- ❌ No Context7 research (potential outdated/incorrect patterns)
-- ❌ No @code-reviewer validation (OWASP Top 10 security gaps)
-- ❌ No testing requirements (95%+ coverage waived)
-- ❌ No approval workflow (decisions undocumented)
-
-Choose: [1] Protocol  [2] Override  [Cancel]"
-    ↓
-┌──────────────────┬─────────────────────────┐
-│ User: Protocol   │ User: Override          │
-├──────────────────┼─────────────────────────┤
-│ → Execute 7-step │ → Log override decision │
-│ → Create task    │ → Warn about risks      │
-│ → TodoWrite plan │ → Disable quality gates │
-│ → Quality gates  │ → Execute directly      │
-└──────────────────┴─────────────────────────┘
-```
-
-#### Override Tracking
-
-**EVERY override is logged** in DevStream memory with:
-- Timestamp
-- User justification
-- Disabled quality gates
-- Risk acknowledgment
-- Outcome tracking (for learning)
-
-**Override Audit Trail**: Query with `mcp__devstream__devstream_search_memory` using keyword "protocol-override"
-
-#### Violation Consequences
-
-**Protocol violations** (proceeding without gate approval):
-1. ⚠️ Automatic detection via hook monitoring
-2. 🔄 Rollback to last checkpoint
-3. 📝 Log violation in memory
-4. 🚨 Restart with protocol enforcement
-
-**BYPASS FORBIDDEN**: Cannot disable enforcement via configuration. Only user explicit override allowed.
-
-### 🚨 Mandatory Workflow: 7 Sequential Steps
-
-**EVERY task MUST follow**: DISCUSSION → ANALYSIS → RESEARCH → PLANNING → APPROVAL → IMPLEMENTATION → VERIFICATION/TEST
-
-#### Step 1: DISCUSSION (MANDATORY)
-- ✅ Present problem/objective, discuss trade-offs, identify constraints, obtain consensus
-- 🔒 Hook registers discussions in memory (content_type: "decision")
-- 📊 Validation: Every task must have ≥1 discussion record
-
-#### Step 2: ANALYSIS (MANDATORY)
-- ✅ Analyze codebase for similar patterns, identify files to modify, estimate complexity, define acceptance criteria
-- 🔒 Hook requires context injection from memory
-- 📊 Validation: Verify codebase pattern analysis
-
-#### Step 3: RESEARCH (MANDATORY - Context7)
-- ✅ Use Context7 for technical decisions, research best practices, document findings, validate approach
-- 🔒 Context7 integration automatic via PreToolUse hook
-- 📊 Validation: Verify Context7 docs in context injection log
-
-#### Step 4: PLANNING (MANDATORY - TodoWrite + Implementation Plan)
-- ✅ Create TodoWrite list for non-trivial tasks, micro-tasks MAX 10-15 min, define dependencies, establish completion criteria
-- ✅ **Protocol v2.2.0**: Generate implementation plan with model-specific template (GLM-4.6 or Sonnet 4.5)
-- ✅ **Dual Storage**: Plan saved to DevStream DB + filesystem (`docs/development/plan/piano_[task-slug].md`)
-- 🔒 TodoWrite tool integrated in Claude Code
-- 🔒 **NEW**: `implementation_plan_generator.py` hook automates plan creation at Step 4
-- 📊 Validation: Task list + implementation plan must exist before implementation
-
-#### Step 5: APPROVAL (MANDATORY + Strategic Choice Gate)
-- ✅ Present complete plan, show Context7 findings, obtain explicit approval ("OK", "proceed", "approved")
-- ✅ **Protocol v2.2.0 - Strategic Choice Gate**: After approval, choose implementation model:
-  - **Option A**: Continue with **Sonnet 4.5** (architectural work, complex reasoning, 30+ hour focus)
-  - **Option B**: Handoff to **GLM-4.6** (precise execution, cost-optimized ~70% savings, tool calling 90.6%)
-- ✅ **GLM Handoff Workflow** (if Option B selected):
-  1. Generate GLM handoff prompt with complete context transfer
-  2. Save plan + handoff to DB and filesystem
-  3. Display handoff instructions for manual session switch
-  4. Close Sonnet session, start new GLM session with handoff prompt
-- 🔒 Memory registers approval as "decision"
-- 🔒 **NEW**: Strategic Choice Gate logs model selection decision
-- 📊 Validation: Verify approval record + model choice before commit
-
-#### Step 6: IMPLEMENTATION (MANDATORY - Guided)
-- ✅ One micro-task at a time, mark "in_progress" → work → mark "completed", document with docstrings + type hints
-- 🔒 PostToolUse hook registers code in memory automatically
-- 📊 Validation: Verify every written file registered in memory
-
-#### Step 7: VERIFICATION/TEST (MANDATORY)
-- ✅ Tests for EVERY feature, 95%+ coverage, validate performance, E2E integration tests, error handling
-- 🔒 Hook requires test validation before completion
-- 📊 Validation: Test results documented in memory
-
----
-
-## 🔄 PRESCRIPTIVE RULES - Task Lifecycle Management
-
-### Task Creation (Protocol v2.2.0 - Step 1 MANDATORY)
-**WHEN**: Work > 15 minutes OR involves code/architecture/research
-**CRITICAL CHANGE**: Task creation moved from Step 5 (APPROVAL) to Step 1 (DISCUSSION) to prevent data loss
-**RULES**:
-- ✅ **AUTOMATIC**: `task_first_handler.py` hook enforces task creation at Step 1 before DISCUSSION
-- ✅ **Complexity Analysis**: Automatic detection based on duration, code involvement, architecture decisions, file count, Context7 requirement
-- ✅ **Interactive Enforcement Gate**: User presented with Protocol/Override/Cancel options via PyInquirer
-- ✅ Use `mcp__devstream__devstream_create_task` for task registration
-- ✅ Define title/description, task_type (analysis/coding/documentation/testing/review/research), priority (1-10), phase_name
-- ✅ **Draft Task Cleanup**: Tasks in "pending" status >7 days auto-archived (configurable)
-- ❌ Manual tasks without MCP | ❌ Creating tasks at Step 5 (old protocol)
-**ENFORCEMENT**: `task_first_handler.py` + `enforcement_gate.py` (blocking validation)
-
-### Task Execution
-**WHEN**: During implementation
-**RULES**: ✅ Mark "active" via `mcp__devstream__devstream_update_task`, follow 7-step workflow, update progress, register decisions/learnings, TodoWrite real-time | ❌ Multiple tasks simultaneously without approval
-**ENFORCEMENT**: Hook monitors task status and tool usage
-
-### Task Completion
-**WHEN**: All acceptance criteria completed
-**RULES**: ✅ Verify TodoWrite "completed", tests 100% pass, mark "completed", register lessons learned, commit, push if requested | ❌ Mark "completed" with failing tests or pending TodoWrite
-**ENFORCEMENT**: Hook validates completion criteria automatically
-
----
-
-## 💾 PRESCRIPTIVE RULES - Memory System
-
-### Automatic Memory Storage (PostToolUse Hook)
-**WHEN**: Automatic after EVERY tool execution (Write, Edit, Bash, etc.)
-**CONTENT TYPES**: code, documentation, context, output, error, decision, learning
-**PROCESS**: ✅ AUTOMATIC - PostToolUse hook → content preview (300 chars) → keywords extraction → vector embeddings (Ollama) → SQLite + sqlite-vec storage
-**USER ACTION**: None - completely automatic
-
-### Memory Search & Retrieval (PreToolUse Hook)
-**WHEN**: Automatic before EVERY tool execution
-**FLOW**: (1) Detect libraries (Context7) → (2) Search DevStream memory → (3) Assemble hybrid context → (4) Inject in Claude context → (5) Token budget management
-**ALGORITHM**: Hybrid search (semantic + keyword) via RRF (Reciprocal Rank Fusion), threshold 0.5, token budget: Context7 5000 + Memory 2000
-**USER ACTION**: None - completely automatic
-
-### Manual Memory Operations (OPTIONAL)
-**TOOLS**: `mcp__devstream__devstream_store_memory` (content, content_type, keywords), `mcp__devstream__devstream_search_memory` (query, content_type, limit)
-**USE CASE**: Advanced queries, store critical context pre-session end
-**NOTE**: Automatic system handles 99% of cases
-
----
-
-## 🔍 PRESCRIPTIVE RULES - Context Injection
+## 📝 Context Injection
 
 ### Context7 Integration (PreToolUse Hook)
-**TRIGGERS**: Import statements, library mentions, code patterns (async/await, decorators), documentation requests
-**PROCESS**: ✅ AUTOMATIC - Context7 detect → retrieve docs via `mcp__context7__get-library-docs` → inject (max 5000 tokens) → priority ordering (official docs > examples > best practices)
-**CONFIG**: `.env.devstream` → `DEVSTREAM_CONTEXT7_ENABLED=true`, `DEVSTREAM_CONTEXT7_AUTO_DETECT=true`, `DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000`
+**Triggers**: Import statements, library mentions, code patterns, documentation requests
+**Process**: Automatic
+1. Context7 detect
+2. Retrieve docs via `mcp__context7__get-library-docs`
+3. Inject (max 5000 tokens)
+4. Priority ordering (official docs > examples > best practices)
 
 ### DevStream Memory Context (PreToolUse Hook)
-**PRIORITY ORDER**: (1) Context7 Documentation (5000 tokens), (2) DevStream Memory (2000 tokens - related code, decisions, learnings), (3) Current File Context (remaining budget)
-**PROCESS**: ✅ AUTOMATIC - Hybrid search (RRF) → relevance filtering (threshold 0.5) → token budget enforcement → context assembly → injection
-**CONFIG**: `.env.devstream` → `DEVSTREAM_CONTEXT_INJECTION_ENABLED=true`, `DEVSTREAM_CONTEXT_MAX_TOKENS=2000`, `DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5`
+**Priority Order**:
+1. Context7 Documentation (5000 tokens)
+2. DevStream Memory (2000 tokens - related code/decisions)
+3. Current File Context (remaining budget)
 
-### Context Injection Quality Optimizations (2025-10-02)
-
-**Status**: ✅ Production Ready (Phases 1-5 Complete) | **Tested**: 2025-10-02 | **Coverage**: 100%
-
-**Improvements**:
-1. **Code-Aware Queries**: Extracts imports, classes, functions, decorators (83% size reduction - 313→50 chars)
-2. **Relevance Filtering**: min_relevance=0.03 (3% RRF score threshold - 50% noise reduction)
-3. **Token Budget Enforcement**: 2000 token max for DevStream memory (strict enforcement)
-4. **Context7 Advisory Pattern**: Emits recommendations instead of direct MCP calls (no blocking)
-5. **Library Name Normalization**: Lowercase for Context7 compatibility (sqlalchemy, fastapi)
-
-**Configuration (.env.devstream)**:
-- `DEVSTREAM_CONTEXT_MAX_TOKENS=2000` (DevStream memory budget)
-- `DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000` (Context7 library docs budget)
-- `min_relevance=0.03` (memory.ts search threshold - 3% RRF minimum)
-
-**Performance Validated** (2025-10-02):
-- Query construction: <1ms average (83% size reduction)
-- Token estimation: ±1 token accuracy (100% tests passed)
-- Memory search: +25% relevance improvement (RRF hybrid search)
-- False positives: -30% reduction (relevance filtering)
-- Context7 advisory: 100% success rate (non-blocking pattern)
-
-**Test Results**: All component tests passed (code-aware queries, library detection, token estimation, relevance filtering)
-
-**Documentation**: See [Context Injection Optimization Summary](docs/implementation/context-injection-optimization-summary.md)
+**Config** (.env.devstream):
+```bash
+DEVSTREAM_CONTEXT7_ENABLED=true
+DEVSTREAM_CONTEXT7_AUTO_DETECT=true
+DEVSTREAM_CONTEXT7_TOKEN_BUDGET=5000
+DEVSTREAM_CONTEXT_INJECTION_ENABLED=true
+DEVSTREAM_CONTEXT_MAX_TOKENS=2000
+DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5
+```
 
 ---
 
-## 🐍 PRESCRIPTIVE RULES - Python Environment
+## 🐍 Python Environment (MANDATORY)
 
-### 🚨 MANDATORY: Virtual Environment Usage
+### Critical Rule: Use .devstream Venv
+**Configuration**:
+- Venv: `.devstream`
+- Python: 3.11.x
+- Interpreter: `.devstream/bin/python`
 
-**CRITICAL RULE**: ALWAYS use `.devstream` venv for ALL Python commands.
-
-**Configuration**: Venv: `.devstream` | Python: 3.11.x | Interpreter: `.devstream/bin/python`
-
-#### Session Start Checklist (MANDATORY at Start of EVERY Session)
+**Session Start Checklist**:
 ```bash
-# 1. Verify venv exists
-if [ ! -d ".devstream" ]; then python3.11 -m venv .devstream; fi
-# 2. Verify Python version (MUST be 3.11.x)
+# Verify venv exists
+[ ! -d ".devstream" ] && python3.11 -m venv .devstream
+
+# Verify Python version
 .devstream/bin/python --version
-# 3. Verify critical dependencies
+
+# Verify critical dependencies
 .devstream/bin/python -m pip list | grep -E "(cchooks|aiohttp|structlog)"
 ```
 
-**FORBIDDEN**: ❌ `python script.py`, `python3 script.py`, `uv run script.py` (non-persistent)
-**REQUIRED**: ✅ `.devstream/bin/python script.py`, `.devstream/bin/python -m pytest`, `.devstream/bin/python -m pip install package`
+**FORBIDDEN**: `python`, `python3`, `uv run`
+**REQUIRED**: `.devstream/bin/python`, `.devstream/bin/python -m pytest`, `.devstream/bin/python -m pip install`
 
-#### First-Time Setup (when venv missing)
+### First-Time Setup
 ```bash
-# 1. Create venv → 2. Upgrade pip → 3. Install requirements.txt
-# 4. Install hook dependencies: cchooks>=0.1.4, aiohttp>=3.8.0, structlog>=23.0.0, python-dotenv>=1.0.0
-# 5. Verify: .devstream/bin/python -m pip list | head -20
+# Create venv
+python3.11 -m venv .devstream
+
+# Upgrade pip
+.devstream/bin/python -m pip install --upgrade pip
+
+# Install requirements
+.devstream/bin/python -m pip install -r requirements.txt
+
+# Install hook dependencies
+.devstream/bin/python -m pip install cchooks>=0.1.4 aiohttp>=3.8.0 \
+  structlog>=23.0.0 python-dotenv>=1.0.0
 ```
 
-#### Hook System Configuration (settings.json)
+### Hook System Configuration
+**settings.json**:
 ```json
 {
   "hooks": {
-    "PreToolUse": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py"}]}],
-    "PostToolUse": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py"}]}],
-    "UserPromptSubmit": [{"hooks": [{"command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py"}]}]
+    "PreToolUse": [{
+      "hooks": [{
+        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/pre_tool_use.py"
+      }]
+    }],
+    "PostToolUse": [{
+      "hooks": [{
+        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/memory/post_tool_use.py"
+      }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "command": "\"$CLAUDE_PROJECT_DIR\"/.devstream/bin/python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/devstream/context/user_query_context_enhancer.py"
+      }]
+    }]
   }
 }
 ```
-**CRITICAL**: Hooks MUST use `.devstream/bin/python`, NOT system Python
 
 ---
 
-## 🛠 PRESCRIPTIVE RULES - Tools & Configuration
+## 🛠️ Tools & Configuration
 
 ### Context7 Usage (MANDATORY for Research)
-**WORKFLOW**: (1) `mcp__context7__resolve-library-id` (library name → Context7 ID) → (2) `mcp__context7__get-library-docs` (ID → docs max 5000 tokens) → (3) Analyze findings → (4) Apply research-backed patterns | ❌ Skip Context7 for new technologies
+**Workflow**:
+1. `mcp__context7__resolve-library-id` (library name → Context7 ID)
+2. `mcp__context7__get-library-docs` (ID → docs max 5000 tokens)
+3. Analyze findings
+4. Apply research-backed patterns
 
 ### TodoWrite Usage (MANDATORY for Planning)
-**WHEN**: Non-trivial tasks (>15 min)
-**RULES**: ✅ Create TodoWrite BEFORE implementation, micro-tasks 10-15 min, mark "in_progress" → work → "completed", ONE task "in_progress" at a time | ❌ Start without TodoWrite, mark "completed" with pending sub-tasks
-**FORMAT**: `{"content": "Imperative form", "activeForm": "Present continuous", "status": "pending|in_progress|completed"}`
+**When**: Non-trivial tasks (>15 min)
+**Process**:
+- Create TodoWrite BEFORE implementation
+- Micro-tasks 10-15 min
+- Mark "in_progress" → work → "completed"
+- ONE task "in_progress" at a time
+**Format**: `{"content": "Imperative", "activeForm": "Present continuous", "status": "pending|in_progress|completed"}`
 
 ### Testing Requirements (MANDATORY)
-**COVERAGE**: ✅ 95%+ for NEW code, 100% pass rate before commit, E2E integration tests, performance validation, error handling | ❌ Commit with failing tests, commit without tests
-**STRUCTURE**: `tests/unit/` (fast <1s), `tests/integration/` (E2E <10s), `tests/fixtures/` (test data)
-**EXECUTION**: `.devstream/bin/python -m pytest tests/ -v --cov=.claude/hooks/devstream --cov-report=html`
+**Coverage**:
+- 95%+ for NEW code
+- 100% pass rate before commit
+- E2E integration tests
+- Performance validation
+- Error handling
+
+**Structure**:
+- `tests/unit/` (fast <1s)
+- `tests/integration/` (E2E <10s)
+- `tests/fixtures/` (test data)
+
+**Execution**:
+```bash
+.devstream/bin/python -m pytest tests/ -v \
+  --cov=.claude/hooks/devstream \
+  --cov-report=html
+```
+
+**Thresholds**: Unit 95%+, Integration 85%+, E2E 70%+
+
+### Async Testing Patterns (pytest-asyncio)
+```python
+# Async fixtures
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def mcp_client():
+    client = await create_mcp_client()
+    yield client
+    await client.close()
+
+# Error testing
+@pytest.mark.asyncio
+async def test_error_handling():
+    with pytest.raises(ConnectionError, match="timeout"):
+        await failing_function()
+
+# AsyncMock for retries
+@pytest.mark.asyncio
+async def test_circuit_breaker():
+    mock = AsyncMock()
+    mock.create_task.side_effect = [
+        ConnectionError("Fail 1"),
+        ConnectionError("Fail 2"),
+        {"task_id": "success"}
+    ]
+    result = await circuit_breaker_execute(mock)
+    assert mock.create_task.call_count == 3
+```
+
+### .coveragerc Configuration
+```ini
+[run]
+source = .claude/hooks/devstream
+omit = */tests/*, */test_*, __pycache__
+concurrency = gevent
+
+[report]
+exclude_lines = pragma: no cover, def __repr__, raise AssertionError, raise NotImplementedError, if __name__ == .__main__:
+
+[html]
+directory = htmlcov
+```
 
 ---
 
-## 📖 PRESCRIPTIVE RULES - Documentation
+## 📖 Documentation Requirements
 
 ### Code Documentation (MANDATORY)
-**EVERY function/class MUST have**: Docstring (description, Args, Returns, Raises, Note), full type hints, inline comments for complex logic (>5 lines) | ❌ Missing docstrings, missing type hints
+**Every function/class MUST have**:
+- Docstring (description, Args, Returns, Raises, Note)
+- Full type hints
+- Inline comments for complex logic (>5 lines)
 
 **Example**:
 ```python
-def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str] = None) -> List[Dict[str, Any]]:
+def hybrid_search(
+    self,
+    query: str,
+    limit: int = 10,
+    content_type: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Perform hybrid search combining semantic and keyword search.
     Uses Reciprocal Rank Fusion (RRF) algorithm.
@@ -625,87 +459,183 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 ```
 
 ### Project Documentation (MANDATORY)
-**Structure**: `docs/architecture/` (system design - MANDATORY new systems), `docs/api/` (API reference - MANDATORY APIs), `docs/deployment/` (MANDATORY production), `docs/guides/` (MANDATORY user-facing features), `docs/development/` (MANDATORY complex features), `docs/tutorials/` (OPTIONAL)
-**RULES**: ✅ Create docs for EVERY major feature, update BEFORE task complete, include code examples, keep in sync | ❌ .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md), outdated docs
+**Structure**:
+- `docs/architecture/` (system design - MANDATORY new systems)
+- `docs/api/` (API reference - MANDATORY APIs)
+- `docs/deployment/` (MANDATORY production)
+- `docs/guides/` (MANDATORY user-facing features)
+- `docs/development/` (MANDATORY complex features)
+- `docs/tutorials/` (OPTIONAL)
 
-### Progress Documentation (MANDATORY)
-**MUST Document**: TodoWrite tracking, implementation notes per phase, lessons learned per completed task, decision rationale, test results
-**STORAGE**: Automatic via PostToolUse hook in memory (content_type: "learning", "decision")
+**Rules**:
+- Create docs for EVERY major feature
+- Update BEFORE task complete
+- Include code examples
+- Keep in sync
+- No .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
 
 ---
 
-## 🎯 PRESCRIPTIVE RULES - Quality Standards
+## 🎯 Quality Standards
 
 ### Code Quality (MANDATORY)
-**Type Safety**: ✅ Full type hints ALL functions/methods, mypy --strict (zero errors) | ❌ Any type hints, mypy errors in production
-**Error Handling**: ✅ Structured exception hierarchy, logging for EVERY exception, graceful degradation, user-friendly messages | ❌ Bare except:, silent failures
-**Performance**: ✅ async/await for I/O, connection pooling, token budget enforcement, performance testing | ❌ Blocking I/O in async, no performance validation
-**Maintainability**: ✅ SOLID principles, single responsibility, max function length 50 lines, max cyclomatic complexity 10 | ❌ God objects, cryptic abbreviations
+**Type Safety**:
+- Full type hints ALL functions/methods
+- `mypy --strict` (zero errors)
+- No `Any` type hints
+- No mypy errors in production
+
+**Error Handling**:
+- Structured exception hierarchy
+- Logging for EVERY exception
+- Graceful degradation
+- User-friendly messages
+- No bare `except:`
+- No silent failures
+
+**Performance**:
+- async/await for I/O
+- Connection pooling
+- Token budget enforcement
+- Performance testing
+- No blocking I/O in async
+
+**Maintainability**:
+- SOLID principles
+- Single responsibility
+- Max function length 50 lines
+- Max cyclomatic complexity 10
+- No god objects
+- No cryptic abbreviations
 
 ### Architecture Quality (MANDATORY)
-**Separation**: ✅ Clear module boundaries, layered architecture (hooks → utils → core), interface segregation | ❌ Circular dependencies, tight coupling
-**Configuration**: ✅ Environment-based (.env.devstream), validate ALL config, defaults, documentation | ❌ Hardcoded values, config in code
-**Logging**: ✅ Structured logging (structlog), context ALL log messages, appropriate levels (DEBUG/INFO/WARNING/ERROR), log rotation | ❌ print() statements, logging sensitive data
+**Separation**:
+- Clear module boundaries
+- Layered architecture (hooks → utils → core)
+- Interface segregation
+- No circular dependencies
+- No tight coupling
+
+**Configuration**:
+- Environment-based (.env.devstream)
+- Validate ALL config
+- Defaults and documentation
+- No hardcoded values
+- No config in code
+
+**Logging**:
+- Structured logging (structlog)
+- Context ALL log messages
+- Appropriate levels (DEBUG/INFO/WARNING/ERROR)
+- Log rotation
+- No `print()` statements
+- No logging sensitive data
 
 ---
 
-## 🚀 PRESCRIPTIVE RULES - Implementation Patterns
+## 🚀 Implementation Patterns
 
 ### Research-Driven Development (MANDATORY)
-**SEQUENCE**: (1) RESEARCH (Context7 → best practices → document findings) → (2) DESIGN (research-based architecture → clear interfaces) → (3) IMPLEMENT (validated patterns → one micro-task at a time) → (4) TEST (95%+ coverage → validate assumptions) → (5) DOCUMENT (lessons learned → update docs)
-**ENFORCEMENT**: Hook registers research findings in memory
+**Sequence**:
+1. RESEARCH - Context7 → best practices → document findings
+2. DESIGN - Research-based architecture → clear interfaces
+3. IMPLEMENT - Validated patterns → one micro-task at a time
+4. TEST - 95%+ coverage → validate assumptions
+5. DOCUMENT - Lessons learned → update docs
 
 ### Micro-Task Execution (MANDATORY)
-**SEQUENCE**: (1) ANALYZE (break down feature → 10-15 min micro-tasks → dependencies) → (2) PLAN (TodoWrite list → completion criteria) → (3) EXECUTE (one task at a time → mark "in_progress" → work → "completed") → (4) VERIFY (test after EVERY task → verify integration) → (5) INTEGRATE (merge codebase → update docs)
-**ENFORCEMENT**: TodoWrite tool tracks compliance
+**Sequence**:
+1. ANALYZE - Break down feature → 10-15 min micro-tasks → dependencies
+2. PLAN - TodoWrite list → completion criteria
+3. EXECUTE - One task at a time → mark "in_progress" → work → "completed"
+4. VERIFY - Test after EVERY task → verify integration
+5. INTEGRATE - Merge codebase → update docs
 
 ### Approval Workflow (MANDATORY)
-**SEQUENCE**: (1) DISCUSS (present approach + trade-offs → identify risks) → (2) RESEARCH (Context7 validation → alternative approaches) → (3) APPROVE (explicit approval → confirm acceptance criteria) → (4) IMPLEMENT (follow approved approach → no deviations without approval) → (5) REVIEW (validate results → document learnings)
-**ENFORCEMENT**: Memory registers approval as "decision"
+**Sequence**:
+1. DISCUSS - Present approach + trade-offs → identify risks
+2. RESEARCH - Context7 validation → alternative approaches
+3. APPROVE - Explicit approval → confirm acceptance criteria
+4. IMPLEMENT - Follow approved approach → no deviations without approval
+5. REVIEW - Validate results → document learnings
 
 ---
 
-## 📊 PRESCRIPTIVE RULES - Success Metrics
+## 📊 Success Metrics
 
 ### Development Metrics (MANDATORY Targets)
-✅ Task Completion: 100% | Test Coverage: 95%+ NEW code | Test Pass Rate: 100% | Code Quality: Zero mypy errors | Cyclomatic Complexity: Max 10 | Documentation Coverage: 100% docstrings | Performance: Meet/exceed targets
+- Task Completion: 100%
+- Test Coverage: 95%+ NEW code
+- Test Pass Rate: 100%
+- Code Quality: Zero mypy errors
+- Cyclomatic Complexity: Max 10
+- Documentation Coverage: 100% docstrings
+- Performance: Meet/exceed targets
 
 ### Process Metrics (MANDATORY Tracking)
-✅ Research Quality: Context7 usage for EVERY major decision | Collaboration: 100% approval workflow adherence | Learning: Documented lessons learned per phase | Innovation: Research-backed technology choices | Delivery: On-time (planned vs actual) | Memory Usage: Automatic storage tracking | Context Injection: Automatic injection rate
-
-**STORAGE**: Automatic via DevStream memory system
+- Research Quality: Context7 usage for EVERY major decision
+- Collaboration: 100% approval workflow adherence
+- Learning: Documented lessons learned per phase
+- Innovation: Research-backed technology choices
+- Delivery: On-time (planned vs actual)
+- Memory Usage: Automatic storage tracking
+- Context Injection: Automatic injection rate
 
 ---
 
-## 🔧 PRESCRIPTIVE RULES - File Organization
+## 📁 File Organization
 
-### 📁 Project Structure (MANDATORY)
+### Project Structure (MANDATORY)
 **CRITICAL**: ALWAYS follow PROJECT_STRUCTURE.md
 
-**Documentation**: ✅ `docs/{architecture,api,deployment,guides,development,tutorials}/` | ❌ .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
-**Tests**: ✅ `tests/{unit,integration,fixtures}/` | ❌ Test files in root, tests mixed with source
-**Naming**: Documentation → kebab-case (devstream-guide.md) | Code → snake_case (pre_tool_use.py)
+**Documentation**:
+- `docs/{architecture,api,deployment,guides,development,tutorials}/`
+- No .md files in root (except README.md, CLAUDE.md, PROJECT_STRUCTURE.md)
 
-**File Creation Checklist**: (1) Check PROJECT_STRUCTURE.md → (2) Identify correct directory → (3) Use naming convention → (4) Verify directory exists → (5) Create file
+**Tests**:
+- `tests/{unit,integration,fixtures}/`
+- No test files in root
+- No tests mixed with source
+
+**Naming**:
+- Documentation → kebab-case (devstream-guide.md)
+- Code → snake_case (pre_tool_use.py)
+
+**File Creation Checklist**:
+1. Check PROJECT_STRUCTURE.md
+2. Identify correct directory
+3. Use naming convention
+4. Verify directory exists
+5. Create file
 
 ---
 
-## 🚨 FUNDAMENTAL RULE - Problem Solving
+## 🚨 Fundamental Rule - Problem Solving
 
 ### ⚡⚡⚡ USE CONTEXT7 TO SOLVE - NEVER SIMPLIFY ⚡⚡⚡
 
-**MANDATORY**: ✅ Use Context7 to research solution, research best practices, implement research-backed solution, maintain ALL features functional, test thoroughly
-**FORBIDDEN**: ❌ Disable features to "fix" problem, remove functionality as workaround, create temporary workarounds, simplify to avoid complexity, skip research step
+**MANDATORY**:
+- Use Context7 to research solution
+- Research best practices
+- Implement research-backed solution
+- Maintain ALL features functional
+- Test thoroughly
 
-**ENFORCEMENT**: Code review rejects workarounds and feature disabling
+**FORBIDDEN**:
+- Disable features to "fix" problem
+- Remove functionality as workaround
+- Create temporary workarounds
+- Simplify to avoid complexity
+- Skip research step
 
 ---
 
-## 📚 APPENDIX - System Integration Reference
+## 📚 System Integration Reference
 
 ### Hook Integration Points
-| Hook | Location | Trigger | Purpose | Config |
+| Hook | Location | Trigger | Purpose | Status |
 |------|----------|---------|---------|--------|
+<<<<<<< HEAD
 | PreToolUse | `.claude/hooks/devstream/memory/pre_tool_use.py` | Before EVERY tool execution | Inject Context7 + DevStream memory | `DEVSTREAM_CONTEXT_INJECTION_ENABLED` |
 | PostToolUse | `.claude/hooks/devstream/memory/post_tool_use.py` | After EVERY tool execution | Store code/docs/context | `DEVSTREAM_MEMORY_ENABLED` |
 | UserPromptSubmit | `.claude/hooks/devstream/context/user_query_context_enhancer.py` | On EVERY user prompt | Enhance query with context | `DEVSTREAM_QUERY_ENHANCEMENT_ENABLED` |
@@ -721,21 +651,70 @@ def hybrid_search(self, query: str, limit: int = 10, content_type: Optional[str]
 
 ### Implementation Plans System (Protocol v2.2.0)
 **Database Schema**: `implementation_plans` table with model-specific storage (GLM-4.6 vs Sonnet 4.5)
+=======
+| PreToolUse | `.claude/hooks/devstream/memory/pre_tool_use.py` | Before EVERY tool | Context7 + Memory injection | ✅ Active |
+| PostToolUse | `.claude/hooks/devstream/memory/post_tool_use.py` | After EVERY tool | Store code/docs/context | ✅ Active |
+| UserPromptSubmit | `.claude/hooks/devstream/context/user_query_context_enhancer.py` | Every user prompt | Enhance query with context | ✅ Active |
+| SessionEnd | `.claude/hooks/devstream/sessions/session_end.py` | Session exit | Generate session summary | ⚠️ **DISABLED** (2025-10-12) |
+| PreCompact | `.claude/hooks/devstream/sessions/pre_compact.py` | Before /compact | Save summary pre-compaction | ⚠️ **DISABLED** (2025-10-12) |
+| SessionStart | `.claude/hooks/devstream/sessions/session_start.py` | Session startup | Display previous summary | ⚠️ **DISABLED** (2025-10-12) |
+
+### Direct Database Access Points
+| Component | Access Method | Tools | Purpose | Status |
+|-----------|---------------|-------|---------|--------|
+| Task Management | Direct DB | `get_direct_client()` methods | Task lifecycle | ✅ Active |
+| Memory System | **MemoryManager** | `get_direct_client()` methods | Semantic storage | ✅ Active |
+| Implementation Plans | Direct DB | `get_direct_client()` methods | Plan management | ✅ Active |
+| Vector Search | **MemoryManager** + Ollama | N/A | Memory retrieval | ✅ Active |
+| Session Tracking | Direct DB | N/A | Cross-session | ✅ Active |
+
+**🚨 CRITICAL**: Memory System and Vector Search **MUST** use MemoryManager (`get_direct_client()`) - NEVER use Python Specialist or MCP tools for memory database interrogation.
+
+### Direct Database Integration (v2.2.0+)
+**Architecture**: Direct SQLite database connection (Direct DB Architecture)
+- **Direct DB**: Native SQLite access via `get_direct_client()` methods (current)
+- **MCP Server**: Eliminated in v2.2.0+ for performance and reliability
+
+**Database**: `data/devstream.db` (sqlite-vec enabled)
+
+**Direct DB Tools** (no server required):
+- Task Management: `get_direct_client().create_task()`, `get_direct_client().update_task()`, `get_direct_client().list_tasks()`
+- Memory System: `get_direct_client().store_memory()`, `get_direct_client().search_memory()`
+- Implementation Plans: `get_direct_client().create_implementation_plan()`, `get_direct_client().get_implementation_plan()`, `get_direct_client().update_implementation_plan()`, `get_direct_client().list_implementation_plans()`
+- Memory Operations: `get_direct_client().trigger_checkpoint()`
+
+### Implementation Plans System (v2.2.0+)
+**Architecture**: Direct database integration with dual storage pattern
+**Database Schema**: `implementation_plans` table
+- Direct SQLite access via `get_direct_client()` methods
+- Full metadata, task linkage, model type tracking
+- Direct DB Architecture (no server dependency)
+
+>>>>>>> release/v0.3.0
 **Dual Storage Pattern**:
-- **Database**: SQLite (`data/devstream.db`) with full metadata, task linkage, model type tracking
-- **Filesystem**: Markdown files in `docs/development/plan/piano_[task-slug].md` for human readability
+- **Database**: Direct SQLite storage with full metadata
+- **Filesystem**: `docs/development/plan/piano_[task-slug].md` for human readability
+
 **Model-Specific Templates**:
-- **GLM-4.6**: `templates/implementation-plan-glm46.md` (execution-focused, micro-task breakdown, syntax precision)
-- **Sonnet 4.5**: `templates/implementation-plan-sonnet45.md` (architectural, ADRs, component-level, subagent delegation)
-- **Handoff Prompt**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
-**Strategic Choice Gate**: Interactive model selection at Step 5 (APPROVAL) with automatic plan generation
-**Hook Integration**: `implementation_plan_generator.py` automates plan creation at Step 4 (PLANNING)
+- **GLM-4.6**: `templates/implementation-plan-glm46.md` (execution-focused)
+- **Sonnet 4.5**: `templates/implementation-plan-sonnet45.md` (architectural)
+- **Handoff**: `templates/handoff-prompt-glm46.md` (Sonnet→GLM context transfer)
+
+**Direct DB Tools** (Primary Interface):
+- `get_direct_client().create_implementation_plan()` - Create new plan
+- `get_direct_client().get_implementation_plan()` - Retrieve plan by task ID
+- `get_direct_client().update_implementation_plan()` - Update existing plan
+- `get_direct_client().list_implementation_plans()` - List all plans
 
 ### Environment Configuration (.env.devstream)
 ```bash
-# Memory System (MANDATORY)
+# Core System (MANDATORY)
 DEVSTREAM_MEMORY_ENABLED=true
 DEVSTREAM_MEMORY_FEEDBACK_LEVEL=minimal
+
+# Database (MANDATORY - Direct DB Architecture)
+DEVSTREAM_DB_PATH=data/devstream.db
+DEVSTREAM_DIRECT_DB_ENABLED=true
 
 # Context7 (MANDATORY)
 DEVSTREAM_CONTEXT7_ENABLED=true
@@ -747,34 +726,64 @@ DEVSTREAM_CONTEXT_INJECTION_ENABLED=true
 DEVSTREAM_CONTEXT_MAX_TOKENS=2000
 DEVSTREAM_CONTEXT_RELEVANCE_THRESHOLD=0.5
 
-# Tier-Based Delegation (Protocol v2.2.0 - MANDATORY)
-DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true   # Monolithic first (default)
-DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95 # Single specialist confidence
-DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70 # Multi-agent coordination
-DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true    # Mandatory @code-reviewer
+# Tier-Based Delegation (v2.2.0+ - MANDATORY)
+DEVSTREAM_AUTO_DELEGATION_TIER1_ENABLED=true
+DEVSTREAM_AUTO_DELEGATION_TIER2_THRESHOLD=0.95
+DEVSTREAM_AUTO_DELEGATION_TIER3_THRESHOLD=0.70
+DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true
 
-# Database (MANDATORY)
-DEVSTREAM_DB_PATH=data/devstream.db
+# Implementation Plans (v2.2.0+ - MANDATORY)
+DEVSTREAM_IMPLEMENTATION_PLANS_ENABLED=true
+DEVSTREAM_DUAL_STORAGE_ENABLED=true
+
+# Session Management (v2.2.0+)
+DEVSTREAM_HOOK_SESSIONSTART=false
+DEVSTREAM_HOOK_SESSION_END=false
+DEVSTREAM_HOOK_PRE_COMPACT=false
 
 # Logging (RECOMMENDED)
 DEVSTREAM_LOG_LEVEL=INFO
 DEVSTREAM_LOG_PATH=~/.claude/logs/devstream/
+
+# Vector Search (MANDATORY)
+DEVSTREAM_VECTOR_SEARCH_ENABLED=true
+DEVSTREAM_VECTOR_EMBEDDINGS_MODEL=gemma3
+DEVSTREAM_VECTOR_DB_ENABLED=true
 ```
 
 ---
 
-**Document Version**: 2.2.0 (Protocol v2.2.0 - Strategic Choice Gate + Implementation Plans)
-**Last Updated**: 2025-10-09
-**Status**: ✅ Production Ready - Protocol v2.2.0 Complete
-**Key Changes**:
-- ✅ Task creation moved to Step 1 (DISCUSSION) - prevents data loss
-- ✅ Implementation plans with model-specific templates (GLM-4.6 vs Sonnet 4.5)
-- ✅ Strategic Choice Gate at Step 5 (APPROVAL) - cost optimization via hybrid workflow
-- ✅ GLM-4.6 handoff workflow for Sonnet→GLM session switching
+## Document Metadata
+
+**Version**: 2.2.0+ (Protocol v2.2.0 - Direct DB Architecture)
+**Last Updated**: 2025-10-14
+**Status**: ✅ Production Ready - Direct DB Architecture Complete
+
+**Key Changes v2.2.0+**:
+- ✅ **Direct Database Architecture** - MCP server eliminated, direct SQLite access
+- ✅ Task creation moved to Step 1 (prevents data loss)
+- ✅ Implementation plans with model-specific templates
+- ✅ Strategic Choice Gate at Step 5 (cost optimization)
+- ✅ GLM-4.6 handoff workflow for session switching
 - ✅ Dual storage pattern (DB + filesystem) for plans
+- ✅ Enhanced vector search with sqlite-vec integration
+- ✅ Simplified configuration with direct DB tools
+
+**Architecture Migration**:
+- ❌ ~~MCP devstream server~~ (eliminated - Direct DB Architecture)
+- ✅ Direct SQLite database (`data/devstream.db`) - Primary storage
+- ✅ Direct DB tools (`get_direct_client()` methods) - Primary interface
+- ✅ Enhanced performance and reliability
+- ✅ Reduced system complexity
+
 **Methodology**: Research-Driven Development with Context7
-**Enforcement**: Automatic via Hook System + MCP Integration + Auto-Delegation + Strategic Choice Gate
+**Enforcement**: Automatic via Hook System + Direct DB Architecture + Auto-Delegation + Strategic Choice Gate
 
 ---
 
-*These rules are an integral part and foundation of the DevStream system. Violating them may cause automatic system malfunctions.*
+*These rules are the foundation of the DevStream system. Violating them causes automatic system malfunctions and rollback.*
+<!--
+Generated with DevStream v2.0 - Context7-compliant multi-project setup
+Generation timestamp: Sun Oct 19 10:17:02 CEST 2025
+Template: template_processor.py
+-->

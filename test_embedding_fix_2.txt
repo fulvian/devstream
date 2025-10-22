@@ -1,0 +1,15 @@
+Second test file to verify PostToolUse hook embedding generation fix after code changes.
+
+This file should trigger the PostToolUse hook with the FIX applied:
+1. Store the file content in semantic_memory (via MCP)
+2. Generate embedding via Ollama (SYNCHRONOUSLY corrected)
+3. Update the database with the embedding (SYNCHRONOUSLY corrected)
+
+Expected result: New record in semantic_memory WITH embedding (not NULL).
+
+Created: 2025-10-12T02:28:00Z
+
+Fix applied:
+- Removed await from ollama_client.generate_embedding() call
+- Removed await from update_memory_embedding() call
+- Both methods are synchronous, not async

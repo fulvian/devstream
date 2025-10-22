@@ -137,12 +137,12 @@ export class MetricsServer {
       this.server.on('error', reject);
 
       this.server.listen(this.config.port, () => {
-        console.log(`📊 Metrics server started on http://localhost:${this.config.port}`);
-        console.log(`   - Prometheus endpoint: http://localhost:${this.config.port}${this.config.path}`);
-        console.log(`   - JSON metrics: http://localhost:${this.config.port}/metrics/json`);
-        console.log(`   - Health check: http://localhost:${this.config.port}/health`);
-        console.log(`   - Quality metrics: http://localhost:${this.config.port}/quality`);
-        console.log(`   - Error stats: http://localhost:${this.config.port}/errors`);
+        console.error(`📊 Metrics server started on http://localhost:${this.config.port}`);
+        console.error(`   - Prometheus endpoint: http://localhost:${this.config.port}${this.config.path}`);
+        console.error(`   - JSON metrics: http://localhost:${this.config.port}/metrics/json`);
+        console.error(`   - Health check: http://localhost:${this.config.port}/health`);
+        console.error(`   - Quality metrics: http://localhost:${this.config.port}/quality`);
+        console.error(`   - Error stats: http://localhost:${this.config.port}/errors`);
         resolve();
       });
     });
@@ -162,7 +162,7 @@ export class MetricsServer {
         if (err) {
           reject(err);
         } else {
-          console.log('📊 Metrics server stopped');
+          console.error('📊 Metrics server stopped');
           this.server = null;
           resolve();
         }

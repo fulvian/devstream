@@ -152,31 +152,33 @@ CREATE TABLE IF NOT EXISTS micro_tasks (
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS semantic_memory (
-    id VARCHAR(32) NOT NULL PRIMARY KEY,
-    plan_id VARCHAR(32),                  -- Optional: link to intervention plan
-    phase_id VARCHAR(32),                 -- Optional: link to phase
-    task_id VARCHAR(32),                  -- Optional: link to micro task
+    id TEXT NOT NULL PRIMARY KEY,
+    plan_id TEXT,                         -- Optional: link to intervention plan
+    phase_id TEXT,                        -- Optional: link to phase
+    task_id TEXT,                         -- Optional: link to micro task
     content TEXT NOT NULL,                -- Full content (code, docs, etc.)
-    content_type VARCHAR(20) NOT NULL CHECK (content_type IN ('code', 'documentation', 'context', 'output', 'error', 'decision', 'learning')),
-    content_format VARCHAR(20) CHECK (content_format IN ('text', 'markdown', 'code', 'json', 'yaml')),
-    keywords JSON,                        -- JSON array: ["python", "fastapi", "async"]
+    content_type TEXT NOT NULL CHECK (content_type IN ('code', 'documentation', 'context', 'output', 'error', 'decision', 'learning')),
+    content_format TEXT CHECK (content_format IN ('text', 'markdown', 'code', 'json', 'yaml')),
+    keywords TEXT,                        -- JSON array: ["python", "fastapi", "async"]
     entities JSON,                        -- JSON array: extracted entities
     sentiment FLOAT,                      -- Sentiment score (-1 to 1)
     complexity_score INTEGER CHECK (complexity_score BETWEEN 1 AND 10),
-    embedding TEXT,                       -- Vector embedding (768-dim float array serialized as TEXT)
-    embedding_model VARCHAR(50),          -- Model name (e.g., 'nomic-embed-text')
-    embedding_dimension INTEGER,          -- Dimension count (768 for nomic-embed-text)
-    context_snapshot JSON,                -- JSON: execution context at creation time
-    related_memory_ids JSON,              -- JSON array: ["MEM-001", "MEM-002"]
-    access_count INTEGER,                 -- How many times accessed
+    access_count INTEGER DEFAULT 0,       -- How many times accessed
+    relevance_score REAL DEFAULT 1.0,     -- Dynamic relevance score
+    importance_score REAL DEFAULT 0.0,    -- Importance score (0-1)
     last_accessed_at TIMESTAMP,           -- Last access timestamp
-    relevance_score FLOAT,                -- Dynamic relevance score
-    is_archived BOOLEAN,                  -- Archived flag
+    session_id TEXT,                      -- Associated work session
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source TEXT,                          -- Source information
-    importance_score REAL,                -- Importance score (0-1)
     metadata TEXT,                        -- Additional metadata
+    source TEXT,                          -- Source information
+    embedding_blob BLOB,                  -- Vector embedding stored as BLOB
+    embedding_model TEXT,                 -- Embedding model name
+    embedding_dimension INTEGER,          -- Embedding vector dimension
+    embedding TEXT,                       -- Legacy text embedding (deprecated)
+    context_snapshot JSON,                -- JSON: execution context at creation time
+    related_memory_ids JSON,              -- JSON array: ["MEM-001", "MEM-002"]
+    is_archived BOOLEAN,                  -- Archived flag
     FOREIGN KEY(plan_id) REFERENCES intervention_plans(id) ON DELETE CASCADE,
     FOREIGN KEY(phase_id) REFERENCES phases(id) ON DELETE CASCADE,
     FOREIGN KEY(task_id) REFERENCES micro_tasks(id) ON DELETE CASCADE
@@ -229,8 +231,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_semantic_memory USING fts5(
     content,                              -- Full-text indexed content
     content_type UNINDEXED,               -- Filter by content type
     memory_id UNINDEXED,                  -- Link to semantic_memory.id
-    created_at UNINDEXED,                 -- Timestamp for sorting
-    tokenize='unicode61 remove_diacritics 2'  -- Unicode tokenizer with diacritics removal
+    created_at UNINDEXED                  -- Timestamp for sorting
 );
 
 -- ============================================================================

@@ -1,0 +1,11 @@
+Test file for debugging embedding generation with new logging.
+
+This test will help us understand why embeddings are NULL in the database.
+
+Debug logging should show:
+- embedding type (should be object/array)
+- isArray (should be true)
+- embeddingJson length (should be ~20KB for 768D vector)
+- First 100 chars of JSON
+
+Created: 2025-10-12T02:50:00Z

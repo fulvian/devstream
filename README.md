@@ -1,6 +1,6 @@
 # DevStream: Integrated Task Management & Cross-Session Memory System
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/yourusername/devstream)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/fulvian/devstream)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Poetry](https://img.shields.io/badge/dependency%20management-poetry-blue.svg)](https://python-poetry.org/)

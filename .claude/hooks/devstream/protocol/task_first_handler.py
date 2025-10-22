@@ -503,36 +503,152 @@ class TaskFirstHandler:
         return mapping.get(complexity, 0.5)
 
     async def _create_task(self, task_info: TaskInfo, session_id: str) -> Optional[str]:
-        """Create task via MCP devstream_create_task."""
-        try:
-            # Create task via MCP
-            result = await self.memory_client.create_task(
-                title=task_info.title,
-                description=task_info.description,
-                task_type=task_info.task_type,
-                priority=task_info.priority,
-                phase_name="Core Engine & Infrastructure",  # Default phase
-                project="DevStream"
-            )
+        """
+        Create task via MCP devstream_create_task with circuit breaker pattern.
 
-            if result and result.get("task_id"):
-                logger.logger.info(
-                    "mcp_task_created",
-                    task_id=result["task_id"],
-                    title=task_info.title[:50]
+        Implements graceful fallback with exponential backoff when MCP services
+        are unavailable, ensuring session continuity.
+        """
+        import os
+        from pathlib import Path
+
+        # Circuit breaker configuration from environment
+        max_retries = int(os.getenv("DEVSTREAM_MCP_CIRCUIT_BREAKER_RETRIES", "3"))
+        backoff_factor = float(os.getenv("DEVSTREAM_MCP_CIRCUIT_BREAKER_BACKOFF_FACTOR", "2"))
+        initial_delay = float(os.getenv("DEVSTREAM_MCP_CIRCUIT_BREAKER_INITIAL_DELAY", "1"))
+
+        # Fallback log file
+        fallback_log = Path.home() / ".claude" / "logs" / "protocol_decisions.jsonl"
+        fallback_log.parent.mkdir(parents=True, exist_ok=True)
+
+        attempt = 0
+        last_error = None
+
+        while attempt < max_retries:
+            attempt += 1
+            try:
+                # Attempt MCP task creation
+                result = await self.memory_client.create_task(
+                    title=task_info.title,
+                    description=task_info.description,
+                    task_type=task_info.task_type,
+                    priority=task_info.priority,
+                    phase_name="Core Engine & Infrastructure",  # Default phase
+                    project="DevStream"
                 )
-                return result["task_id"]
-            else:
-                logger.logger.error("mcp_task_creation_failed", result=result)
-                return None
+
+                if result and result.get("task_id"):
+                    logger.logger.info(
+                        "mcp_task_created",
+                        task_id=result["task_id"],
+                        title=task_info.title[:50],
+                        attempt=attempt
+                    )
+                    return result["task_id"]
+                else:
+                    logger.logger.warning(
+                        "mcp_task_creation_failed",
+                        result=result,
+                        attempt=attempt
+                    )
+                    last_error = f"MCP returned invalid result: {result}"
+
+            except Exception as e:
+                last_error = str(e)
+                logger.logger.warning(
+                    "mcp_task_creation_attempt_failed",
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    error=last_error,
+                    error_type=type(e).__name__
+                )
+
+            # Exponential backoff: delay = initial_delay * (backoff_factor ^ (attempt-1))
+            if attempt < max_retries:
+                delay = initial_delay * (backoff_factor ** (attempt - 1))
+                logger.logger.info(
+                    "mcp_circuit_backoff",
+                    attempt=attempt,
+                    delay_seconds=delay,
+                    next_attempt=attempt + 1
+                )
+                await asyncio.sleep(delay)
+
+        # All retries failed - implement graceful fallback
+        logger.logger.error(
+            "mcp_circuit_breaker_tripped",
+            max_retries=max_retries,
+            last_error=last_error,
+            task_title=task_info.title[:50],
+            session_id=session_id
+        )
+
+        # Fallback to local logging
+        await self._fallback_task_logging(task_info, session_id, fallback_log, last_error)
+
+        # Return fallback task ID (timestamp-based)
+        fallback_task_id = f"fallback-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+        logger.logger.info(
+            "mcp_fallback_task_created",
+            fallback_task_id=fallback_task_id,
+            task_title=task_info.title[:50],
+            degraded_mode=True
+        )
+
+        return fallback_task_id
+
+    async def _fallback_task_logging(
+        self,
+        task_info: TaskInfo,
+        session_id: str,
+        fallback_log: Path,
+        error: str
+    ) -> None:
+        """
+        Log task creation to fallback file when MCP is unavailable.
+
+        Creates structured JSONL log entry for later recovery and audit.
+        """
+        try:
+            import json
+
+            log_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event": "task_creation_fallback",
+                "session_id": session_id,
+                "task_info": {
+                    "title": task_info.title,
+                    "description": task_info.description,
+                    "task_type": task_info.task_type,
+                    "priority": task_info.priority,
+                    "estimated_duration": task_info.estimated_duration,
+                    "complexity": task_info.complexity.value
+                },
+                "mcp_error": error,
+                "fallback_reason": "MCP circuit breaker tripped",
+                "degraded_mode": True
+            }
+
+            # Ensure directory exists
+            fallback_log.parent.mkdir(parents=True, exist_ok=True)
+
+            # Append to fallback log file
+            with open(fallback_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+            logger.logger.info(
+                "fallback_task_logged",
+                log_file=str(fallback_log),
+                task_title=task_info.title[:50]
+            )
 
         except Exception as e:
             logger.logger.error(
-                "mcp_task_creation_error",
+                "fallback_logging_failed",
                 error=str(e),
-                error_type=type(e).__name__
+                fallback_log=str(fallback_log)
             )
-            return None
 
     async def _log_task_creation(
         self,

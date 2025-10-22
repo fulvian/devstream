@@ -42,6 +42,8 @@ Usage Example (PreCompact Hook):
 
 import os
 import tempfile
+import secrets
+import stat
 from pathlib import Path
 from typing import Optional
 
@@ -52,21 +54,209 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+def _generate_secure_temp_name(base_name: str) -> str:
+    """
+    Generate a secure, unpredictable temporary file name.
+
+    Context7 Security Best Practices:
+    - Uses cryptographically secure random bytes (secrets.token_hex)
+    - Prevents predictable filename attacks
+    - Ensures sufficient entropy (16 bytes = 32 hex chars)
+
+    Args:
+        base_name: Original file name for context
+
+    Returns:
+        Secure temporary file name with random suffix
+
+    Example:
+        >>> _generate_secure_temp_name("config.json")
+        '.config.json.a1b2c3d4e5f6789012345678901234ab.tmp'
+    """
+    # Generate 16 cryptographically secure random bytes (32 hex chars)
+    random_suffix = secrets.token_hex(16)
+    return f".{base_name}.{random_suffix}.tmp"
+
+
+def _validate_temp_file_security(temp_path: Path) -> bool:
+    """
+    Context7-comprehensive security validation of temporary file.
+
+    Security Checks (OWASP Best Practices):
+    1. Symlink attack prevention - verify file is not a symlink
+    2. Ownership verification - ensure we own the file
+    3. Permission validation - verify restrictive permissions
+    4. Path validation - ensure file is in expected directory
+    5. Race condition protection - validate file properties
+
+    Args:
+        temp_path: Path to temporary file to validate
+
+    Returns:
+        True if file passes all security checks, False otherwise
+
+    Security Notes:
+        - Prevents privilege escalation via symlink attacks
+        - Ensures file isolation and confidentiality
+        - Validates atomic file creation properties
+    """
+    try:
+        # SECURITY CHECK 1: Symlink attack prevention
+        if temp_path.is_symlink():
+            logger.error(
+                "temp_file_security_failed",
+                path=str(temp_path),
+                reason="symlink_detected",
+                details="File is a symbolic link - possible symlink attack"
+            )
+            return False
+
+        # SECURITY CHECK 2: File existence validation
+        if not temp_path.exists():
+            logger.error(
+                "temp_file_security_failed",
+                path=str(temp_path),
+                reason="file_not_found",
+                details="Temporary file does not exist"
+            )
+            return False
+
+        # SECURITY CHECK 3: Permission validation (Context7 secure defaults)
+        file_stat = temp_path.stat()
+        file_mode = file_stat.st_mode
+
+        # Check file permissions are restrictive (owner read/write only)
+        # Expected: 0o600 (rw-------) or more restrictive
+        if file_mode & 0o077:  # Check any group/other permissions
+            logger.error(
+                "temp_file_security_failed",
+                path=str(temp_path),
+                reason="insecure_permissions",
+                details=f"File mode {oct(file_mode)} allows group/other access",
+                expected_mode="0o600 (rw-------) or more restrictive"
+            )
+            return False
+
+        # SECURITY CHECK 4: Ownership verification
+        current_uid = os.getuid() if hasattr(os, 'getuid') else None
+        file_uid = file_stat.st_uid if hasattr(file_stat, 'st_uid') else None
+
+        if current_uid is not None and file_uid != current_uid:
+            logger.error(
+                "temp_file_security_failed",
+                path=str(temp_path),
+                reason="ownership_mismatch",
+                details=f"File owned by uid {file_uid}, current uid {current_uid}",
+                severity="HIGH"
+            )
+            return False
+
+        # SECURITY CHECK 5: Path validation (ensure same filesystem)
+        # This prevents cross-filesystem symlink attacks
+        try:
+            temp_dev = file_stat.st_dev if hasattr(file_stat, 'st_dev') else None
+            parent_stat = temp_path.parent.stat()
+            parent_dev = parent_stat.st_dev if hasattr(parent_stat, 'st_dev') else None
+
+            if temp_dev is not None and parent_dev is not None and temp_dev != parent_dev:
+                logger.error(
+                    "temp_file_security_failed",
+                    path=str(temp_path),
+                    reason="cross_filesystem",
+                    details="Temp file is on different filesystem from parent directory",
+                    temp_device=temp_dev,
+                    parent_device=parent_dev,
+                    severity="HIGH"
+                )
+                return False
+        except (OSError, AttributeError):
+            # If we can't verify filesystem, log but don't fail
+            logger.warning(
+                "temp_file_filesystem_check_failed",
+                path=str(temp_path),
+                reason="filesystem_verification_failed",
+                details="Unable to verify filesystem device numbers"
+            )
+
+        # All security checks passed
+        logger.debug(
+            "temp_file_security_validated",
+            path=str(temp_path),
+            file_mode=oct(file_mode),
+            file_uid=file_uid,
+            file_size=file_stat.st_size
+        )
+
+        return True
+
+    except (OSError, AttributeError) as e:
+        logger.error(
+            "temp_file_security_check_error",
+            path=str(temp_path),
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        return False
+
+
+def _set_secure_file_permissions(file_path: Path) -> bool:
+    """
+    Set Context7-compliant secure permissions on temporary file.
+
+    Security Standards:
+    - Owner read/write only (0o600 = rw-------)
+    - No group or other permissions
+    - Prevents information disclosure
+
+    Args:
+        file_path: Path to file to secure
+
+    Returns:
+        True if permissions set successfully, False otherwise
+    """
+    try:
+        # Set restrictive permissions: owner read/write only
+        os.chmod(file_path, 0o600)
+
+        logger.debug(
+            "secure_permissions_set",
+            file_path=str(file_path),
+            permissions="0o600 (rw-------)"
+        )
+
+        return True
+
+    except OSError as e:
+        logger.error(
+            "secure_permissions_failed",
+            file_path=str(file_path),
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        return False
+
+
 async def write_atomic(
     file_path: Path,
     content: str,
     encoding: str = "utf-8"
 ) -> bool:
     """
-    Write content to file atomically using temp file + rename pattern.
+    Context7-Secure atomic file writing with comprehensive security protections.
 
-    This function ensures that file writes are atomic to prevent partial
-    writes that can corrupt session summaries or other critical data.
-    Uses the write-rename pattern:
-    1. Create temp file in same directory as target
-    2. Write content to temp file
-    3. Flush and close temp file
-    4. Atomic rename temp → target
+    Enhanced Security Features (SEC-005 Fixed):
+    - Cryptographically secure temp file names (prevents prediction attacks)
+    - Symlink attack prevention (comprehensive validation)
+    - Secure file permissions (0o600 - owner read/write only)
+    - Race condition protection (security validation before use)
+    - Cross-filesystem attack prevention
+
+    Uses the secure write-rename pattern:
+    1. Generate cryptographically secure temp file name
+    2. Create temp file with secure permissions
+    3. Validate temp file security (symlink, ownership, permissions)
+    4. Write content using async I/O
+    5. Atomic rename temp → target
 
     Args:
         file_path: Target file path to write to
@@ -79,10 +269,12 @@ async def write_atomic(
     Raises:
         OSError: If file operation fails (disk full, permissions, etc.)
 
-    Note:
-        Uses aiofiles for async I/O and os.replace() for atomic rename.
-        Temp file created in same directory as target to ensure same filesystem
-        (required for atomic rename on POSIX systems).
+    Security Notes:
+        - Temp files use 32-character cryptographically secure random names
+        - All temp files validated before use (symlink attack prevention)
+        - Secure permissions enforced (0o600 = rw-------)
+        - Race condition protection through comprehensive validation
+        - Cross-filesystem symlink attack prevention
 
     Example:
         >>> success = await write_atomic(
@@ -90,7 +282,7 @@ async def write_atomic(
         ...     json.dumps(data, indent=2)
         ... )
         >>> if success:
-        ...     print("File written atomically")
+        ...     print("File written securely and atomically")
     """
     tmp_fd = None
     tmp_path = None
@@ -99,46 +291,131 @@ async def write_atomic(
         # Ensure parent directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create temp file in same directory as target (same filesystem requirement)
-        # delete=False because we need to rename it after closing
-        tmp_fd = tempfile.NamedTemporaryFile(
-            mode='w',
-            encoding=encoding,
-            dir=file_path.parent,
-            delete=False,
-            suffix='.tmp',
-            prefix=f'.{file_path.name}.'
-        )
-        tmp_path = Path(tmp_fd.name)
+        # SECURITY: Generate cryptographically secure temp file name
+        # Context7 Best Practice: Use secrets.token_hex() for unpredictability
+        secure_temp_name = _generate_secure_temp_name(file_path.name)
+        tmp_path = file_path.parent / secure_temp_name
 
-        # Write content using aiofiles for async I/O
-        async with aiofiles.open(tmp_path, 'w', encoding=encoding) as tmp_file:
-            await tmp_file.write(content)
-            await tmp_file.flush()
+        # SECURITY: Create temp file with secure permissions from start
+        # Use O_EXCL | O_CREAT to prevent race conditions in file creation
+        try:
+            # Create file with exclusive access (prevents race conditions)
+            tmp_fd = os.open(
+                tmp_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_TRUNC,
+                mode=0o600  # Secure permissions from creation
+            )
+        except FileExistsError:
+            logger.error(
+                "temp_file_creation_race",
+                temp_path=str(tmp_path),
+                reason="file_already_exists",
+                details="Race condition detected during temp file creation"
+            )
+            return False
+
+        # SECURITY: Validate the created file meets security requirements
+        if not _validate_temp_file_security(tmp_path):
+            # Cleanup failed security validation
+            try:
+                os.close(tmp_fd)
+                await aiofiles.os.remove(tmp_path)
+            except OSError:
+                pass  # Best effort cleanup
+            return False
+
+        # SECURITY: Ensure permissions remain secure after validation
+        if not _set_secure_file_permissions(tmp_path):
+            # Cleanup if permission setting fails
+            try:
+                os.close(tmp_fd)
+                await aiofiles.os.remove(tmp_path)
+            except OSError:
+                pass  # Best effort cleanup
+            return False
+
+        # Write content using the secure file descriptor
+        try:
+            # Write content using os.write with the secure fd
+            content_bytes = content.encode(encoding)
+            os.write(tmp_fd, content_bytes)
+
             # Ensure data is written to disk (fsync for durability)
-            # Note: aiofiles doesn't provide async fsync, use sync version
-            os.fsync(tmp_file.fileno())
+            os.fsync(tmp_fd)
 
-        # Close the original file descriptor (already closed by aiofiles context manager)
-        # tmp_fd is just the initial NamedTemporaryFile descriptor
-        tmp_fd.close()
+            logger.debug(
+                "secure_content_written",
+                temp_path=str(tmp_path),
+                content_size=len(content_bytes),
+                encoding=encoding
+            )
 
-        # Atomic rename: temp → target
+        except OSError as write_error:
+            logger.error(
+                "secure_content_write_failed",
+                temp_path=str(tmp_path),
+                error=str(write_error),
+                error_type=type(write_error).__name__
+            )
+            # Cleanup on write failure
+            try:
+                os.close(tmp_fd)
+                await aiofiles.os.remove(tmp_path)
+            except OSError:
+                pass
+            return False
+
+        # Close the file descriptor
+        os.close(tmp_fd)
+        tmp_fd = None
+
+        # SECURITY: Final validation before atomic rename
+        if not _validate_temp_file_security(tmp_path):
+            logger.error(
+                "final_security_validation_failed",
+                temp_path=str(tmp_path),
+                reason="post_write_security_check_failed",
+                severity="HIGH"
+            )
+            # Cleanup failed validation
+            try:
+                await aiofiles.os.remove(tmp_path)
+            except OSError:
+                pass
+            return False
+
+        # SECURITY: Atomic rename with validation
         # os.replace() is atomic on both POSIX and Windows (Python 3.3+)
-        await aiofiles.os.replace(tmp_path, file_path)
+        try:
+            await aiofiles.os.replace(tmp_path, file_path)
+        except OSError as rename_error:
+            logger.error(
+                "atomic_rename_failed",
+                temp_path=str(tmp_path),
+                target_path=str(file_path),
+                error=str(rename_error),
+                error_type=type(rename_error).__name__
+            )
+            # Cleanup failed rename
+            try:
+                await aiofiles.os.remove(tmp_path)
+            except OSError:
+                pass
+            return False
 
-        logger.debug(
-            "atomic_write_success",
+        logger.info(
+            "secure_atomic_write_success",
             file_path=str(file_path),
             content_size=len(content),
-            encoding=encoding
+            encoding=encoding,
+            security_features="secure_temp_name,symlink_protection,secure_permissions,race_condition_protection"
         )
 
         return True
 
     except OSError as e:
         logger.error(
-            "atomic_write_failed",
+            "secure_atomic_write_failed",
             file_path=str(file_path),
             error=str(e),
             error_type=type(e).__name__
@@ -161,7 +438,7 @@ async def write_atomic(
     except Exception as e:
         # Unexpected errors (should rarely happen)
         logger.error(
-            "atomic_write_unexpected_error",
+            "secure_atomic_write_unexpected_error",
             file_path=str(file_path),
             error=str(e),
             error_type=type(e).__name__
@@ -178,8 +455,11 @@ async def write_atomic(
 
     finally:
         # Ensure temp file descriptor is closed if still open
-        if tmp_fd and not tmp_fd.closed:
-            tmp_fd.close()
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass  # Best effort cleanup
 
 
 async def write_atomic_json(

@@ -51,7 +51,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'utils'))
 
 from devstream_base import DevStreamHookBase
-from mcp_client import get_mcp_client
+from unified_client import get_unified_client
 from debouncer import debounce
 from logger import get_devstream_logger
 
@@ -175,7 +175,7 @@ class RealTimeDataCapture:
             project_root: Root directory to monitor (defaults to current working directory)
         """
         self.base = DevStreamHookBase("real_time_capture")
-        self.mcp_client = get_mcp_client()
+        self.unified_client = get_unified_client()
 
         # Project configuration
         self.project_root = Path(project_root) if project_root else Path.cwd()
@@ -390,15 +390,11 @@ class RealTimeDataCapture:
                         event_type=modification.event_type,
                         keywords_count=len(keywords))
 
-            # Store via MCP
-            result = await self.base.safe_mcp_call(
-                self.mcp_client,
-                "devstream_store_memory",
-                {
-                    "content": memory_content,
-                    "content_type": "code",
-                    "keywords": keywords
-                }
+            # Store via unified client
+            result = await self.unified_client.store_memory(
+                content=memory_content,
+                content_type="code",
+                keywords=keywords
             )
 
             if result and isinstance(result, dict):

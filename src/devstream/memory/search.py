@@ -209,15 +209,21 @@ class HybridSearchEngine:
         terms = cleaned.split()
 
         if not terms:
-            return '""'
+            return 'content:"" OR keywords:"" OR entities:""'
 
         # Create phrase query for better matching
         if len(terms) == 1:
-            return f'"{terms[0]}"'
+            term = terms[0]
+            return f'content:"{term}" OR keywords:"{term}" OR entities:"{term}"'
 
         # Multi-term query with OR operator for broader matching
-        escaped_terms = [f'"{term}"' for term in terms]
-        return " OR ".join(escaped_terms)
+        # Search across all FTS columns: content, keywords, entities
+        term_queries = []
+        for term in terms:
+            term_query = f'content:"{term}" OR keywords:"{term}" OR entities:"{term}"'
+            term_queries.append(f'({term_query})')
+
+        return " AND ".join(term_queries)
 
     def _reciprocal_rank_fusion(
         self,

@@ -24,8 +24,123 @@ Implementation follows OWASP Input Validation Cheat Sheet:
 """
 
 import os
+import re
+import urllib.parse
+import unicodedata
 from pathlib import Path
 from typing import Optional
+
+# Context7 Pattern: Dynamic environment-based configuration
+def load_dotenv():
+    """Load .env file if available (Context7/Dynaconf pattern)"""
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _load_dotenv()
+    except ImportError:
+        # Fallback: manually parse .env file
+        env_file = os.path.join(os.getcwd(), '.env')
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        os.environ[key.strip()] = value.strip()
+
+# Load environment variables on import (Context7 best practice)
+load_dotenv()
+
+
+def is_path_traversal_attack(path: str) -> bool:
+    """
+    Context7-compliant path traversal detection following OWASP best practices.
+
+    Multiple detection layers following defense-in-depth principle:
+    1. URL decoding detection
+    2. Unicode normalization
+    3. Pattern-based detection for encoded variants
+    4. Backward path sequence detection
+
+    This function protects against:
+    - Basic traversal: "../etc/passwd"
+    - URL encoded: "..%2Fetc/passwd"
+    - Double encoded: "..%252Fetc/passwd"
+    - Unicode encoded: "..%c0%afetc/passwd"
+    - Mixed separators: "..\\etc/passwd"
+
+    Args:
+        path: User-provided path to validate
+
+    Returns:
+        True if path traversal attack detected, False otherwise
+    """
+    if not path:
+        return False
+
+    # Layer 1: URL decoding detection (OWASP best practice)
+    try:
+        # Try multiple decoding rounds to detect double encoding
+        decoded_path = path
+        for _ in range(3):  # Prevent infinite loops
+            previous = decoded_path
+            decoded_path = urllib.parse.unquote(decoded_path)
+            if decoded_path == previous:
+                break
+
+        # Check if decoding revealed traversal
+        if ".." in decoded_path:
+            return True
+
+    except Exception:
+        # If decoding fails, be conservative and block
+        if ".." in path:
+            return True
+
+    # Layer 2: Unicode normalization attacks
+    try:
+        normalized = unicodedata.normalize('NFC', path)
+        if ".." in normalized:
+            return True
+    except Exception:
+        pass
+
+    # Layer 3: Pattern-based detection for encoded variants
+    dangerous_patterns = [
+        r'\.\.%2[Ff]',           # URL encoded forward slash
+        r'\.\.%5[Cc]',           # URL encoded backslash
+        r'\.\.%c0%[aA][fF]',     # UTF-8 overlong encoding
+        r'\.\.%e0%80%[aA][fF]',  # UTF-8 overlong encoding variant
+        r'\.\.\\',               # Windows backslash
+        r'\.\.\/',               # Forward slash variant
+        r'%2e%2e%2[fF]',         # Double URL encoded ".."
+        r'%252e%252e%252[fF]',   # Triple URL encoded ".."
+    ]
+
+    for pattern in dangerous_patterns:
+        if re.search(pattern, path, re.IGNORECASE):
+            return True
+
+    # Layer 4: Path normalization with detection
+    try:
+        # Convert to Path object for robust handling
+        p = Path(path)
+
+        # Check for obvious traversal in any component
+        for part in p.parts:
+            if part == "..":
+                return True
+
+        # Try to resolve relative paths safely
+        if not p.is_absolute():
+            # Don't resolve - just check for traversal
+            if any(part == ".." for part in p.parts):
+                return True
+
+    except Exception:
+        # If Path parsing fails, be conservative
+        return ".." in path
+
+    return False
 
 
 class PathValidationError(ValueError):
@@ -107,17 +222,17 @@ def validate_db_path(
     
     # Default project root to current working directory
     if project_root is None:
-        project_root = os.getcwd()
+        project_root = os.getenv('DEVSTREAM_PROJECT_ROOT', os.getcwd())
     
     # Canonicalize project root (resolve symlinks)
     canonical_project_root = os.path.realpath(project_root)
     
-    # SECURITY CHECK 1: Block obvious path traversal attempts
-    # Detect ../ sequences BEFORE canonicalization (defense in depth)
-    if ".." in path:
+    # SECURITY CHECK 1: Enhanced path traversal detection (OWASP Context7-compliant)
+    # Multiple detection layers following defense-in-depth principle
+    if is_path_traversal_attack(path):
         raise PathValidationError(
             f"Path traversal detected: {path}. "
-            f"Database paths must not contain '..' sequences. "
+            f"Database paths must not contain path traversal sequences (encoded or literal). "
             f"Valid example: data/devstream.db or /absolute/path/to/devstream.db"
         )
     
@@ -181,17 +296,23 @@ def get_validated_db_path(
     project_root: Optional[str] = None
 ) -> str:
     """
-    Get validated database path from environment or default.
-    
-    Convenience function that:
-    1. Reads path from environment variable
-    2. Falls back to default if not set
-    3. Validates path with validate_db_path()
-    
+    Context7-compliant database path resolution with multi-project support.
+
+    This function implements Dynaconf-inspired patterns:
+    1. Environment variable detection (DEVSTREAM_DB_PATH)
+    2. Fallback to default relative path
+    3. Dynamic project root resolution
+    4. Security validation with path traversal protection
+
+    Priority Order (Context7 best practice):
+    1. Explicit env_var (DEVSTREAM_DB_PATH)
+    2. DEVSTREAM_PROJECT_ROOT + default_path
+    3. Current working directory + default_path
+
     Args:
         env_var: Environment variable name (default: DEVSTREAM_DB_PATH)
         default_path: Default relative path (default: data/devstream.db)
-        project_root: Project root directory (default: current working directory)
+        project_root: Project root directory (auto-detected if None)
 
     Returns:
         Validated canonical absolute path
@@ -200,24 +321,37 @@ def get_validated_db_path(
         PathValidationError: If validation fails
 
     Examples:
-        >>> # With environment variable
-        >>> os.environ["DEVSTREAM_DB_PATH"] = "data/devstream.db"
+        >>> # Multi-project with DEVSTREAM_PROJECT_ROOT
+        >>> os.environ["DEVSTREAM_PROJECT_ROOT"] = "/Users/accountabilly"
         >>> get_validated_db_path()
-        '/project/data/devstream.db'
+        '/Users/accountabilly/data/devstream.db'
 
-        >>> # With default
-        >>> del os.environ["DEVSTREAM_DB_PATH"]
+        >>> # Custom database path
+        >>> os.environ["DEVSTREAM_DB_PATH"] = "data/custom.db"
         >>> get_validated_db_path()
-        '/project/data/devstream.db'
-        
+        '/project/data/custom.db'
+
         >>> # Attack attempt blocked
         >>> os.environ["DEVSTREAM_DB_PATH"] = "../../etc/passwd"
         >>> get_validated_db_path()
         PathValidationError: Path traversal detected
     """
-    # Get path from environment or use default
-    db_path = os.getenv(env_var, default_path)
-    
+    # Context7 Pattern: Multi-project environment detection
+    if project_root is None:
+        # Priority 1: DEVSTREAM_PROJECT_ROOT (multi-project mode)
+        project_root = os.getenv("DEVSTREAM_PROJECT_ROOT")
+
+        # Priority 2: Current working directory (single-project mode)
+        if project_root is None:
+            project_root = os.getcwd()
+
+    # Priority 1: Custom database path from environment
+    db_path = os.getenv(env_var)
+
+    # Priority 2: Default path in project directory
+    if db_path is None:
+        db_path = default_path
+
     # Validate and return canonical path
     return validate_db_path(db_path, project_root)
 
@@ -225,14 +359,15 @@ def get_validated_db_path(
 # Test function for standalone execution
 def test_path_validator():
     """
-    Test path validator with attack scenarios.
-    
-    Tests legitimate paths and attack vectors to ensure security.
+    Context7-compliant path validator security testing.
+
+    Tests legitimate paths and attack vectors to ensure security
+    in multi-project environments.
     """
-    print("🔒 Testing Path Validator Security\n")
-    
-    # Create temporary project root
-    project_root = "/Users/fulvioventura/devstream"
+    print("🔒 Testing Path Validator Security (Context7 Multi-Project)\n")
+
+    # Context7 Pattern: Dynamic project root detection
+    project_root = os.getenv("DEVSTREAM_PROJECT_ROOT", os.getcwd())
     
     test_cases = [
         # (path, should_pass, description)
@@ -243,6 +378,23 @@ def test_path_validator():
         ("data/../../../etc/passwd", False, "Directory traversal via canonicalization"),
         ("data/test.txt", False, "Invalid file extension"),
         ("", False, "Empty path"),
+        # NEW: Enhanced path traversal test cases (Context7-compliant)
+        ("..%2Fetc/passwd", False, "URL encoded forward slash traversal"),
+        ("..%2fetc/passwd", False, "URL encoded forward slash (lowercase)"),
+        ("..%5Cetc/passwd", False, "URL encoded backslash traversal"),
+        ("..%5cetc/passwd", False, "URL encoded backslash (lowercase)"),
+        ("..%c0%afetc/passwd", False, "Unicode overlong encoding"),
+        ("..%C0%AFetc/passwd", False, "Unicode overlong encoding (uppercase)"),
+        ("..%e0%80%afetc/passwd", False, "Unicode overlong encoding variant"),
+        ("..%E0%80%AFetc/passwd", False, "Unicode overlong encoding variant (uppercase)"),
+        ("..\\etc\\passwd", False, "Windows backslash traversal"),
+        ("..\\/etc\\/passwd", False, "Mixed separator traversal"),
+        ("%2e%2e%2fetc/passwd", False, "Double URL encoded dots"),
+        ("%2E%2E%2Fetc/passwd", False, "Double URL encoded dots (uppercase)"),
+        ("%252e%252e%252fetc/passwd", False, "Triple URL encoded dots"),
+        ("%252E%252E%252Fetc/passwd", False, "Triple URL encoded dots (uppercase)"),
+        ("..././../../etc/passwd", False, "Multiple dots with current directory"),
+        ("./../etc/passwd", False, "Current directory with traversal"),
     ]
     
     print("Running security test cases:\n")

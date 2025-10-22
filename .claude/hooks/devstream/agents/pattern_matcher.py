@@ -22,29 +22,254 @@ Usage:
 from typing import Optional, Dict, List, Pattern
 import re
 import os
+import sys
 from pathlib import Path
 
-from .pattern_catalog import (
-    PatternMatch,
-    PatternRule,
-    PATTERN_CATALOG,
-    QUALITY_GATE_PATTERNS,
-    PYTHON_PATTERNS,
-    TYPESCRIPT_PATTERNS,
-    RUST_PATTERNS,
-    GO_PATTERNS,
-    SECURITY_PATTERNS,
-    DATABASE_PATTERNS,
-    TESTING_PATTERNS,
-    PERFORMANCE_PATTERNS,
-    REFACTORING_PATTERNS,
-    API_PATTERNS,
-    DEBUGGING_PATTERNS,
-    INTEGRATION_PATTERNS,
-    DEPLOYMENT_PATTERNS,
-    DOCUMENTATION_PATTERNS,
-    MIGRATION_PATTERNS,
-)
+# Multi-project import handling with fallback mechanisms
+def _import_pattern_catalog():
+    """Import pattern catalog with multi-project fallback support."""
+
+    # Strategy 1: Try relative import (when run as module)
+    try:
+        from .pattern_catalog import (
+            PatternMatch,
+            PatternRule,
+            PATTERN_CATALOG,
+            QUALITY_GATE_PATTERNS,
+            PYTHON_PATTERNS,
+            TYPESCRIPT_PATTERNS,
+            RUST_PATTERNS,
+            GO_PATTERNS,
+            SECURITY_PATTERNS,
+            DATABASE_PATTERNS,
+            TESTING_PATTERNS,
+            PERFORMANCE_PATTERNS,
+            REFACTORING_PATTERNS,
+            API_PATTERNS,
+            DEBUGGING_PATTERNS,
+            INTEGRATION_PATTERNS,
+            DEPLOYMENT_PATTERNS,
+            DOCUMENTATION_PATTERNS,
+            MIGRATION_PATTERNS,
+        )
+        return {
+            'PatternMatch': PatternMatch,
+            'PatternRule': PatternRule,
+            'PATTERN_CATALOG': PATTERN_CATALOG,
+            'QUALITY_GATE_PATTERNS': QUALITY_GATE_PATTERNS,
+            'PYTHON_PATTERNS': PYTHON_PATTERNS,
+            'TYPESCRIPT_PATTERNS': TYPESCRIPT_PATTERNS,
+            'RUST_PATTERNS': RUST_PATTERNS,
+            'GO_PATTERNS': GO_PATTERNS,
+            'SECURITY_PATTERNS': SECURITY_PATTERNS,
+            'DATABASE_PATTERNS': DATABASE_PATTERNS,
+            'TESTING_PATTERNS': TESTING_PATTERNS,
+            'PERFORMANCE_PATTERNS': PERFORMANCE_PATTERNS,
+            'REFACTORING_PATTERNS': REFACTORING_PATTERNS,
+            'API_PATTERNS': API_PATTERNS,
+            'DEBUGGING_PATTERNS': DEBUGGING_PATTERNS,
+            'INTEGRATION_PATTERNS': INTEGRATION_PATTERNS,
+            'DEPLOYMENT_PATTERNS': DEPLOYMENT_PATTERNS,
+            'DOCUMENTATION_PATTERNS': DOCUMENTATION_PATTERNS,
+            'MIGRATION_PATTERNS': MIGRATION_PATTERNS,
+        }
+    except ImportError:
+        pass
+
+    # Strategy 2: Try absolute import from current directory
+    try:
+        from pattern_catalog import (
+            PatternMatch,
+            PatternRule,
+            PATTERN_CATALOG,
+            QUALITY_GATE_PATTERNS,
+            PYTHON_PATTERNS,
+            TYPESCRIPT_PATTERNS,
+            RUST_PATTERNS,
+            GO_PATTERNS,
+            SECURITY_PATTERNS,
+            DATABASE_PATTERNS,
+            TESTING_PATTERNS,
+            PERFORMANCE_PATTERNS,
+            REFACTORING_PATTERNS,
+            API_PATTERNS,
+            DEBUGGING_PATTERNS,
+            INTEGRATION_PATTERNS,
+            DEPLOYMENT_PATTERNS,
+            DOCUMENTATION_PATTERNS,
+            MIGRATION_PATTERNS,
+        )
+        return {
+            'PatternMatch': PatternMatch,
+            'PatternRule': PatternRule,
+            'PATTERN_CATALOG': PATTERN_CATALOG,
+            'QUALITY_GATE_PATTERNS': QUALITY_GATE_PATTERNS,
+            'PYTHON_PATTERNS': PYTHON_PATTERNS,
+            'TYPESCRIPT_PATTERNS': TYPESCRIPT_PATTERNS,
+            'RUST_PATTERNS': RUST_PATTERNS,
+            'GO_PATTERNS': GO_PATTERNS,
+            'SECURITY_PATTERNS': SECURITY_PATTERNS,
+            'DATABASE_PATTERNS': DATABASE_PATTERNS,
+            'TESTING_PATTERNS': TESTING_PATTERNS,
+            'PERFORMANCE_PATTERNS': PERFORMANCE_PATTERNS,
+            'REFACTORING_PATTERNS': REFACTORING_PATTERNS,
+            'API_PATTERNS': API_PATTERNS,
+            'DEBUGGING_PATTERNS': DEBUGGING_PATTERNS,
+            'INTEGRATION_PATTERNS': INTEGRATION_PATTERNS,
+            'DEPLOYMENT_PATTERNS': DEPLOYMENT_PATTERNS,
+            'DOCUMENTATION_PATTERNS': DOCUMENTATION_PATTERNS,
+            'MIGRATION_PATTERNS': MIGRATION_PATTERNS,
+        }
+    except ImportError:
+        pass
+
+    # Strategy 3: Try import from DevStream root (multi-project context)
+    current_file = Path(__file__).resolve()
+    agents_dir = current_file.parent
+
+    # Look for pattern_catalog.py in various locations
+    search_paths = [
+        agents_dir / 'pattern_catalog.py',  # Same directory
+        agents_dir.parent / 'pattern_catalog.py',  # Parent directory
+        Path.cwd() / '.claude' / 'hooks' / 'devstream' / 'agents' / 'pattern_catalog.py',  # Multi-project context
+        Path.cwd() / '.claude' / 'hooks' / 'devstream' / 'pattern_catalog.py',  # Alternative multi-project structure
+    ]
+
+    for search_path in search_paths:
+        if search_path.exists():
+            try:
+                # Add the directory to Python path
+                import_dir = str(search_path.parent)
+                if import_dir not in sys.path:
+                    sys.path.insert(0, import_dir)
+
+                # Import the module
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("pattern_catalog", search_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+                return {
+                    'PatternMatch': module.PatternMatch,
+                    'PatternRule': module.PatternRule,
+                    'PATTERN_CATALOG': module.PATTERN_CATALOG,
+                    'QUALITY_GATE_PATTERNS': module.QUALITY_GATE_PATTERNS,
+                    'PYTHON_PATTERNS': module.PYTHON_PATTERNS,
+                    'TYPESCRIPT_PATTERNS': module.TYPESCRIPT_PATTERNS,
+                    'RUST_PATTERNS': module.RUST_PATTERNS,
+                    'GO_PATTERNS': module.GO_PATTERNS,
+                    'SECURITY_PATTERNS': module.SECURITY_PATTERNS,
+                    'DATABASE_PATTERNS': module.DATABASE_PATTERNS,
+                    'TESTING_PATTERNS': module.TESTING_PATTERNS,
+                    'PERFORMANCE_PATTERNS': module.PERFORMANCE_PATTERNS,
+                    'REFACTORING_PATTERNS': module.REFACTORING_PATTERNS,
+                    'API_PATTERNS': module.API_PATTERNS,
+                    'DEBUGGING_PATTERNS': module.DEBUGGING_PATTERNS,
+                    'INTEGRATION_PATTERNS': module.INTEGRATION_PATTERNS,
+                    'DEPLOYMENT_PATTERNS': module.DEPLOYMENT_PATTERNS,
+                    'DOCUMENTATION_PATTERNS': module.DOCUMENTATION_PATTERNS,
+                    'MIGRATION_PATTERNS': module.MIGRATION_PATTERNS,
+                }
+            except Exception:
+                continue
+
+    # Strategy 4: Create minimal fallback patterns
+    return _create_fallback_patterns()
+
+def _create_fallback_patterns():
+    """Create minimal fallback patterns when pattern catalog is unavailable."""
+
+    # Define basic TypedDict classes
+    class PatternMatch(dict):
+        def __init__(self, agent=None, confidence=0.0, reason="", method=""):
+            super().__init__({
+                'agent': agent,
+                'confidence': confidence,
+                'reason': reason,
+                'method': method
+            })
+
+    class PatternRule(dict):
+        def __init__(self, **kwargs):
+            super().__init__(kwargs)
+
+    # Create minimal pattern catalog with essential patterns
+    PATTERN_CATALOG = {
+        "python_development": {
+            "extensions": [".py", ".pyi"],
+            "keywords": ["python", "fastapi", "django", "async"],
+            "agent": "@python-specialist",
+            "confidence": 0.9
+        },
+        "typescript_development": {
+            "extensions": [".ts", ".tsx"],
+            "keywords": ["typescript", "react", "nextjs"],
+            "agent": "@typescript-specialist",
+            "confidence": 0.9
+        },
+        "database_work": {
+            "keywords": ["database", "sql", "postgresql", "migration"],
+            "agent": "@database-specialist",
+            "confidence": 0.85
+        },
+        "testing_work": {
+            "keywords": ["test", "pytest", "testing"],
+            "agent": "@testing-specialist",
+            "confidence": 0.85
+        },
+        "pre_commit_review": {
+            "keywords": ["review", "commit", "code review"],
+            "agent": "@code-reviewer",
+            "confidence": 1.0,
+            "mandatory": True
+        }
+    }
+
+    return {
+        'PatternMatch': PatternMatch,
+        'PatternRule': PatternRule,
+        'PATTERN_CATALOG': PATTERN_CATALOG,
+        'QUALITY_GATE_PATTERNS': {k: v for k, v in PATTERN_CATALOG.items() if v.get('mandatory')},
+        'PYTHON_PATTERNS': {'python_development': PATTERN_CATALOG['python_development']},
+        'TYPESCRIPT_PATTERNS': {'typescript_development': PATTERN_CATALOG['typescript_development']},
+        'RUST_PATTERNS': {},
+        'GO_PATTERNS': {},
+        'SECURITY_PATTERNS': {},
+        'DATABASE_PATTERNS': {'database_work': PATTERN_CATALOG['database_work']},
+        'TESTING_PATTERNS': {'testing_work': PATTERN_CATALOG['testing_work']},
+        'PERFORMANCE_PATTERNS': {},
+        'REFACTORING_PATTERNS': {},
+        'API_PATTERNS': {},
+        'DEBUGGING_PATTERNS': {},
+        'INTEGRATION_PATTERNS': {},
+        'DEPLOYMENT_PATTERNS': {},
+        'DOCUMENTATION_PATTERNS': {},
+        'MIGRATION_PATTERNS': {},
+    }
+
+# Import pattern catalog with fallback support
+_pattern_exports = _import_pattern_catalog()
+
+# Extract all exports
+PatternMatch = _pattern_exports['PatternMatch']
+PatternRule = _pattern_exports['PatternRule']
+PATTERN_CATALOG = _pattern_exports['PATTERN_CATALOG']
+QUALITY_GATE_PATTERNS = _pattern_exports['QUALITY_GATE_PATTERNS']
+PYTHON_PATTERNS = _pattern_exports['PYTHON_PATTERNS']
+TYPESCRIPT_PATTERNS = _pattern_exports['TYPESCRIPT_PATTERNS']
+RUST_PATTERNS = _pattern_exports['RUST_PATTERNS']
+GO_PATTERNS = _pattern_exports['GO_PATTERNS']
+SECURITY_PATTERNS = _pattern_exports['SECURITY_PATTERNS']
+DATABASE_PATTERNS = _pattern_exports['DATABASE_PATTERNS']
+TESTING_PATTERNS = _pattern_exports['TESTING_PATTERNS']
+PERFORMANCE_PATTERNS = _pattern_exports['PERFORMANCE_PATTERNS']
+REFACTORING_PATTERNS = _pattern_exports['REFACTORING_PATTERNS']
+API_PATTERNS = _pattern_exports['API_PATTERNS']
+DEBUGGING_PATTERNS = _pattern_exports['DEBUGGING_PATTERNS']
+INTEGRATION_PATTERNS = _pattern_exports['INTEGRATION_PATTERNS']
+DEPLOYMENT_PATTERNS = _pattern_exports['DEPLOYMENT_PATTERNS']
+DOCUMENTATION_PATTERNS = _pattern_exports['DOCUMENTATION_PATTERNS']
+MIGRATION_PATTERNS = _pattern_exports['MIGRATION_PATTERNS']
 
 
 class PatternMatcher:

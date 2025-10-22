@@ -207,9 +207,27 @@ describe('MCP Server Lifecycle - Integration Tests', () => {
 
       await waitForServerStartup(serverProcess);
 
+      // Context7 Pattern: Poll for async log with timeout
+      // Auto-save service starts in background (.then()), so log may arrive after server startup
+      const maxWaitMs = 3000; // 3 seconds timeout
+      const pollIntervalMs = 100; // Check every 100ms
+      const startTime = Date.now();
+
+      while ((Date.now() - startTime) < maxWaitMs) {
+        const allLogs = startupLogs.join('');
+        if (allLogs.match(/Auto-save service started successfully/)) {
+          // Log found, test passes
+          expect(allLogs).toMatch(/Auto-save service started successfully/);
+          return;
+        }
+        // Wait before next check
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      }
+
+      // If we get here, timeout occurred - check one last time
       const allLogs = startupLogs.join('');
       expect(allLogs).toMatch(/Auto-save service started successfully/);
-    }, STARTUP_TIMEOUT + 2000);
+    }, STARTUP_TIMEOUT + 5000);
   });
 
   describe('MCP Protocol Compliance', () => {

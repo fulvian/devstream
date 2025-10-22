@@ -1,0 +1,45 @@
+{
+  "hook_files": {
+    ".claude/hooks/devstream/memory/pre_tool_use.py": {
+      "exists": true,
+      "executable": true,
+      "readable": true
+    },
+    ".claude/hooks/devstream/memory/post_tool_use.py": {
+      "exists": true,
+      "executable": true,
+      "readable": true
+    },
+    ".claude/hooks/devstream/context/user_query_context_enhancer.py": {
+      "exists": true,
+      "executable": true,
+      "readable": true
+    },
+    ".claude/hooks/devstream/protocol/task_first_handler.py": {
+      "exists": true,
+      "executable": false,
+      "readable": true
+    },
+    ".claude/hooks/devstream/protocol/micro_task_commit_handler.py": {
+      "exists": true,
+      "executable": false,
+      "readable": true
+    },
+    ".claude/hooks/devstream/concurrency_guard.py": {
+      "exists": true,
+      "executable": false,
+      "readable": true
+    }
+  },
+  "python_env": true,
+  "syntax": {
+    ".claude/hooks/devstream/memory/pre_tool_use.py": true,
+    ".claude/hooks/devstream/memory/post_tool_use.py": false,
+    ".claude/hooks/devstream/context/user_query_context_enhancer.py": true,
+    ".claude/hooks/devstream/protocol/task_first_handler.py": true,
+    ".claude/hooks/devstream/protocol/micro_task_commit_handler.py": true,
+    ".claude/hooks/devstream/concurrency_guard.py": true
+  },
+  "database": true,
+  "context7": false
+}
