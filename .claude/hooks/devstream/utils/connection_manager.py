@@ -259,16 +259,18 @@ class ConnectionManager:
 
                 # Try to load sqlite-vec extension
                 try:
-                    import sqlite_vec
+                    import sqlite_vec  # type: ignore
                     sqlite_vec.load(conn)
                     self.logger.debug("sqlite-vec extension loaded successfully")
                 except ImportError:
-                    self.logger.debug("sqlite-vec not available, loading extension manually")
-                    # Try manual loading
-                    conn.load_extension("vec0")
-                    self.logger.debug("vec0 extension loaded manually")
-
-                conn.enable_load_extension(False)
+                    self.logger.debug("sqlite-vec module not available; continuing without vector extension")
+                except Exception as load_exc:
+                    self.logger.warning(f"Failed to load sqlite-vec extension: {load_exc}")
+                finally:
+                    try:
+                        conn.enable_load_extension(False)
+                    except sqlite3.Error:
+                        pass
 
             except Exception as e:
                 self.logger.warning(f"Failed to load sqlite-vec extension: {e}")

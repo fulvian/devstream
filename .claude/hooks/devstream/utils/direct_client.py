@@ -385,11 +385,28 @@ class DevStreamDirectClient:
         Implements automatic schema validation and creation patterns inspired by sqlite-utils.
         Uses transaction control and error handling for robust initialization.
         """
+        vector_enabled = False
         try:
             with self.connection_manager.get_connection() as conn:
                 # Context7 Pattern: Use explicit transaction for schema operations
                 try:
                     conn.execute("BEGIN IMMEDIATE")
+
+                    vector_enabled = self._check_vec_extension_available()
+                    if not vector_enabled:
+                        try:
+                            cursor = conn.execute(
+                                "SELECT name FROM sqlite_master WHERE type IN ('table','view','trigger') "
+                                "AND name LIKE 'vec_semantic_memory%'"
+                            )
+                            for (name,) in cursor.fetchall():
+                                conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+                        except sqlite3.Error as drop_err:
+                            if hasattr(self.logger, 'logger') and self.logger.logger:
+                                self.logger.logger.debug(
+                                    "Failed to drop legacy vector tables",
+                                    extra={"error": str(drop_err)}
+                                )
 
                     # Define required schemas (sqlite-utils pattern)
                     schemas = {
@@ -426,7 +443,7 @@ class DevStreamDirectClient:
                                 memory_id TEXT,
                                 content_preview TEXT
                             )
-                        """ if self._check_vec_extension_available() else None,
+                        """ if vector_enabled else None,
                         "tasks": """
                             CREATE TABLE IF NOT EXISTS tasks (
                                 id TEXT PRIMARY KEY,
@@ -654,74 +671,136 @@ class DevStreamDirectClient:
                 print("⚠️ sqlite-vec not available, using FTS search only")
             return False
 
-    def _check_vector_availability(self, conn: sqlite3.Connection) -> None:
+    def _initialize_vector_search_with_fallback(self) -> bool:
         """
-        Thread-safe check for vector search availability.
+        Initialize vector search with graceful degradation to FTS-only mode.
+
+        Uses Context7 research patterns from sqlite-vec documentation for
+        try/catch extension loading with fallback strategies.
 
         Args:
-            conn: Database connection to use for checking
+            None
+
+        Returns:
+            bool: True if vector search available, False if FTS-only mode
+
+        Raises:
+            DatabaseError: If critical database operations fail
+
+        Example:
+            >>> client = DevStreamDirectClient()
+            >>> vector_available = client._initialize_vector_search_with_fallback()
+            >>> print(f"Vector search: {'✅' if vector_available else '🔄 FTS-only'}")
         """
-        # Default to False
+        test_conn = None
+        try:
+            # Try to import sqlite-vec
+            import sqlite_vec
+
+            # Create test connection for extension loading
+            test_conn = sqlite3.connect(":memory:")
+            test_conn.enable_load_extension(True)
+
+            # Try to load the extension
+            sqlite_vec.load(test_conn)
+            test_conn.enable_load_extension(False)
+
+            # Test basic functionality
+            test_conn.execute("SELECT 1")
+
+            # If we get here, vector search is available
+            self.vector_search_available = True
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info("Vector search initialized successfully")
+            else:
+                print("✅ Vector search initialized successfully")
+
+            return True
+
+        except (ImportError, Exception) as e:
+            # Vector search not available, fall back to FTS-only mode
+            self.vector_search_available = False
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.warning(
+                    "Vector search unavailable, using FTS-only mode",
+                    extra={"error": str(e)}
+                )
+            else:
+                print(f"⚠️ Vector search unavailable ({e}), using FTS-only mode")
+
+            # Continue with FTS-only mode - don't raise an exception
+            return False
+
+        finally:
+            # Always close the test connection, even on failure
+            if test_conn:
+                test_conn.close()
+
+    def _check_vector_availability(self, conn: sqlite3.Connection) -> None:
+        """Determine whether sqlite-vec is usable and disable gracefully if not."""
         self.vector_search_available = False
 
         try:
-            # First, check if vector table exists in the current database using the provided connection
-            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_semantic_memory'")
-            if not cursor.fetchone():
-                if hasattr(self.logger, 'logger') and self.logger.logger:
-                    self.logger.logger.info("Vector table does not exist, using FTS search only")
-                else:
-                    print("ℹ️ Vector table does not exist, using FTS search only")
-                return
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='vec_semantic_memory'"
+            )
+        except sqlite3.Error as exc:
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info(
+                    "Vector table lookup failed, disabling vector search",
+                    extra={"error": str(exc)}
+                )
+            return
 
-            # Vector table exists, now check if sqlite-vec extension is available
-            try:
-                import sqlite_vec
-            except ImportError:
+        if not cursor.fetchone():
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info("Vector table does not exist, using FTS search only")
+            else:
+                print("ℹ️ Vector table does not exist, using FTS search only")
+            return
+
+        try:
+            import sqlite_vec  # type: ignore
+        except ImportError:
+            if hasattr(self.logger, 'logger') and self.logger.logger:
+                self.logger.logger.info("sqlite-vec module not available, disabling vector search")
+            else:
+                print("ℹ️ sqlite-vec module not available, disabling vector search")
+            return
+
+        try:
+            conn.execute("SELECT rowid FROM vec_semantic_memory LIMIT 1").fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such module" in str(exc):
+                try:
+                    drop_cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type IN ('table','view','trigger') "
+                        "AND name LIKE 'vec_semantic_memory%'"
+                    )
+                    for (name,) in drop_cursor.fetchall():
+                        conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+                except sqlite3.Error:
+                    pass
                 if hasattr(self.logger, 'logger') and self.logger.logger:
                     self.logger.logger.info(
-                        "sqlite-vec not installed but vector table exists, using FTS search only"
+                        "Legacy vector tables removed; falling back to FTS search"
                     )
                 else:
-                    print("ℹ️ sqlite-vec not installed but vector table exists, using FTS search only")
-                return
-
-            # Try to test vector functionality without using sqlite_vec_helper
-            try:
-                # Test if we can access vec_semantic_memory table
-                cursor = conn.execute("SELECT rowid FROM vec_semantic_memory LIMIT 1")
-                cursor.fetchone()
-
-                # If we get here, vector extension is working
-                self.vector_search_available = True
-                if hasattr(self.logger, 'logger') and self.logger.logger:
-                    self.logger.logger.info("Vector search extension is available and working")
-                else:
-                    print("✅ Vector search extension is available and working")
-
-            except sqlite3.OperationalError as e:
-                if "no such module" in str(e) or "no such function" in str(e):
-                    if hasattr(self.logger, 'logger') and self.logger.logger:
-                        self.logger.logger.info(
-                            "sqlite-vec extension not loaded in connection, using FTS search only"
-                        )
-                    else:
-                        print("ℹ️ sqlite-vec extension not loaded in connection, using FTS search only")
-                else:
-                    if hasattr(self.logger, 'logger') and self.logger.logger:
-                        self.logger.logger.warning(
-                            f"Vector extension error: {e}, using fallback search"
-                        )
-                    else:
-                        print(f"⚠️ Vector extension error: {e}, using fallback search")
-
-        except Exception as e:
-            if hasattr(self.logger, 'logger') and self.logger.logger:
-                self.logger.logger.warning(
-                    f"Vector search check failed: {e}, using FTS fallback"
-                )
+                    print("ℹ️ Legacy vector tables removed; falling back to FTS search")
             else:
-                print(f"⚠️ Vector search check failed: {e}, using FTS fallback")
+                if hasattr(self.logger, 'logger') and self.logger.logger:
+                    self.logger.logger.warning(
+                        f"Vector extension error: {exc}, using fallback search"
+                    )
+                else:
+                    print(f"⚠️ Vector extension error: {exc}, using fallback search")
+            return
+
+        self.vector_search_available = True
+        if hasattr(self.logger, 'logger') and self.logger.logger:
+            self.logger.logger.info("Vector search extension is available and working")
+        else:
+            print("✅ Vector search extension is available and working")
 
     def _generate_embedding_sync(self, content: str) -> Optional[List[float]]:
         """

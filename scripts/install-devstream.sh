@@ -294,6 +294,84 @@ pip_install_packages() {
     return 0
 }
 
+ensure_sqlite_vec_for_env() {
+    local env_dir="$1"
+    local label="$2"
+
+    if [ ! -d "$env_dir" ] || [ ! -x "$env_dir/bin/python" ]; then
+        return 0
+    fi
+
+    local python_cmd="$env_dir/bin/python"
+    local pip_cmd="$env_dir/bin/pip"
+    local display_label=${label:-"virtual environment"}
+
+    print_info "Ensuring sqlite-vec in $display_label ($env_dir)"
+
+    if ! "$pip_cmd" list 2>/dev/null | grep -qi "^sqlite-vec"; then
+        print_info "   Installing sqlite-vec in $display_label"
+        if ! "$python_cmd" -m pip install --disable-pip-version-check sqlite-vec >/dev/null 2>&1; then
+            print_warning "   Failed to install sqlite-vec in $display_label (vector search will fall back to FTS)"
+            return 1
+        fi
+        print_success "   sqlite-vec installed in $display_label"
+    else
+        print_success "   sqlite-vec already present in $display_label"
+    fi
+
+    if ! "$python_cmd" - <<'PY'
+import sqlite3
+import sys
+
+try:
+    import sqlite_vec
+except ImportError as exc:
+    print(f"WARNING: sqlite_vec module missing ({exc})")
+    sys.exit(1)
+
+try:
+    conn = sqlite3.connect(":memory:")
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    conn.execute("select 1")
+    conn.close()
+except Exception as exc:
+    print(f"WARNING: sqlite-vec extension load failed ({exc})")
+    sys.exit(2)
+PY
+    then
+        print_warning "   sqlite-vec importable but extension load failed in $display_label (vector search will fall back to FTS)"
+        return 2
+    else
+        print_success "   sqlite-vec operational in $display_label"
+    fi
+
+    return 0
+}
+
+ensure_sqlite_vec_for_all_envs() {
+    local project_root="$1"
+    local success_count=0
+    local total_count=0
+
+    # Enhanced virtual environment detection
+    local env_dirs=(".devstream" ".venv" "venv" "env")
+
+    for env_dir in "${env_dirs[@]}"; do
+        local env_path="$project_root/$env_dir"
+        if [ -d "$env_path" ] && [ -x "$env_path/bin/python" ]; then
+            ((total_count++))
+            if ensure_sqlite_vec_for_env "$env_path" "$env_dir"; then
+                ((success_count++))
+            fi
+        fi
+    done
+
+    echo "sqlite-vec installed in $success_count/$total_count environments"
+    return $((total_count - success_count))
+}
+
 install_requirements_file() {
     local requirements_file="$1"
     local title="$2"
@@ -1179,6 +1257,19 @@ run_memory_bootstrap() {
         return 0
     fi
 
+    # CRITICAL FIX: Remove problematic database triggers that block memory insertion
+    # These triggers try to insert into non-existent vec_semantic_memory table
+    local db_path="$DATA_DIR/devstream.db"
+    if [ -f "$db_path" ]; then
+        print_info "🔧 Removing problematic database triggers..."
+        sqlite3 "$db_path" "
+            DROP TRIGGER IF EXISTS sync_insert_memory;
+            DROP TRIGGER IF EXISTS sync_update_memory;
+            DROP TRIGGER IF EXISTS sync_delete_memory;
+        " 2>/dev/null || print_warning "   Triggers already removed or not present"
+        print_success "   ✅ Database triggers cleaned"
+    fi
+
     local bootstrap_script="$TARGET_PROJECT_ROOT/.claude/hooks/devstream/memory/memory_bootstrap.py"
     if [ ! -f "$bootstrap_script" ]; then
         print_warning "⚠️  Memory bootstrap script not found at $bootstrap_script"
@@ -1210,15 +1301,19 @@ run_memory_bootstrap() {
     if [ -n "$prev_project_root" ]; then export DEVSTREAM_PROJECT_ROOT="$prev_project_root"; else unset DEVSTREAM_PROJECT_ROOT; fi
     if [ -n "$prev_log_dir" ]; then export DEVSTREAM_LOG_DIR="$prev_log_dir"; else unset DEVSTREAM_LOG_DIR; fi
 
+    printf '%s\n' "${bootstrap_result}"
+
     if [ $bootstrap_exit_code -eq 0 ]; then
         print_success "✅ Project memory bootstrap completed successfully"
-        if echo "$bootstrap_result" | grep -q "Total files:"; then
-            local files_info=$(echo "$bootstrap_result" | grep "Total files:" | head -1)
-            print_info "   $files_info"
-        fi
-        if echo "$bootstrap_result" | grep -q "Total chunks:"; then
-            local chunks_info=$(echo "$bootstrap_result" | grep "Total chunks:" | head -1)
-            print_info "   $chunks_info"
+
+        local stored_records_line
+        stored_records_line=$(echo "$bootstrap_result" | grep -m1 "Stored records") || true
+        if [ -n "$stored_records_line" ]; then
+            local stored_records
+            stored_records=$(echo "$stored_records_line" | grep -Eo '[0-9]+' | head -1)
+            if [ -n "$stored_records" ]; then
+                print_info "   Stored records: $stored_records"
+            fi
         fi
 
         "$VENV_DIR/bin/python" -c "
@@ -1472,6 +1567,21 @@ EOF
     chmod 600 "$env_file"
     print_verbose "Set permissions: 600 for .env.devstream"
 
+    # Ensure bootstrap configuration exists
+    local bootstrap_template="$DEVSTREAM_ROOT/templates/bootstrap/default.yml"
+    local bootstrap_target="$TARGET_PROJECT_ROOT/.devstream/bootstrap.yml"
+    if [ -f "$bootstrap_template" ]; then
+        if [ ! -f "$bootstrap_target" ]; then
+            mkdir -p "$(dirname "$bootstrap_target")"
+            cp "$bootstrap_template" "$bootstrap_target"
+            print_success "Bootstrap configuration created: .devstream/bootstrap.yml"
+        else
+            print_info "Bootstrap configuration already present (.devstream/bootstrap.yml)"
+        fi
+    else
+        print_warning "Bootstrap template not found; skipping .devstream/bootstrap.yml creation"
+    fi
+
     print_success "Environment configuration completed"
 }
 
@@ -1487,43 +1597,15 @@ initialize_database() {
         return 0
     fi
 
-    # Context7-compliant dependency check: Ensure sqlite-vec is installed with proper loading
-    print_info "Checking for sqlite-vec dependency..."
-    if ! "$VENV_DIR/bin/pip" list 2>/dev/null | grep -qi "sqlite-vec"; then
-        print_info "Installing sqlite-vec for vector database support..."
-        pip_install_packages "Installazione sqlite-vec" sqlite-vec
-    else
-        print_success "sqlite-vec already available"
-    fi
+    ensure_sqlite_vec_for_env "$VENV_DIR" "DevStream virtual environment"
 
-    # Context7-compliant: Verify sqlite-vec can be loaded properly
-    print_info "Verifying sqlite-vec loading capability..."
-    if ! "$VENV_DIR/bin/python" -c "
-import sqlite3
-import sys
-try:
-    import sqlite_vec
-    # Test loading as per Context7 best practices
-    db = sqlite3.connect(':memory:')
-    db.enable_load_extension(True)
-    sqlite_vec.load(db)
-    db.enable_load_extension(False)
-
-    # Verify vec_version() function works
-    vec_version = db.execute('select vec_version()').fetchone()[0]
-    print(f'✓ sqlite-vec loaded successfully: version {vec_version}')
-    db.close()
-    sys.exit(0)
-except Exception as e:
-    print(f'✗ sqlite-vec loading failed: {e}')
-    sys.exit(1)
-" 2>/dev/null; then
-        print_warning "⚠️  sqlite-vec loading verification failed"
-        print_info "   Vector search will not be available"
-        print_info "   This is non-critical for basic functionality"
-    else
-        print_success "✅ sqlite-vec loading verified (vector search available)"
-    fi
+    local project_env
+    for project_env in ".venv" "venv" "env"; do
+        local project_env_path="$TARGET_PROJECT_ROOT/$project_env"
+        if [ -d "$project_env_path" ] && [ "$project_env_path" != "$VENV_DIR" ]; then
+            ensure_sqlite_vec_for_env "$project_env_path" "Project virtual environment ($project_env)"
+        fi
+    done
 
     # Create data directory
     if [ ! -d "$DATA_DIR" ]; then

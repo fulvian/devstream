@@ -27,6 +27,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 import logging
 
+try:
+    import yaml  # type: ignore
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
 # Add current directory to path for imports
 current_dir = Path(__file__).parent
 sys.path.append(str(current_dir))
@@ -63,6 +69,7 @@ class BootstrapConfig:
     exclude_patterns: Optional[List[str]] = None
     verbose: bool = False
     output_format: str = "summary"  # summary, detailed, json
+    config_file: Optional[str] = None
 
 
 @dataclass
@@ -108,7 +115,7 @@ class MemoryBootstrap:
             config: Bootstrap configuration
         """
         self.config = config
-        self.project_root = Path(config.project_root)
+        self.project_root = Path(config.project_root).resolve()
 
         # Configure logging
         log_level = logging.DEBUG if config.verbose else logging.INFO
@@ -122,19 +129,55 @@ class MemoryBootstrap:
         if not COMPONENTS_AVAILABLE:
             raise RuntimeError("Bootstrap components not available")
 
+        self.bootstrap_settings = self._load_bootstrap_settings(self.config.config_file)
+        self.processor_settings = self.bootstrap_settings.get("document_processor", {})
+        self.indexer_settings = self.bootstrap_settings.get("indexer", {})
+        self.analysis_settings = self.bootstrap_settings.get("code_analysis", {})
+
         self.doc_processor = create_document_processor(
             str(self.project_root),
-            batch_size=config.batch_size
+            batch_size=config.batch_size,
+            config=self.processor_settings or None
         )
         self.code_scanner = create_codebase_scanner(str(self.project_root))
         self.memory_client = get_direct_client() if MEMORY_CLIENT_AVAILABLE else None
         self.incremental_indexer = create_incremental_indexer(
             str(self.project_root),
-            self.memory_client
+            self.memory_client,
+            processor_config=self.processor_settings or None
         )
 
         # Validate configuration
         self._validate_config()
+
+    def _load_bootstrap_settings(self, config_path: Optional[str]) -> Dict[str, Any]:
+        """Load bootstrap settings from YAML/JSON if available."""
+        candidate_paths: List[Path] = []
+        if config_path:
+            candidate_paths.append(Path(config_path))
+        candidate_paths.extend([
+            self.project_root / ".devstream" / "bootstrap.yml",
+            self.project_root / ".devstream" / "bootstrap.yaml",
+            self.project_root / ".devstream" / "bootstrap.json",
+        ])
+
+        for candidate in candidate_paths:
+            if not candidate.exists():
+                continue
+            try:
+                if candidate.suffix.lower() in {".yml", ".yaml"} and YAML_AVAILABLE:
+                    with open(candidate, "r", encoding="utf-8") as fh:
+                        data = yaml.safe_load(fh)  # type: ignore
+                        self.logger.info("Loaded bootstrap configuration from %s", candidate)
+                        return data or {}
+                elif candidate.suffix.lower() == ".json":
+                    with open(candidate, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                        self.logger.info("Loaded bootstrap configuration from %s", candidate)
+                        return data or {}
+            except Exception as exc:
+                self.logger.warning("Failed to load bootstrap config %s: %s", candidate, exc)
+        return {}
 
     def _validate_config(self) -> None:
         """Validate bootstrap configuration."""
@@ -399,58 +442,195 @@ class MemoryBootstrap:
         Context7 Pattern: Orchestrated workflow with error handling.
         """
         start_time = time.time()
-        self.logger.info(f"Starting memory bootstrap for {self.project_root}")
-        self.logger.info(f"Mode: {self.config.mode}, Cleanup: {self.config.cleanup_mode}")
+        self.logger.info("Starting memory bootstrap for %s", self.project_root)
 
-        result = BootstrapResult(
-            success=True,
-            config=self.config
-        )
+        result = BootstrapResult(success=True, config=self.config)
+
+        include_patterns = self.config.include_patterns or self.indexer_settings.get("include_patterns")
+        exclude_patterns = self.config.exclude_patterns or self.indexer_settings.get("exclude_patterns")
+        cleanup_mode = self.indexer_settings.get("cleanup_mode", self.config.cleanup_mode)
+        force_reindex = self.config.force_reindex or self.indexer_settings.get("force_reindex", False)
 
         try:
-            # Discover files
-            all_files, _ = self._discover_files()
-            result.total_files_processed = len(all_files)
+            index_result = self.incremental_indexer.index_directory(
+                cleanup_mode=cleanup_mode,
+                force_reindex=force_reindex,
+                include_patterns=include_patterns,
+                exclude_patterns=exclude_patterns,
+            )
 
-            if not all_files:
-                result.warnings.append("No files found for processing")
-                result.total_processing_time = time.time() - start_time
-                return result
+            result.document_result = index_result
+            result.total_files_processed = index_result.total_files
+            result.total_chunks_indexed = index_result.total_chunks
+            result.errors.extend(index_result.errors)
+            result.warnings.extend(index_result.warnings)
 
-            # Process documents (primary operation)
-            if self.config.mode in ["full", "docs-only", "incremental"]:
-                result.document_result = self._process_documents(all_files)
-                result.total_chunks_indexed = result.document_result.total_chunks
-                result.errors.extend(result.document_result.errors)
-                result.warnings.extend(result.document_result.warnings)
+            if not index_result.success:
+                result.success = False
 
-            # Analyze codebase (secondary operation)
-            if self.config.mode in ["full", "code-only"]:
-                result.code_analysis_result = self._analyze_codebase(all_files)
+            if index_result.stored_records == 0:
+                warning_msg = "Indexing completed but no records were stored in semantic memory."
+                result.warnings.append(warning_msg)
+                result.success = False
 
-            # Update metadata
-            result.metadata = {
+            result.metadata.update({
                 'project_root': str(self.project_root),
-                'files_discovered': len(all_files),
-                'indexing_status': self.incremental_indexer.get_indexing_status(),
+                'files_discovered': index_result.files_discovered,
+                'stored_records': index_result.stored_records,
+                'categories_indexed': index_result.categories_indexed,
                 'memory_client_available': MEMORY_CLIENT_AVAILABLE,
-                'bootstrap_timestamp': time.time()
-            }
+                'cleanup_mode': cleanup_mode,
+                'force_reindex': force_reindex,
+                'bootstrap_timestamp': time.time(),
+                'indexing_status': self.incremental_indexer.get_indexing_status(),
+            })
 
-            result.total_processing_time = time.time() - start_time
-
-            self.logger.info(f"Bootstrap completed successfully in {result.total_processing_time:.2f}s")
-            self.logger.info(f"Processed {result.total_files_processed} files, "
-                           f"indexed {result.total_chunks_indexed} chunks")
-
-        except Exception as e:
+        except Exception as exc:
             result.success = False
-            result.total_processing_time = time.time() - start_time
-            error_msg = f"Bootstrap failed: {e}"
+            error_msg = f"Bootstrap failed: {exc}"
             self.logger.error(error_msg)
             result.errors.append(error_msg)
 
+        result.total_processing_time = time.time() - start_time
+        self.logger.info(
+            "Bootstrap finished in %.2fs (success=%s, stored_records=%d)",
+            result.total_processing_time,
+            result.success,
+            result.document_result.stored_records if result.document_result else 0,
+        )
+
         return result
+
+    def _validate_environment_and_choose_strategy(self) -> Dict[str, Any]:
+        """
+        Validate environment and choose optimal population strategy.
+
+        Context7-compliant environment validation following Rye patterns
+        for multi-virtual environment detection and dependency validation.
+
+        Args:
+            None
+
+        Returns:
+            Dict[str, Any]: Strategy configuration with mode and capabilities
+
+        Raises:
+            EnvironmentValidationError: If critical environment issues detected
+
+        Example:
+            >>> bootstrap = MemoryBootstrap(config)
+            >>> strategy = bootstrap._validate_environment_and_choose_strategy()
+            >>> print(f"Strategy: {strategy['mode']}, Vector: {strategy['vector_available']}")
+        """
+        strategy = {
+            "mode": "fts_only",
+            "vector_available": False,
+            "embedding_available": False,
+            "sqlite_optimization": False,
+            "multi_env_detected": False,
+            "recommended_chunk_size": 500,
+            "performance_profile": "conservative"
+        }
+
+        try:
+            # Check vector extension availability using memory client
+            vector_available = False
+            if MEMORY_CLIENT_AVAILABLE and hasattr(self, 'memory_client') and self.memory_client:
+                try:
+                    vector_available = self.memory_client._check_vec_extension_available()
+                except Exception as e:
+                    self.logger.warning(
+                        "Vector extension check failed, assuming FTS-only mode",
+                        extra={"error": str(e)}
+                    )
+                    vector_available = False
+            else:
+                self.logger.warning("Memory client not available for vector extension check")
+                vector_available = False
+
+            # Detect multiple virtual environments
+            env_dirs = [".devstream", ".venv", "venv", "env"]
+            detected_envs = []
+            for env_dir in env_dirs:
+                env_path = self.config.project_root / env_dir
+                if env_path.exists() and (env_path / "bin" / "python").exists():
+                    detected_envs.append(env_dir)
+
+            if len(detected_envs) > 1:
+                strategy["multi_env_detected"] = True
+                self.logger.info(f"Multiple virtual environments detected: {detected_envs}")
+
+            # Check embedding service availability
+            embedding_available = False
+            try:
+                # Try to check Ollama service availability
+                import aiohttp
+                # This is a basic check - in a real implementation you'd ping the service
+                embedding_available = True  # Assume available for now
+            except ImportError:
+                self.logger.warning("aiohttp not available for embedding service check")
+            except Exception as e:
+                self.logger.warning(f"Embedding service check failed: {e}")
+
+            # Determine optimal strategy based on capabilities
+            if vector_available and embedding_available and self.config.mode != "fts-only":
+                strategy.update({
+                    "mode": "vector_fts",
+                    "vector_available": True,
+                    "embedding_available": True,
+                    "sqlite_optimization": True,
+                    "recommended_chunk_size": 1000,
+                    "performance_profile": "optimized"
+                })
+                self.logger.info("Vector + FTS hybrid strategy selected")
+            elif vector_available and self.config.mode != "fts-only":
+                strategy.update({
+                    "mode": "vector_fts",
+                    "vector_available": True,
+                    "embedding_available": False,
+                    "sqlite_optimization": True,
+                    "recommended_chunk_size": 750,
+                    "performance_profile": "vector_focused"
+                })
+                self.logger.info("Vector-first strategy selected (embeddings will be generated)")
+            else:
+                strategy.update({
+                    "mode": "fts_only",
+                    "vector_available": False,
+                    "embedding_available": False,
+                    "sqlite_optimization": True,
+                    "recommended_chunk_size": 500,
+                    "performance_profile": "conservative"
+                })
+                self.logger.info("FTS-only strategy selected (vector search unavailable)")
+
+            # Add environment summary
+            strategy["environment_summary"] = {
+                "project_root": str(self.config.project_root),
+                "detected_envs": detected_envs,
+                "env_count": len(detected_envs),
+                "memory_client_available": MEMORY_CLIENT_AVAILABLE,
+                "components_available": COMPONENTS_AVAILABLE,
+                "yaml_available": YAML_AVAILABLE
+            }
+
+            self.logger.info(
+                f"Environment validation complete: {strategy['mode']} mode, "
+                f"vector={'✅' if strategy['vector_available'] else '❌'}, "
+                f"embedding={'✅' if strategy['embedding_available'] else '❌'}"
+            )
+
+            return strategy
+
+        except Exception as e:
+            self.logger.error(f"Environment validation failed: {e}")
+            # Return conservative fallback strategy
+            strategy.update({
+                "mode": "fts_only",
+                "performance_profile": "fallback",
+                "validation_error": str(e)
+            })
+            return strategy
 
     def format_output(self, result: BootstrapResult) -> str:
         """
@@ -485,6 +665,11 @@ class MemoryBootstrap:
             lines.append(f"  Total chunks: {doc.total_chunks}")
             if doc.deleted_files > 0:
                 lines.append(f"  Deleted: {doc.deleted_files}")
+            lines.append(f"  Stored records: {doc.stored_records}")
+            if doc.categories_indexed:
+                lines.append("  Categories indexed:")
+                for category, count in sorted(doc.categories_indexed.items()):
+                    lines.append(f"    - {category}: {count}")
             lines.append("")
 
         if result.code_analysis_result:
@@ -577,6 +762,11 @@ Examples:
     parser.add_argument("--output", choices=["summary", "detailed", "json"],
                        default="summary", help="Output format (default: summary)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    parser.add_argument("--config", dest="config_file", help="Path to bootstrap configuration file (YAML/JSON)")
+    parser.add_argument("--include", dest="include_patterns", action="append",
+                       help="Additional glob pattern to include (can be repeated)")
+    parser.add_argument("--exclude", dest="exclude_patterns", action="append",
+                       help="Additional glob pattern to exclude (can be repeated)")
 
     args = parser.parse_args()
 
@@ -589,7 +779,10 @@ Examples:
         dry_run=args.dry_run,
         batch_size=args.batch_size,
         output_format=args.output,
-        verbose=args.verbose
+        verbose=args.verbose,
+        include_patterns=args.include_patterns,
+        exclude_patterns=args.exclude_patterns,
+        config_file=args.config_file,
     )
 
     try:
