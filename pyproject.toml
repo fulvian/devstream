@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "devstream"
-version = "0.1.0"
+version = "0.3.0"
 description = "Sistema Integrato Task Management & Memoria Cross-Session per Claude Code"
 authors = ["Claude AI Assistant <noreply@anthropic.com>"]
 readme = "README.md"
