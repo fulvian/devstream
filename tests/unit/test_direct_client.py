@@ -10,6 +10,8 @@ import asyncio
 import tempfile
 import os
 import sys
+import sqlite3
+from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 # Add hooks to path
@@ -197,6 +199,221 @@ def test_error_handling():
         pass
     except Exception as e:
         assert False, f"Expected DatabaseException but got {type(e).__name__}: {e}"
+
+
+class TestGracefulDegradation:
+    """Test graceful degradation architecture."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a DevStreamDirectClient instance for testing."""
+        # Create a temporary in-memory database
+        conn = sqlite3.connect(":memory:")
+
+        # Initialize with required tables
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                keywords TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                -- Vector column for embeddings
+                embedding BLOB
+            )
+        """)
+
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_memory_chunks USING fts5(
+                content,
+                keywords,
+                content_type,
+                created_at
+            )
+        """)
+
+        conn.close()
+
+        # Reset ConnectionManager singleton to avoid conflicts
+        import connection_manager
+        connection_manager.ConnectionManager._instance = None
+
+        return DevStreamDirectClient()
+
+    def test_method_signature_and_return_type(self, client):
+        """Test that method signature matches specification."""
+        # Check method exists
+        assert hasattr(client, '_initialize_vector_search_with_fallback')
+
+        # Check method is callable
+        assert callable(getattr(client, '_initialize_vector_search_with_fallback'))
+
+        # Check return type annotation (should be bool)
+        import inspect
+        sig = inspect.signature(client._initialize_vector_search_with_fallback)
+        assert sig.return_annotation == bool
+
+    def test_method_docstring_complete(self, client):
+        """Test that method has complete docstring with example."""
+        docstring = client._initialize_vector_search_with_fallback.__doc__
+
+        # Check docstring exists and has required sections
+        assert docstring is not None
+        assert "Initialize vector search with graceful degradation" in docstring
+        assert "Context7 research patterns" in docstring
+        assert "Args:" in docstring
+        assert "Returns:" in docstring
+        assert "Raises:" in docstring
+        assert "Example:" in docstring
+
+    def test_vector_search_success_case(self, client):
+        """Test successful vector search initialization."""
+        with patch('sqlite_vec.load') as mock_load:
+            with patch('sqlite3.connect') as mock_connect:
+                # Setup mock connection
+                mock_conn = MagicMock()
+                mock_connect.return_value = mock_conn
+
+                # Call the method
+                result = client._initialize_vector_search_with_fallback()
+
+                # Verify vector search is enabled
+                assert result is True
+                assert client.vector_search_available is True
+
+                # Verify extension loading was attempted
+                mock_load.assert_called_once_with(mock_conn)
+
+    def test_import_error_fallback(self, client):
+        """Test fallback to FTS-only mode when sqlite-vec not importable."""
+        with patch.dict('sys.modules', {'sqlite_vec': None}):
+            # Reset vector_search_available to test the method
+            client.vector_search_available = False
+
+            # Call method should handle ImportError gracefully
+            result = client._initialize_vector_search_with_fallback()
+
+            # Should fallback to FTS-only mode
+            assert result is False
+            assert client.vector_search_available is False
+
+    def test_extension_load_error_fallback(self, client):
+        """Test fallback when extension loading fails."""
+        with patch('sqlite_vec.load', side_effect=Exception("Extension load failed")):
+            # Reset vector_search_available
+            client.vector_search_available = False
+
+            # Call method should handle load error gracefully
+            result = client._initialize_vector_search_with_fallback()
+
+            # Should fallback to FTS-only mode
+            assert result is False
+            assert client.vector_search_available is False
+
+    def test_database_connection_error_fallback(self, client):
+        """Test fallback when database connection fails."""
+        with patch('sqlite3.connect', side_effect=sqlite3.Error("Connection failed")):
+            # Reset vector_search_available
+            client.vector_search_available = False
+
+            # Call method should handle connection error gracefully
+            result = client._initialize_vector_search_with_fallback()
+
+            # Should fallback to FTS-only mode
+            assert result is False
+            assert client.vector_search_available is False
+
+    def test_logging_on_success(self, client):
+        """Test proper logging on successful initialization."""
+        with patch('sqlite_vec.load') as mock_load:
+            with patch('sqlite3.connect') as mock_connect:
+                mock_conn = MagicMock()
+                mock_connect.return_value = mock_conn
+
+                # Mock logger
+                mock_logger = MagicMock()
+                mock_logger.logger = MagicMock()
+                client.logger = mock_logger
+
+                # Call method
+                result = client._initialize_vector_search_with_fallback()
+
+                # Verify success logging
+                assert result is True
+                assert client.vector_search_available is True
+                mock_logger.logger.info.assert_called_with("Vector search initialized successfully")
+
+    def test_logging_on_fallback(self, client):
+        """Test proper warning logging on fallback."""
+        with patch('sqlite_vec.load', side_effect=Exception("Test error")):
+            # Mock logger
+            mock_logger = MagicMock()
+            mock_logger.logger = MagicMock()
+            client.logger = mock_logger
+
+            # Call method
+            result = client._initialize_vector_search_with_fallback()
+
+            # Verify fallback logging
+            assert result is False
+            assert client.vector_search_available is False
+            mock_logger.logger.warning.assert_called_with(
+                "Vector search unavailable, using FTS-only mode",
+                extra={"error": "Test error"}
+            )
+
+    def test_no_exception_raised_on_failure(self, client):
+        """Test that method doesn't raise exceptions on failure."""
+        with patch('sqlite_vec.load', side_effect=RuntimeError("Critical error")):
+            # Should not raise any exception
+            try:
+                result = client._initialize_vector_search_with_fallback()
+                assert result is False
+                assert client.vector_search_available is False
+            except Exception as e:
+                pytest.fail(f"Method raised exception {e} when it should have handled gracefully")
+
+    def test_context7_pattern_usage(self, client):
+        """Test that Context7 patterns are properly implemented."""
+        # Check that the implementation follows Context7 patterns
+        with patch('sqlite_vec.load') as mock_load:
+            with patch('sqlite3.connect') as mock_connect:
+                mock_conn = MagicMock()
+                mock_connect.return_value = mock_conn
+
+                # Call method
+                result = client._initialize_vector_search_with_fallback()
+
+                # Verify Context7 pattern: enable_load_extension -> load -> disable_load_extension
+                assert mock_conn.enable_load_extension.called
+                assert mock_conn.enable_load_extension.call_count == 2
+
+                # Check calls order: enable(True) -> load() -> enable(False)
+                calls = mock_conn.enable_load_extension.call_args_list
+                assert calls[0][0] == (True,)  # First call with True
+                assert calls[1][0] == (False,)  # Second call with False
+
+    def test_connection_cleanup_on_success(self, client):
+        """Test that test connection is properly cleaned up on success."""
+        with patch('sqlite_vec.load') as mock_load:
+            mock_conn = MagicMock()
+            with patch('sqlite3.connect', return_value=mock_conn):
+                # Call method
+                result = client._initialize_vector_search_with_fallback()
+
+                # Verify connection was closed
+                mock_conn.close.assert_called_once()
+
+    def test_connection_cleanup_on_failure(self, client):
+        """Test that test connection is properly cleaned up on failure."""
+        with patch('sqlite_vec.load', side_effect=Exception("Load failed")):
+            mock_conn = MagicMock()
+            with patch('sqlite3.connect', return_value=mock_conn):
+                # Call method
+                result = client._initialize_vector_search_with_fallback()
+
+                # Verify connection was still closed even on failure
+                mock_conn.close.assert_called_once()
 
 
 if __name__ == "__main__":
