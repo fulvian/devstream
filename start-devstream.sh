@@ -214,7 +214,7 @@ validate_devstream_project() {
     if [ $validation_failed -eq 1 ]; then
         print_error ""
         print_error "DevStream installation incomplete or corrupted"
-        print_error "Run: $DEVSTREAM_ROOT/scripts/install-devstream.sh"
+        print_error "Run: $DEVSTREAM_SCRIPT_DIR/scripts/install-devstream.sh"
         return 1
     fi
 

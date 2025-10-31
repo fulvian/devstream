@@ -82,11 +82,66 @@ asyncio.run(task_ops())
 
 ## 🤖 Agent System (17/17 Production Ready)
 
+### Super Powers Enhanced Agent Integration
+
+All 17 agents are enhanced with relevant Super Powers skills for maximum effectiveness:
+
+**🔧 Domain Specialists Enhanced:**
+- **@python-specialist**: Enhanced with systematic debugging + verification-before-completion
+- **@typescript-specialist**: Enhanced with brainstorming Socratic + root-cause tracing
+- **@database-specialist**: Enhanced with systematic debugging + preserving-tensions
+- **@rust-specialist**: Enhanced with verification-before-completion + systematic debugging
+- **@go-specialist**: Enhanced with brainstorming + verification workflow
+- **@devops-specialist**: Enhanced with root-cause tracing + systematic debugging
+
+**📋 Task Specialists Enhanced:**
+- **@api-architect**: Enhanced with brainstorming Socratic + preserving-tensions
+- **@performance-optimizer**: Enhanced with systematic debugging + root-cause tracing
+- **@testing-specialist**: Enhanced with verification-before-completion + systematic debugging
+- **@documentation-specialist**: Enhanced with brainstorming Socratic + verification workflow
+- **@refactoring-specialist**: Enhanced with systematic debugging + root-cause tracing
+- **@integration-specialist**: Enhanced with preserving-tensions + systematic debugging
+- **@migration-specialist**: Enhanced with systematic debugging + verification-before-completion
+
+**🔍 Quality Assurance Enhanced:**
+- **@code-reviewer**: Enhanced with systematic debugging + verification-before-completion
+- **@security-auditor**: Enhanced with root-cause tracing + systematic debugging
+- **@debugger**: **SUPER POWERED** with systematic debugging expertise
+- **@code-reviewer**: Enhanced with comprehensive verification workflow
+
+**🎯 Orchestrator Enhanced:**
+- **@tech-lead**: Enhanced with brainstorming Socratic + preserving-productive-tensions
+
+### Agent Usage Patterns with Super Powers
+
+**Direct Enhanced Invocation:**
+```bash
+@python-specialist Create FastAPI endpoint with systematic debugging
+@typescript-specialist Build React component with brainstorming Socratic
+@debugger Apply SUPER POWERED systematic debugging for complex issues
+```
+
+**Orchestrated Enhanced Workflow:**
+```bash
+@tech-lead Build full-stack feature using Super Powers methods
+→ Delegates @python-specialist with systematic debugging
+→ Delegates @typescript-specialist with brainstorming Socratic
+→ Invokes @code-reviewer with verification-before-completion
+```
+
+**Quality Gate Enhancement:**
+```bash
+@code-reviewer Review implementation with Super Powers systematic approach
+→ Applies systematic debugging methodology
+→ Enforces verification-before-completion
+→ Validates Super Powers compliance
+```
+
 ### Hierarchy (4 Levels)
-1. **Orchestrator**: `@tech-lead` - Multi-agent coordination
-2. **Domain Specialists** (6): Python, TypeScript, Rust, Go, Database, DevOps
-3. **Task Specialists** (5): API Architect, Performance, Testing, Documentation, Refactoring
-4. **Quality Assurance** (6): Code Reviewer (MANDATORY), Security, Debugger, Integration, Migration
+1. **Orchestrator**: `@tech-lead` - Multi-agent coordination (Super Powers Enhanced)
+2. **Domain Specialists** (6): Python, TypeScript, Rust, Go, Database, DevOps (Super Powers Enhanced)
+3. **Task Specialists** (5): API Architect, Performance, Testing, Documentation, Refactoring (Super Powers Enhanced)
+4. **Quality Assurance** (6): Code Reviewer (MANDATORY), Security, Debugger (SUPER POWERED), Integration, Migration (Super Powers Enhanced)
 
 ### Usage Patterns
 - **Direct**: `@python-specialist Create FastAPI endpoint`
@@ -136,6 +191,50 @@ DEVSTREAM_AUTO_DELEGATION_QUALITY_GATE=true
 ### Step 0: Enforcement Gate
 **Triggers**: >15min, code implementation, architectural decisions, multi-file, Context7 research
 **Flow**: User request → Complexity analysis → IF criteria met → Protocol/Override/Cancel choice
+
+### Super Powers Integration in 7-Step Workflow
+
+**Step 1 (Discussion) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Apply brainstorming Socratic method for feature discussions
+- **Trigger**: Keywords "feature", "idea", "design", "architecture"
+- **Integration**: @tech-lead with brainstorming skill
+- **Output**: Socratic questioning with iterative development
+
+**Step 2 (Analysis) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Use systematic debugging pattern analysis
+- **Trigger**: Any analysis phase for complex problems
+- **Integration**: Pattern comparison against working examples
+- **Output**: Evidence-based analysis with working references
+
+**Step 3 (Research) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Apply research skill for Context7 validation
+- **Trigger**: Technical decisions requiring best practices
+- **Integration**: Research → Context7 → pattern validation
+- **Output**: Research-backed decisions with evidence
+
+**Step 4 (Planning) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Use writing-plans skill for detailed implementation
+- **Trigger**: TodoWrite creation, planning phases
+- **Integration**: Detailed plans with bite-sized tasks
+- **Output**: Engineer-ready implementation plans
+
+**Step 5 (Approval) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Apply preserving-productive-tensions for trade-offs
+- **Trigger**: Trade-off decisions, architectural choices
+- **Integration**: Configuration patterns for productive tensions
+- **Output**: Documented trade-offs with preservation strategy
+
+**Step 6 (Implementation) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Apply systematic debugging for any issues
+- **Trigger**: Any implementation problems or bugs
+- **Integration**: 4-phase debugging method
+- **Output**: Root cause fixes with verification
+
+**Step 7 (Verification) - SUPERPOWERS ENHANCED**
+- **MANDATORY**: Apply verification-before-completion
+- **Trigger**: Task completion claims, any "done" statements
+- **Integration**: 5-step verification with evidence
+- **Output**: Evidence-verified completion with proof
 
 ### Step 1: Discussion (MANDATORY)
 - Present problem/objective
@@ -781,9 +880,95 @@ DEVSTREAM_VECTOR_DB_ENABLED=true
 
 ---
 
+## 🚨 SUPERPOWERS SYSTEM (CRITICAL)
+
+**Superpowers Integration** is MANDATORY and EXCLUSIVE for advanced DevStream workflows with Obra Super Powers toolkit.
+
+### Usage Rules
+✅ **ALWAYS**: Apply Super Powers skills for complex problem-solving
+✅ **ALWAYS**: Use systematic debugging before any fix attempt
+✅ **ALWAYS**: Apply brainstorming Socratico for feature development
+✅ **ALWAYS**: Use verification-before-completion for task completion
+❌ **NEVER**: Skip Super Powers workflow for complex tasks
+❌ **NEVER**: Apply fixes without root-cause investigation
+❌ **NEVER**: Declare completion without verification evidence
+
+### Critical Super Powers Skills (MANDATORY)
+
+**1. Brainstorming (Socratic Method)**
+```bash
+# Trigger: feature discussions, architectural decisions, design phases
+# Keywords: "feature", "idea", "design", "architecture"
+@tech-lead Apply brainstorming Socratic method for feature development
+```
+
+**2. Systematic Debugging (4-Phase Method)**
+```bash
+# Trigger: bug reports, test failures, unexpected behavior
+# Keywords: "bug", "error", "fail", "issue", "problem"
+Apply 4-phase systematic debugging:
+1. Root Cause Investigation
+2. Pattern Analysis
+3. Hypothesis and Testing
+4. Implementation with Verification
+```
+
+**3. Root-Cause Tracing**
+```bash
+# Trigger: deep stack errors, complex failures
+# Keywords: "trace", "root cause", "investigate"
+Trace backward through call chain to find original trigger
+Fix at source, not at symptom
+```
+
+**4. Verification-Before-Completion**
+```bash
+# Trigger: task completion claims, PR creation
+# Keywords: "complete", "done", "ready", "finished"
+Mandatory verification steps:
+1. IDENTIFY verification command
+2. RUN complete verification
+3. READ full output
+4. VERIFY claim matches evidence
+5. ONLY THEN claim completion
+```
+
+**5. Preserving-Productive-Tensions**
+```bash
+# Trigger: trade-off decisions, architectural choices
+# Keywords: "trade-off", "decision", "approach", "tension"
+Recognize when tensions reveal valuable context
+Preserve multiple valid approaches instead of forcing premature resolution
+```
+
+### Automatic Hook Integration
+
+The Super Powers integration hook automatically:
+- Detects keyword patterns in user queries
+- Injects relevant Super Powers context
+- Enforces mandatory skill application
+- Tracks compliance in DevStream memory
+
+### Compliance Enforcement
+
+**Mandatory Application Points:**
+- **Step 1 (Discussion)**: Brainstorming Socratic for feature discussions
+- **Complex Problems**: Systematic debugging 4-phase method
+- **Task Completion**: Verification-before-completion with evidence
+- **Architecture Decisions**: Preserving-productive-tensions analysis
+- **Deep Issues**: Root-cause tracing before fixes
+
+---
+
 *These rules are the foundation of the DevStream system. Violating them causes automatic system malfunctions and rollback.*
 <!--
 Generated with DevStream v2.0 - Context7-compliant multi-project setup
 Generation timestamp: Sun Oct 19 10:17:02 CEST 2025
+Template: template_processor.py
+-->
+
+<!--
+Generated with DevStream v2.0 - Context7-compliant multi-project setup
+Generation timestamp: Wed Oct 29 08:46:49 CET 2025
 Template: template_processor.py
 -->

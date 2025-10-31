@@ -33,7 +33,7 @@ cd /path/to/existing-project
 
 # Avvio sessione
 export DEVSTREAM_PROJECT_ROOT="$(pwd)"
-/Users/fulvioventura/devstream/start-devstream.sh start anthropic
+/Users/fulvioventura/devstream/start-devstream.sh start z.ai
 
 # Verifica DB puntando al progetto
 env | grep DEVSTREAM_DB_PATH

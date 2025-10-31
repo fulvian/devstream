@@ -1,10 +1,10 @@
 {
-  "task": "hook-system-verification",
-  "branch": "main",
+  "task": "freqtrade-installation-binance",
+  "branch": "feature/freqtrade-setup",
   "services": [
-    "hooks",
-    "memory",
-    "context7"
+    "freqtrade",
+    "binance",
+    "trading"
   ],
-  "updated": "2025-10-22"
+  "updated": "2025-10-30"
 }
